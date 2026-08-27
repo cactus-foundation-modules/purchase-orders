@@ -127,6 +127,7 @@ function mapLine(r: Record<string, unknown>): PoOrderLine {
     qtyCancelled: dec(r.qty_cancelled),
     serviceName: (r.service_name as string | null) ?? null,
     serviceCost: decOrNull(r.service_cost),
+    sourceOrderItemId: (r.source_order_item_id as string | null) ?? null,
     qtyReceived: dec(r.qty_received),
     qtyInvoiced: dec(r.qty_invoiced),
     qtyReturned: dec(r.qty_returned),
@@ -514,6 +515,11 @@ export type OrderLineInput = {
   serviceName: string | null
   /** Per unit, and never added into the line total - see PoOrderLine. */
   serviceCost: string | null
+  /** The customer order line this was bought for. Required rather than optional
+   *  on purpose: updateOrder replaces the lines wholesale, so a caller that
+   *  quietly left it off would erase the link the next time somebody edited the
+   *  order. Pass null on an order that came from nowhere in particular. */
+  sourceOrderItemId: string | null
 }
 
 export type OrderInput = {
@@ -647,14 +653,14 @@ async function insertLines(
         "order_id", "position", "product_id", "product_name", "supplier_sku", "our_sku",
         "description", "qty", "unit", "unit_cost", "discount_percent", "tax_rate_percent",
         "tax_rate_code", "vat_treatment", "category_id", "line_total", "expected_date", "qty_cancelled",
-        "service_name", "service_cost"
+        "service_name", "service_cost", "source_order_item_id"
       ) VALUES (
         ${orderId}, ${index}, ${line.productId}, ${line.productName}, ${line.supplierSku}, ${line.ourSku},
         ${line.description}, ${line.qty}::numeric, ${line.unit}, ${line.unitCost}::numeric,
         ${line.discountPercent}::numeric, ${line.taxRatePercent}::numeric,
         ${line.taxRateCode}, ${line.vatTreatment}, ${line.categoryId},
         ${lineTotals[index] ?? '0'}::numeric, ${line.expectedDate}::date, ${line.qtyCancelled}::numeric,
-        ${line.serviceName}, ${line.serviceCost}::numeric
+        ${line.serviceName}, ${line.serviceCost}::numeric, ${line.sourceOrderItemId}
       )
     `
   }

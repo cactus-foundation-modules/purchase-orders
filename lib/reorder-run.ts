@@ -107,6 +107,8 @@ async function raiseOneOrder(
     // is. There is no customer waiting, so no service to name.
     serviceName: null,
     serviceCost: null,
+    // Nobody has bought this yet - a reorder tops the shelf up.
+    sourceOrderItemId: null,
   }))
 
   const input: OrderInput = {

@@ -106,6 +106,10 @@ export type PoOrderLine = {
    *  total. It is summed across the lines into the order's carriageAmount,
    *  which is where this module has always carried delivery money. */
   serviceCost: string | null
+  /** The customer order line this was bought for, on a purchase order raised
+   *  off a shop order. A plain id and never a foreign key: shop's tables belong
+   *  to another module, and this module holds no key into one. */
+  sourceOrderItemId: string | null
   /** Derived, never stored - see lib/progress.ts. */
   qtyReceived: string
   qtyInvoiced: string

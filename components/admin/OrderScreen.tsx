@@ -60,6 +60,10 @@ type LineForm = {
   // The cost is not in the line total - it is summed into the order's carriage.
   serviceName: string
   serviceCost: string
+  // Never edited, never shown: the customer order line this was bought for. It
+  // is carried through the form only so that saving an order raised off a shop
+  // order does not throw the link away.
+  sourceOrderItemId: string | null
 }
 
 type Form = {
@@ -109,6 +113,7 @@ function newLine(patch: Partial<LineForm> = {}): LineForm {
     qtyCancelled: '0',
     serviceName: '',
     serviceCost: '',
+    sourceOrderItemId: null,
     ...patch,
   }
 }
@@ -185,6 +190,7 @@ function formFromOrder(order: PoOrder): Form {
         qtyCancelled: l.qtyCancelled,
         serviceName: l.serviceName ?? '',
         serviceCost: l.serviceCost ?? '',
+        sourceOrderItemId: l.sourceOrderItemId,
       }),
     ),
   }
@@ -391,6 +397,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         qtyCancelled: l.qtyCancelled || '0',
         serviceName: l.serviceName || null,
         serviceCost: l.serviceCost || null,
+        sourceOrderItemId: l.sourceOrderItemId,
       })),
     }
   }

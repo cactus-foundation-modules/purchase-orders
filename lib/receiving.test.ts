@@ -29,6 +29,7 @@ function line(patch: Partial<PoOrderLine> = {}): PoOrderLine {
     qtyCancelled: '0',
     serviceName: null,
     serviceCost: null,
+    sourceOrderItemId: null,
     qtyReceived: '0',
     qtyInvoiced: '0',
     qtyReturned: '0',

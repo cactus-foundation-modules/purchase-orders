@@ -63,6 +63,11 @@ export const OrderLineBody = z.object({
   // An emptied box is allowed through as blank and becomes null in toOrderInput,
   // the same as a name somebody deleted. Anything else has to look like money.
   serviceCost: UnitCost.or(z.literal('')).nullable().default(null),
+  // The customer order line this was bought for, carried on the wire so that
+  // editing a purchase order raised off a shop order does not erase the link -
+  // updateOrder replaces the lines wholesale, so anything the form does not
+  // send back is gone.
+  sourceOrderItemId: z.string().max(100).nullable().default(null),
 })
 
 export const OrderBody = z.object({
@@ -130,6 +135,7 @@ export function toOrderInput(body: OrderBodyInput): OrderInput {
       qtyCancelled: line.qtyCancelled,
       serviceName: orNull(line.serviceName),
       serviceCost: orNull(line.serviceCost),
+      sourceOrderItemId: orNull(line.sourceOrderItemId),
     })),
   }
 }

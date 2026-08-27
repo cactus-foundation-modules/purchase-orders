@@ -32,6 +32,7 @@ function line(patch: Partial<PoOrderLine> = {}): PoOrderLine {
     qtyCancelled: '0.000',
     serviceName: 'Pre-assembled delivery, two-man',
     serviceCost: '39.0000',
+    sourceOrderItemId: 'shop-item-1',
     qtyReceived: '0.000',
     qtyInvoiced: '0.000',
     qtyReturned: '0.000',
@@ -106,6 +107,9 @@ describe('the supplier projection', () => {
     expect(wire).not.toContain('2376.00')
     expect(wire).not.toContain('165.0000')
     expect(wire).not.toContain('39.0000')
+    // Nor which of our customer's order lines this was bought for. Who we sold
+    // it to is our business, not theirs.
+    expect(wire).not.toContain('shop-item-1')
   })
 
   it('carries what they do need to answer', () => {
