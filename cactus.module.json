@@ -1,0 +1,58 @@
+{
+  "name": "purchase-orders",
+  "version": "0.1.0",
+  "tablePrefix": "po_",
+  "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
+  "requiresCoreVersion": "0.5.1347",
+  "permissions": [
+    "purchase-orders.access",
+    "purchase-orders.create",
+    "purchase-orders.approve",
+    "purchase-orders.receive",
+    "purchase-orders.bills",
+    "purchase-orders.settings"
+  ],
+  "navGroupLabel": "Purchasing",
+  "navEntries": [
+    {
+      "label": "Purchase Orders",
+      "path": "/m/purchase-orders/orders",
+      "icon": "<path d=\"M9 3h6v3H9z\"/><path d=\"M15 4.5h3V21H6V4.5h3\"/><path d=\"M9 11h6M9 15h4\"/>",
+      "permission": "purchase-orders.access"
+    }
+  ],
+  "requiredEnvVars": [],
+  "cookieCategories": [],
+  "requiresModules": [],
+  "settingsTabs": [
+    {
+      "id": "purchase-orders",
+      "label": "Purchase Orders",
+      "permission": "purchase-orders.settings",
+      "import": "./components/admin/PurchaseOrdersSettingsTab",
+      "component": "PurchaseOrdersSettingsTab"
+    }
+  ],
+  "emailTemplates": {
+    "groupLabel": "Purchase Orders",
+    "import": "./lib/email-templates",
+    "export": "purchaseOrdersEmailTemplates"
+  },
+  "teardown": [
+    "po_portal_events",
+    "po_portal_tokens",
+    "po_bill_lines",
+    "po_bills",
+    "po_return_lines",
+    "po_returns",
+    "po_receipt_lines",
+    "po_receipts",
+    "po_revisions",
+    "po_reorder_rules",
+    "po_order_lines",
+    "po_orders",
+    "po_suppliers",
+    "po_audit_log",
+    "po_settings"
+  ]
+}
