@@ -1,8 +1,9 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
+  "publicBasePath": "purchase-order",
   "requiresCoreVersion": "0.5.1347",
   "permissions": [
     "purchase-orders.access",
@@ -54,5 +55,137 @@
     "po_suppliers",
     "po_audit_log",
     "po_settings"
-  ]
+  ],
+  "puckBlocks": [
+    {
+      "type": "PoDocHeader",
+      "import": "./components/puck/po-parts",
+      "component": "poDocHeaderPuckComponent",
+      "rscComponent": "poDocHeaderPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocParties",
+      "import": "./components/puck/po-parts",
+      "component": "poDocPartiesPuckComponent",
+      "rscComponent": "poDocPartiesPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocFrom",
+      "import": "./components/puck/po-parts",
+      "component": "poDocFromPuckComponent",
+      "rscComponent": "poDocFromPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocTo",
+      "import": "./components/puck/po-parts",
+      "component": "poDocToPuckComponent",
+      "rscComponent": "poDocToPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocShipTo",
+      "import": "./components/puck/po-parts",
+      "component": "poDocShipToPuckComponent",
+      "rscComponent": "poDocShipToPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocLines",
+      "import": "./components/puck/po-parts",
+      "component": "poDocLinesPuckComponent",
+      "rscComponent": "poDocLinesPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocTotals",
+      "import": "./components/puck/po-parts",
+      "component": "poDocTotalsPuckComponent",
+      "rscComponent": "poDocTotalsPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocTerms",
+      "import": "./components/puck/po-parts",
+      "component": "poDocTermsPuckComponent",
+      "rscComponent": "poDocTermsPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocNotes",
+      "import": "./components/puck/po-parts",
+      "component": "poDocNotesPuckComponent",
+      "rscComponent": "poDocNotesPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocApproval",
+      "import": "./components/puck/po-parts",
+      "component": "poDocApprovalPuckComponent",
+      "rscComponent": "poDocApprovalPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocStyle",
+      "import": "./components/puck/po-chrome",
+      "component": "poDocStylePuckComponent",
+      "rscComponent": "poDocStylePuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocNotice",
+      "import": "./components/puck/po-chrome",
+      "component": "poDocNoticePuckComponent",
+      "rscComponent": "poDocNoticePuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    },
+    {
+      "type": "PoDocDivider",
+      "import": "./components/puck/po-chrome",
+      "component": "poDocDividerPuckComponent",
+      "rscComponent": "poDocDividerPuckRscComponent",
+      "layoutTypes": [
+        "purchaseOrderDocument"
+      ]
+    }
+  ],
+  "layoutTypes": {
+    "groupLabel": "Purchase Orders",
+    "types": [
+      {
+        "key": "purchaseOrderDocument",
+        "label": "Purchase order document",
+        "starterImport": "./lib/starterLayouts",
+        "starterExport": "purchaseOrderDocumentStarters",
+        "pageSettingsImport": "./lib/doc-page-settings",
+        "pageSettingsExport": "poDocPageSettings"
+      }
+    ]
+  }
 }

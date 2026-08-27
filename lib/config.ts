@@ -28,6 +28,25 @@ const ShipToSchema = z.object({
   instructions: z.string().default(''),
 })
 
+// Who is doing the buying, as it prints at the top of a purchase order.
+//
+// This module is standalone, so it cannot assume a shop is installed to borrow a
+// trading identity from. Every field is optional and blank falls back to the
+// shop's own invoice identity where a shop IS installed - read by raw SQL, never
+// imported - so nobody types their VAT number into two settings screens and then
+// keeps the two in step by hand.
+const OrganisationSchema = z.object({
+  name: z.string().default(''),
+  address: z.string().default(''),
+  contactName: z.string().default(''),
+  email: z.string().default(''),
+  phone: z.string().default(''),
+  vatNumber: z.string().default(''),
+  companyNumber: z.string().default(''),
+})
+
+export type PoOrganisation = z.infer<typeof OrganisationSchema>
+
 const WordingSchema = z.object({
   heading: z.string().default('Purchase order'),
   intro: z.string().default('Please supply the following, quoting our order number on all paperwork.'),
@@ -73,6 +92,7 @@ export const PoConfigSchema = z.object({
   chaseAfterDays: z.number().int().min(0).max(365).default(3),
   chaseRepeatDays: z.number().int().min(0).max(365).default(7),
 
+  organisation: OrganisationSchema.default({}),
   wording: WordingSchema.default({}),
   pdfFilenamePrefix: z.string().default('purchase-order'),
 

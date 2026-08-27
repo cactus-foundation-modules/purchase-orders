@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
-import { availableTransitions, isFreelyEditable, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import { availableTransitions, canSend, editMode, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
@@ -12,6 +12,7 @@ import type {
   CatalogueProduct,
   PoAuditEntry,
   PoOrder,
+  PoRevisionSummary,
   PoStatus,
   PoSupplier,
 } from '@/modules/purchase-orders/lib/types'
@@ -204,6 +205,13 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const isNew = orderId === null
   const [order, setOrder] = useState<PoOrder | null>(null)
   const [history, setHistory] = useState<PoAuditEntry[]>([])
+  const [revisions, setRevisions] = useState<PoRevisionSummary[]>([])
+  // Why this order is changing. Only asked for on an amendment - an order the
+  // supplier is already holding - and required there, because "what changed" is
+  // the first thing they will ask.
+  const [amendReason, setAmendReason] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sent, setSent] = useState<string | null>(null)
   const [suppliers, setSuppliers] = useState<PoSupplier[]>([])
   const [form, setForm] = useState<Form>(() => emptyForm(defaults))
   const [editing, setEditing] = useState(isNew)
@@ -223,6 +231,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           if (data?.order) {
             setOrder(data.order)
             setHistory(data.history ?? [])
+            setRevisions(data.revisions ?? [])
             setForm(formFromOrder(data.order))
           }
           setLoaded(true)
@@ -304,6 +313,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       deliveryTerms: form.deliveryTerms || null,
       notesSupplier: form.notesSupplier || null,
       notesInternal: form.notesInternal || null,
+      amendmentReason: amendReason.trim() || undefined,
       lines: form.lines.map((l) => ({
         productId: l.productId,
         productName: l.productName,
@@ -345,6 +355,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         return
       }
       setEditing(false)
+      setAmendReason('')
       await loadOrder()
     } finally {
       setSaving(false)
@@ -366,6 +377,30 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     await loadOrder()
   }
 
+  async function sendOrder() {
+    if (sending) return
+    setSending(true)
+    setError(null)
+    setSent(null)
+    try {
+      const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: note.trim() || undefined }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error ?? 'Could not send that order.')
+        return
+      }
+      setNote('')
+      setSent(`Sent to ${data.to}${data.cc?.length ? ` (copied to ${data.cc.join(', ')})` : ''}.`)
+      await loadOrder()
+    } finally {
+      setSending(false)
+    }
+  }
+
   async function deleteOrder() {
     setError(null)
     const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}`, { method: 'DELETE' })
@@ -382,8 +417,11 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   }
 
   const status: PoStatus = order?.status ?? 'DRAFT'
-  const canEditNow = isNew || (access.canCreate && isFreelyEditable(status))
+  const mode = editMode(status)
+  const canEditNow = isNew || (access.canCreate && mode !== 'refused')
+  const amending = !isNew && mode === 'amend'
   const transitions = order ? availableTransitions(status, access) : []
+  const sendable = !isNew && access.canCreate && canSend(status, order!.approvalRequired).ok
 
   return (
     <div>
@@ -403,6 +441,12 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       {error && (
         <div className="alert alert-danger" style={{ marginBottom: '1rem' }}>
           {error}
+        </div>
+      )}
+
+      {sent && (
+        <div className="alert alert-success" style={{ marginBottom: '1rem' }}>
+          {sent}
         </div>
       )}
 
@@ -546,9 +590,24 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
             <Totals totals={totals} currency={form.currency} />
           </div>
 
+          {amending && (
+            <div style={card}>
+              <Field
+                label="What has changed"
+                hint="The supplier already has this order. Saving files their copy as a revision and gives you a fresh one to send them."
+              >
+                <input style={input} value={amendReason} onChange={(e) => setAmendReason(e.target.value)} />
+              </Field>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2rem' }}>
-            <button className="btn btn-primary" onClick={save} disabled={saving || !form.supplierId}>
-              {saving ? 'Saving…' : isNew ? 'Create order' : 'Save changes'}
+            <button
+              className="btn btn-primary"
+              onClick={save}
+              disabled={saving || !form.supplierId || (amending && !amendReason.trim())}
+            >
+              {saving ? 'Saving…' : isNew ? 'Create order' : amending ? 'Save as a new revision' : 'Save changes'}
             </button>
             <button
               className="btn btn-secondary"
@@ -574,7 +633,10 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           onTransition={runTransition}
           onEdit={canEditNow ? () => setEditing(true) : null}
           onDelete={access.canCreate && status === 'DRAFT' ? deleteOrder : null}
+          onSend={sendable ? sendOrder : null}
+          sending={sending}
           history={history}
+          revisions={revisions}
         />
       )}
     </div>
@@ -822,10 +884,15 @@ type ViewProps = {
   onTransition: (transition: PoTransition) => void
   onEdit: (() => void) | null
   onDelete: (() => void) | null
+  onSend: (() => void) | null
+  sending: boolean
   history: PoAuditEntry[]
+  revisions: PoRevisionSummary[]
 }
 
-function OrderView({ order, transitions, note, onNote, onTransition, onEdit, onDelete, history }: ViewProps) {
+function OrderView({
+  order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
+}: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
     discountAmount: order.discountAmount,
@@ -929,6 +996,63 @@ function OrderView({ order, transitions, note, onNote, onTransition, onEdit, onD
               <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{order.notesInternal}</p>
             </>
           )}
+        </div>
+      )}
+
+      <div style={card}>
+        <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>The document</h2>
+        <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
+          {order.sentAt
+            ? `Last sent ${formatWhen(order.sentAt)}.`
+            : 'This order has not been sent to the supplier yet.'}
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {/* Plain links rather than fetches: one is a page to look at and the
+              other is a file to save, and the browser does both better than we
+              would. The document link redirects through a route that mints its
+              own short-lived token, so nothing here has to carry one. */}
+          <a
+            className="btn btn-secondary"
+            href={`/api/m/purchase-orders/admin/orders/${order.id}/document`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            View document
+          </a>
+          <a className="btn btn-secondary" href={`/api/m/purchase-orders/admin/orders/${order.id}/pdf`}>
+            Download PDF
+          </a>
+          {onSend && (
+            <button className="btn btn-primary" onClick={onSend} disabled={sending}>
+              {sending ? 'Sending…' : order.sentAt ? 'Send the amended order' : 'Email it to the supplier'}
+            </button>
+          )}
+        </div>
+        {onSend && (
+          <p style={{ ...muted, marginTop: '0.5rem' }}>
+            The document goes as a PDF attachment. Anything typed in the note below goes with it.
+          </p>
+        )}
+      </div>
+
+      {revisions.length > 0 && (
+        <div style={card}>
+          <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>Revisions</h2>
+          <p style={{ ...muted, marginTop: 0 }}>
+            What the supplier was sent before. Each one is kept exactly as it was printed.
+          </p>
+          <table style={table}>
+            <tbody>
+              {revisions.map((r) => (
+                <tr key={r.id}>
+                  <td style={td}>Rev {r.revision}</td>
+                  <td style={td}>{r.reason ?? '—'}</td>
+                  <td style={td}>{r.createdByName ?? 'Somebody'}</td>
+                  <td style={td}>{formatWhen(r.createdAt)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 

@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
-import { deleteOrder, getOrder, updateOrder } from '@/modules/purchase-orders/lib/db'
+import { bumpOrderRevision, deleteOrder, getOrder, listOrderRevisions, updateOrder } from '@/modules/purchase-orders/lib/db'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
-import { isFreelyEditable, needsApproval } from '@/modules/purchase-orders/lib/lifecycle'
+import { editMode, needsApproval } from '@/modules/purchase-orders/lib/lifecycle'
+import { orderRevisionSnapshot } from '@/modules/purchase-orders/lib/document'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { OrderBody, toOrderInput } from '@/modules/purchase-orders/lib/order-body'
 import { listAudit, recordAudit } from '@/modules/purchase-orders/lib/audit'
@@ -21,8 +22,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
   const order = await getOrder(id)
   if (!order) return errorResponse('That purchase order is not here any more.', 404)
 
-  const history = await listAudit('order', id)
-  return NextResponse.json({ order, history })
+  const [history, revisions] = await Promise.all([listAudit('order', id), listOrderRevisions(id)])
+  return NextResponse.json({ order, history, revisions })
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
@@ -35,18 +36,54 @@ export async function PUT(request: NextRequest, { params }: Params) {
   const existing = await getOrder(id)
   if (!existing) return errorResponse('That purchase order is not here any more.', 404)
 
-  // Editing an order the supplier already has means bumping the revision and
-  // keeping what they were sent - which arrives with the document work. Until
-  // then this refuses rather than quietly rewriting history.
-  if (!isFreelyEditable(existing.status)) {
+  // Two kinds of edit, and which one this is depends entirely on whether the
+  // supplier is holding a copy.
+  //
+  //  free    a draft. Saved over, nothing filed, nobody told.
+  //  amend   an order already out. The version they hold is filed as a revision
+  //          first, the live one moves to Rev N + 1, and the screen offers to
+  //          send them the replacement.
+  //  refused cancelled, closed or fully received. There is nothing left to amend;
+  //          raise a fresh order.
+  const mode = editMode(existing.status)
+  if (mode === 'refused') {
     return errorResponse(
-      'This order has already gone to the supplier, so it cannot be edited. Put it on hold or cancel it and raise a fresh one.',
+      `An order that is ${existing.status.toLowerCase().replace(/_/g, ' ')} cannot be edited. Raise a fresh one instead.`,
       409,
     )
   }
 
   const parsed = OrderBody.safeParse(await request.json())
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? 'Invalid input')
+
+  const reason = (parsed.data.amendmentReason ?? '').trim()
+  // Asked for rather than optional. An amendment is a document going back out to
+  // somebody who acted on the last one, and "what changed" is the first thing
+  // they will ask - and the first thing anybody reading the trail in a year's
+  // time will want.
+  if (mode === 'amend' && !reason) {
+    return errorResponse('This order has already gone to the supplier. Say what has changed and it will be filed as a new revision.')
+  }
+
+  // An amendment replaces every line wholesale (see updateOrder), which is only
+  // safe while nothing else points at them. `po_receipt_lines.order_line_id` is
+  // ON DELETE RESTRICT, so a line with a delivery, a bill or a return against it
+  // would fail at the database with a message nobody outside this file could act
+  // on. Refused here instead, in words that say what to do.
+  //
+  // Nothing can trip this today - receiving, bills and returns all arrive in
+  // later releases and no child row can exist yet - but the check costs a loop
+  // over lines already in hand, and the alternative is a 500 on somebody's live
+  // order the week receiving ships.
+  const settled = existing.lines.filter(
+    (line) => Number(line.qtyReceived) > 0 || Number(line.qtyInvoiced) > 0 || Number(line.qtyReturned) > 0,
+  )
+  if (mode === 'amend' && settled.length > 0) {
+    return errorResponse(
+      'Some of this order has already been delivered or invoiced, so its lines cannot be rewritten. Close it and raise a fresh order for the difference.',
+      409,
+    )
+  }
 
   const input = toOrderInput(parsed.data)
   const config = await getPoConfigCached()
@@ -57,15 +94,29 @@ export async function PUT(request: NextRequest, { params }: Params) {
     carriageAmount: input.carriageAmount,
   })
 
+  // The revision is filed BEFORE the write, from the copy already in hand, so a
+  // failure between the two leaves the order unchanged rather than changed with
+  // no record of what it used to say. The unique index on (order_id, revision) is
+  // what stops two people amending at once and both writing revision 2.
+  let revision = existing.revision
+  if (mode === 'amend') {
+    revision = await bumpOrderRevision(id, orderRevisionSnapshot(existing), reason, user.id)
+  }
+
   await updateOrder(id, input, totals, needsApproval(totals.total, config), user.id)
   await recordAudit(
     'order',
     id,
-    'order.updated',
-    { total: totals.total, previousTotal: existing.total, lines: input.lines.length },
+    mode === 'amend' ? 'order.amended' : 'order.updated',
+    {
+      total: totals.total,
+      previousTotal: existing.total,
+      lines: input.lines.length,
+      ...(mode === 'amend' ? { revision, note: reason } : {}),
+    },
     user.id,
   )
-  return NextResponse.json({ ok: true })
+  return NextResponse.json({ ok: true, revision, amended: mode === 'amend' })
 }
 
 export async function DELETE(_request: NextRequest, { params }: Params) {

@@ -3,8 +3,9 @@ import { z } from 'zod'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
-import { getOrder, setOrderStatus } from '@/modules/purchase-orders/lib/db'
-import { checkTransition, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import { getOrder, getSupplier, setOrderStatus } from '@/modules/purchase-orders/lib/db'
+import { canSend, checkTransition, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import { sendOrderCancelled, supplierRecipients } from '@/modules/purchase-orders/lib/email'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 
@@ -41,6 +42,14 @@ export async function POST(request: NextRequest, { params }: Params) {
     return errorResponse('This order does not need approving. Send it straight to the supplier.', 409)
   }
 
+  // "Sent" here means "mark it as sent" - the order went out by post, by phone,
+  // or over somebody's trade counter. Emailing it is the send route's job. Either
+  // way it may not step over an approval the site asked for.
+  if (transition === 'send') {
+    const gate = canSend(order.status, order.approvalRequired)
+    if (!gate.ok) return errorResponse(gate.reason, 409)
+  }
+
   await setOrderStatus(
     id,
     check.to,
@@ -54,5 +63,18 @@ export async function POST(request: NextRequest, { params }: Params) {
   )
 
   await recordAudit('order', id, `order.${transition}`, { from: order.status, to: check.to, note: note ?? null }, user.id)
+
+  // A supplier holding an order that has been cancelled needs telling, and
+  // telling promptly - the alternative is a lorry. Best-effort and after the
+  // fact: the cancellation has already happened, and undoing it because an email
+  // bounced would leave the two out of step in the worst possible direction.
+  // Only where the order actually went out; a cancelled draft never reached
+  // anybody.
+  if (transition === 'cancel' && order.sentAt) {
+    const supplier = await getSupplier(order.supplierId)
+    const recipients = supplierRecipients(supplier?.email ?? null, supplier?.emailCc ?? null)
+    if (recipients) await sendOrderCancelled(order.supplierName, order.number, recipients, note ?? null)
+  }
+
   return NextResponse.json({ ok: true, status: check.to, label: check.label })
 }

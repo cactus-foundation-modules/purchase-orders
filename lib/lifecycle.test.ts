@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { availableTransitions, checkTransition, isFreelyEditable, needsApproval } from './lifecycle'
+import { availableTransitions, canSend, checkTransition, editMode, isAmendable, isFreelyEditable, needsApproval } from './lifecycle'
 import { receiptStatus } from './progress'
 import type { PoAccess } from './permissions'
 
@@ -97,5 +97,59 @@ describe('receiptStatus', () => {
         { qty: '2', qtyCancelled: '0', qtyReceived: '2' },
       ]),
     ).toBe('RECEIVED')
+  })
+})
+
+describe('amending an order the supplier already has', () => {
+  it('lets a draft be saved over with nothing filed', () => {
+    expect(editMode('DRAFT')).toBe('free')
+    expect(editMode('AWAITING_APPROVAL')).toBe('free')
+  })
+
+  it('treats an edit to a sent order as an amendment', () => {
+    for (const status of ['SENT', 'ACKNOWLEDGED', 'PART_RECEIVED', 'ON_HOLD'] as const) {
+      expect(isAmendable(status)).toBe(true)
+      expect(editMode(status)).toBe('amend')
+    }
+  })
+
+  it('refuses an edit to an order that is finished with', () => {
+    // Nothing left to amend. A fully received order is history whatever anybody
+    // would now like it to have said, and a cancelled one is superseded by a
+    // fresh order rather than rewritten.
+    for (const status of ['RECEIVED', 'CLOSED', 'CANCELLED', 'APPROVED'] as const) {
+      expect(editMode(status)).toBe('refused')
+    }
+  })
+})
+
+describe('canSend', () => {
+  it('lets an ordinary draft go straight out', () => {
+    expect(canSend('DRAFT', false)).toEqual({ ok: true, amendment: false })
+    expect(canSend('APPROVED', false)).toEqual({ ok: true, amendment: false })
+  })
+
+  it('holds a draft that is over the approval threshold', () => {
+    // The transition table cannot express this on its own: whether approval
+    // applies is a per-ORDER fact, not a per-state one.
+    const check = canSend('DRAFT', true)
+    expect(check.ok).toBe(false)
+    expect(check.ok === false && check.reason).toContain('approving')
+    expect(canSend('AWAITING_APPROVAL', true).ok).toBe(false)
+  })
+
+  it('lets an approved order over the threshold go', () => {
+    expect(canSend('APPROVED', true)).toEqual({ ok: true, amendment: false })
+  })
+
+  it('calls a second send of a live order an amendment', () => {
+    expect(canSend('SENT', false)).toEqual({ ok: true, amendment: true })
+    expect(canSend('PART_RECEIVED', false)).toEqual({ ok: true, amendment: true })
+  })
+
+  it('refuses to send something nobody can act on', () => {
+    for (const status of ['CANCELLED', 'CLOSED', 'RECEIVED'] as const) {
+      expect(canSend(status, false).ok).toBe(false)
+    }
   })
 })

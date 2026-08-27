@@ -81,15 +81,54 @@ export function availableTransitions(from: PoStatus, access: PoAccess): PoTransi
 }
 
 /**
- * Whether an order in this state may still be edited freely.
+ * Whether an order in this state may still be edited freely - saved over, with
+ * nothing filed and nobody told.
  *
- * A draft is. Anything already sent is not: an edit past that point bumps the
- * revision and snapshots what the supplier was sent, which arrives with the
- * document work in the next release. Until then, editing a sent order is
- * refused rather than quietly rewriting history.
+ * A draft is. Anything the supplier already holds is not.
  */
 export function isFreelyEditable(status: PoStatus): boolean {
   return status === 'DRAFT' || status === 'AWAITING_APPROVAL'
+}
+
+/**
+ * Whether an order in this state may be AMENDED - edited with the previous
+ * version filed as a revision and the supplier owed a fresh copy.
+ *
+ * Everything the supplier is holding and has not finished with. A cancelled or
+ * closed order is not amended, it is superseded by a new one; and an order that
+ * is fully received is history, whatever anybody would now like it to have said.
+ */
+export function isAmendable(status: PoStatus): boolean {
+  return status === 'SENT' || status === 'ACKNOWLEDGED' || status === 'PART_RECEIVED' || status === 'ON_HOLD'
+}
+
+/** Which of the two an edit to this order is, or neither. */
+export function editMode(status: PoStatus): 'free' | 'amend' | 'refused' {
+  if (isFreelyEditable(status)) return 'free'
+  return isAmendable(status) ? 'amend' : 'refused'
+}
+
+export type SendCheck = { ok: true; amendment: boolean } | { ok: false; reason: string }
+
+/**
+ * Whether this order may go to the supplier right now.
+ *
+ * Stricter than the `send` transition in one place, and deliberately: an order
+ * over the approval threshold may not be emailed out of DRAFT. The transition
+ * table cannot express that on its own, because whether approval applies at all
+ * is a per-order fact rather than a per-state one - and an order raised while
+ * approvals were switched off must still be sendable afterwards.
+ */
+export function canSend(status: PoStatus, approvalRequired: boolean): SendCheck {
+  if (approvalRequired && (status === 'DRAFT' || status === 'AWAITING_APPROVAL')) {
+    return { ok: false, reason: 'This order is over your approval threshold, so it needs approving before it can go out.' }
+  }
+  if (status === 'DRAFT' || status === 'APPROVED') return { ok: true, amendment: false }
+  if (isAmendable(status)) return { ok: true, amendment: true }
+  return {
+    ok: false,
+    reason: `An order that is ${status.toLowerCase().replace(/_/g, ' ')} cannot be sent to a supplier.`,
+  }
 }
 
 /** Whether this total needs somebody with the approve permission before it can go out. */

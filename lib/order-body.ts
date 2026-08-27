@@ -73,6 +73,10 @@ export const OrderBody = z.object({
   notesSupplier: z.string().max(5000).nullable().default(null),
   notesInternal: z.string().max(5000).nullable().default(null),
   lines: z.array(OrderLineBody).min(1, 'An order needs at least one line'),
+  // Why this order changed, on an amendment. Ignored on a create and on an edit
+  // to a draft: neither has anything to explain to anybody. Required by the
+  // update route when the supplier is already holding a copy - see editMode().
+  amendmentReason: z.string().max(2000).optional(),
 })
 
 export type OrderBodyInput = z.infer<typeof OrderBody>

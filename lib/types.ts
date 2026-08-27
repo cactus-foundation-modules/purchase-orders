@@ -152,6 +152,19 @@ export type PoOrder = PoOrderSummary & {
   lines: PoOrderLine[]
 }
 
+/** One earlier version of an order, as the screen lists them. The snapshot
+ *  itself is deliberately not here: it is the whole document, it is only read
+ *  when somebody actually asks for it, and shipping it down with the list would
+ *  put ten copies of an order on the wire to draw four lines of a table. */
+export type PoRevisionSummary = {
+  id: string
+  revision: number
+  reason: string | null
+  createdByUserId: string | null
+  createdByName: string | null
+  createdAt: string
+}
+
 export type PoAuditEntry = {
   id: string
   action: string

@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { LINE_PROGRESS_SQL } from './progress'
 import type {
   CatalogueProduct,
+  PoRevisionSummary,
   PoOrder,
   PoOrderLine,
   PoOrderSummary,
@@ -695,4 +696,180 @@ export async function setOrderStatus(
 
 export async function deleteOrder(id: string): Promise<void> {
   await prisma.$executeRaw`DELETE FROM "po_orders" WHERE "id" = ${id}`
+}
+
+// ---------------------------------------------------------------------------
+// The document: snapshots, revisions and who did what
+// ---------------------------------------------------------------------------
+//
+// Everything below exists because a purchase order that has gone out is not a
+// draft any more. What the supplier holds must stay readable exactly as they
+// received it, whatever anybody renames, re-words or re-prices afterwards.
+
+/** The wording an order was printed with, frozen at first send. Empty until then. */
+export async function getOrderWording(id: string): Promise<Record<string, string>> {
+  const rows = await prisma.$queryRaw<{ wording: unknown }[]>`
+    SELECT "wording" FROM "po_orders" WHERE "id" = ${id} LIMIT 1
+  `
+  const raw = rows[0]?.wording
+  if (!raw || typeof raw !== 'object') return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string') out[key] = value
+  }
+  return out
+}
+
+/** The supplier as the order froze them, or null where it never has. Read in
+ *  preference to the live row: a supplier renamed or deleted after the order
+ *  went out must not rewrite paperwork they are already holding. */
+export async function getOrderSupplierSnapshot(id: string): Promise<Record<string, unknown> | null> {
+  const rows = await prisma.$queryRaw<{ supplier_snapshot: unknown }[]>`
+    SELECT "supplier_snapshot" FROM "po_orders" WHERE "id" = ${id} LIMIT 1
+  `
+  const raw = rows[0]?.supplier_snapshot
+  if (!raw || typeof raw !== 'object' || Object.keys(raw as object).length === 0) return null
+  return raw as Record<string, unknown>
+}
+
+/**
+ * Freezes the supplier and the wording onto the order, and records who it went
+ * to.
+ *
+ * Only ever writes the snapshots that are still empty (`= '{}'::jsonb`), so a
+ * second send - an amendment, a re-send after a bounce - leaves the original
+ * exactly as it was. `sent_to` appends, because who has been told is a list and
+ * not a fact that gets replaced.
+ */
+export async function recordOrderSent(
+  id: string,
+  supplierSnapshot: Record<string, unknown>,
+  wording: Record<string, string>,
+  recipients: string[],
+): Promise<void> {
+  const entry = JSON.stringify([{ at: new Date().toISOString(), to: recipients }])
+  await prisma.$executeRaw`
+    UPDATE "po_orders" SET
+      "supplier_snapshot" = CASE WHEN "supplier_snapshot" = '{}'::jsonb
+        THEN ${JSON.stringify(supplierSnapshot)}::jsonb ELSE "supplier_snapshot" END,
+      "wording" = CASE WHEN "wording" = '{}'::jsonb
+        THEN ${JSON.stringify(wording)}::jsonb ELSE "wording" END,
+      "sent_to" = COALESCE("sent_to", '[]'::jsonb) || ${entry}::jsonb,
+      "updated_at" = now()
+    WHERE "id" = ${id}
+  `
+}
+
+/**
+ * Files the order as it stands as revision N and moves the live order on to
+ * N + 1.
+ *
+ * One statement each, inside one transaction, and the INSERT goes first: the
+ * unique index on (order_id, revision) is what stops two people amending the
+ * same order at the same moment and both writing revision 2.
+ */
+export async function bumpOrderRevision(
+  id: string,
+  snapshot: unknown,
+  reason: string | null,
+  userId: string,
+): Promise<number> {
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ revision: number }[]>`
+      SELECT "revision" FROM "po_orders" WHERE "id" = ${id} FOR UPDATE
+    `
+    const current = Number(rows[0]?.revision ?? 1)
+    await tx.$executeRaw`
+      INSERT INTO "po_revisions" ("order_id", "revision", "snapshot", "reason", "created_by_user_id")
+      VALUES (${id}, ${current}, ${JSON.stringify(snapshot)}::jsonb, ${reason}, ${userId})
+    `
+    await tx.$executeRaw`
+      UPDATE "po_orders" SET "revision" = ${current + 1}, "updated_at" = now() WHERE "id" = ${id}
+    `
+    return current + 1
+  })
+}
+
+/** What this order looked like at each earlier revision. Newest first. */
+export async function listOrderRevisions(id: string): Promise<PoRevisionSummary[]> {
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT r."id", r."revision", r."reason", r."created_by_user_id", r."created_at",
+           COALESCE(u."displayName", u."username") AS "created_by_name"
+      FROM "po_revisions" r
+      LEFT JOIN "User" u ON u."id" = r."created_by_user_id"
+     WHERE r."order_id" = ${id}
+     ORDER BY r."revision" DESC
+  `
+  return rows.map((r) => ({
+    id: r.id as string,
+    revision: Number(r.revision ?? 0),
+    reason: (r.reason as string | null) ?? null,
+    createdByUserId: (r.created_by_user_id as string | null) ?? null,
+    createdByName: (r.created_by_name as string | null) ?? null,
+    createdAt: stamp(r.created_at) ?? '',
+  }))
+}
+
+/** Display names for a handful of user ids, in one round trip. A missing user -
+ *  somebody who has since left - simply has no name, which prints as nothing
+ *  rather than as an id nobody recognises. */
+export async function userNames(ids: (string | null | undefined)[]): Promise<Record<string, string>> {
+  const wanted = [...new Set(ids.filter((id): id is string => Boolean(id)))]
+  if (wanted.length === 0) return {}
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT "id", COALESCE("displayName", "username") AS "name"
+      FROM "User" WHERE "id" = ANY(${wanted}::text[])
+  `
+  const out: Record<string, string> = {}
+  for (const row of rows) out[row.id as string] = (row.name as string | null) ?? ''
+  return out
+}
+
+/** Who raised the order, and who approved it - as ids, for `userNames`. */
+export async function getOrderPeople(id: string): Promise<{ createdByUserId: string | null; approvedByUserId: string | null }> {
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT "created_by_user_id", "approved_by_user_id" FROM "po_orders" WHERE "id" = ${id} LIMIT 1
+  `
+  return {
+    createdByUserId: (rows[0]?.created_by_user_id as string | null) ?? null,
+    approvedByUserId: (rows[0]?.approved_by_user_id as string | null) ?? null,
+  }
+}
+
+/** One order, found by its number rather than its id - which is what the public
+ *  document page has in the URL. */
+export async function getOrderIdByNumber(number: string): Promise<string | null> {
+  const rows = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "po_orders" WHERE "number" = ${number} LIMIT 1
+  `
+  return rows[0]?.id ?? null
+}
+
+/**
+ * The shop's own trading identity, where a shop is installed.
+ *
+ * Read by raw SQL out of shp_settings' JSON column, never by importing the shop
+ * module: those files do not exist at build time on an install without it. Used
+ * only as a FALLBACK for this module's own organisation settings, so nobody has
+ * to type their VAT number into two screens and keep the two in step by hand.
+ */
+export async function shopTradingIdentity(): Promise<Record<string, string> | null> {
+  const { hasCatalogue } = await getCapabilities()
+  if (!hasCatalogue) return null
+  try {
+    const rows = await prisma.$queryRaw<{ config: unknown }[]>`
+      SELECT "config" FROM "shp_settings" WHERE "id" = 'singleton' LIMIT 1
+    `
+    const raw = rows[0]?.config
+    if (!raw || typeof raw !== 'object') return null
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof value === 'string') out[key] = value
+    }
+    return out
+  } catch {
+    // A shop old enough to predate its own settings table degrades to "no
+    // fallback identity", not to an error page on somebody's document.
+    return null
+  }
 }

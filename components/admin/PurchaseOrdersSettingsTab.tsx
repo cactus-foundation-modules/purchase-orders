@@ -41,6 +41,10 @@ export function PurchaseOrdersSettingsTab() {
     )
   }
 
+  function setOrganisation(patch: Partial<PoConfig['organisation']>) {
+    setConfig((prev) => (prev ? { ...prev, organisation: { ...prev.organisation, ...patch } } : prev))
+  }
+
   function setWording(patch: Partial<PoConfig['wording']>) {
     setConfig((prev) => (prev ? { ...prev, wording: { ...prev.wording, ...patch } } : prev))
   }
@@ -234,6 +238,44 @@ export function PurchaseOrdersSettingsTab() {
             they carry through.
           </p>
         )}
+      </div>
+
+      <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Who is buying</h3>
+        <p style={{ ...muted, marginTop: 0, marginBottom: '0.75rem' }}>
+          What prints at the top of a purchase order as your own details. Leave a box empty and, where you run the Shop
+          module, whatever you put on your invoices is used instead - so there is no need to type your VAT number twice.
+        </p>
+        <div style={rowGrid}>
+          <Field label="Business name">
+            <input style={input} value={config.organisation.name} onChange={(e) => setOrganisation({ name: e.target.value })} />
+          </Field>
+          <Field label="Who to ask for">
+            <input style={input} value={config.organisation.contactName} onChange={(e) => setOrganisation({ contactName: e.target.value })} />
+          </Field>
+          <Field label="Email">
+            <input style={input} value={config.organisation.email} onChange={(e) => setOrganisation({ email: e.target.value })} />
+          </Field>
+          <Field label="Phone">
+            <input style={input} value={config.organisation.phone} onChange={(e) => setOrganisation({ phone: e.target.value })} />
+          </Field>
+          <Field label="VAT number">
+            <input style={input} value={config.organisation.vatNumber} onChange={(e) => setOrganisation({ vatNumber: e.target.value })} />
+          </Field>
+          <Field label="Company number">
+            <input style={input} value={config.organisation.companyNumber} onChange={(e) => setOrganisation({ companyNumber: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ marginTop: '0.75rem' }}>
+          <Field label="Address" hint="One line each.">
+            <textarea rows={4} style={input} value={config.organisation.address} onChange={(e) => setOrganisation({ address: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ marginTop: '0.75rem', maxWidth: 320 }}>
+          <Field label="PDF filename starts with" hint="A saved order is named after this and its number.">
+            <input style={input} value={config.pdfFilenamePrefix} onChange={(e) => set('pdfFilenamePrefix', e.target.value)} />
+          </Field>
+        </div>
       </div>
 
       <div style={card}>
