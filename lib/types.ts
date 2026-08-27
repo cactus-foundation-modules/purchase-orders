@@ -542,3 +542,98 @@ export type PoBillTotals = {
   approvedCount: number
   approvedTotal: string
 }
+
+// ---------------------------------------------------------------------------
+// Reordering
+// ---------------------------------------------------------------------------
+
+/** One product's reorder level, as the Reorder tab lists and edits it. */
+export type PoReorderRule = {
+  id: string
+  productId: string
+  /** Null when the product has since left the catalogue - the rule is still
+   *  shown, so somebody can delete it rather than wonder why nothing happens. */
+  productName: string | null
+  sku: string | null
+  supplierId: string | null
+  supplierName: string | null
+  reorderPoint: number
+  reorderQty: number
+  enabled: boolean
+  lastSuggestedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** One product the levels say should be bought, with the arithmetic shown. */
+export type PoReorderSuggestion = {
+  ruleId: string
+  productId: string
+  productName: string
+  sku: string | null
+  supplierId: string | null
+  supplierName: string | null
+  reorderPoint: number
+  reorderQty: number
+  /** Null where nothing is keeping a count of this product. */
+  inStock: number | null
+  /** On purchase orders that have not fully arrived, drafts included. */
+  onOrder: number
+  available: number
+  suggestedQty: number
+  unitCost: string
+  taxRatePercent: string
+  supplierSku: string | null
+  /** Net of tax, at the suggested quantity. */
+  lineValue: string
+  lastSuggestedAt: string | null
+  /** Why this one cannot become an order line. Null when nothing is in the way. */
+  blockedReason: string | null
+}
+
+/** Everything one supplier should be sent, and whether the nightly run will. */
+export type PoReorderPlan = {
+  supplierId: string
+  supplierName: string
+  currency: string
+  lines: PoReorderSuggestion[]
+  /** Net of tax, before carriage. */
+  goodsValue: string
+  minimumOrderValue: string | null
+  /** How far under the minimum this comes, or null when it clears it. */
+  shortOfMinimum: string | null
+  carriageAmount: string
+  /** True when the goods value has earned free carriage. */
+  carriagePaid: boolean
+  /** Whether the nightly run would raise this one on its own. */
+  auto: boolean
+  /** Why it would not, in a sentence. Null when it would. */
+  holdReason: string | null
+}
+
+/** What the planner made of the whole catalogue. */
+export type PoReorderReview = {
+  suggestions: PoReorderSuggestion[]
+  plans: PoReorderPlan[]
+  /** Rules with enough on the shelf to be left alone. */
+  restingCount: number
+}
+
+/** What one run of the reorder job actually raised. */
+export type PoReorderRunResult = {
+  ordersCreated: {
+    id: string
+    number: string
+    supplierId: string
+    supplierName: string
+    currency: string
+    total: string
+    lineCount: number
+  }[]
+  /** Suppliers the run deliberately left alone, and why. */
+  held: { supplierId: string; supplierName: string; reason: string }[]
+  suggested: number
+  blocked: number
+  /** Set when the run could do nothing at all - no catalogue, say. */
+  skipped: string | null
+}

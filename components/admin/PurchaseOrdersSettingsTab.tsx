@@ -332,6 +332,24 @@ export function PurchaseOrdersSettingsTab() {
       </div>
 
       <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Reordering</h3>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={config.reorderAutomatic}
+            disabled={!capabilities?.hasCatalogue}
+            onChange={(e) => set('reorderAutomatic', e.target.checked)}
+          />
+          Raise draft orders automatically overnight
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          {capabilities?.hasCatalogue
+            ? 'Off, the Reorder tab still works out what needs buying and you raise it yourself. On, the drafts are waiting for you in the morning. Either way nothing is ever sent to a supplier without somebody sending it, and an order under a supplier’s minimum is left to grow rather than raised.'
+            : 'There is no product catalogue on this site, so nothing is keeping the counts this would work from. Install the Shop module and this switches on.'}
+        </p>
+      </div>
+
+      <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Chasing and the supplier link</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input type="checkbox" checked={config.chaseEnabled} onChange={(e) => set('chaseEnabled', e.target.checked)} />

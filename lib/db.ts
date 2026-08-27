@@ -545,12 +545,24 @@ export type OrderTotalsPatch = {
   lineTotals: string[]
 }
 
+/** Where an order came from, for the orders that nobody typed.
+ *
+ *  Optional, and MANUAL when it is left off: every order raised by a person on
+ *  the order screen is a manual one, and that is most of them. */
+export type OrderSource = { kind: SourceKind; ref: Record<string, unknown> | null }
+
+const MANUAL_SOURCE: OrderSource = { kind: 'MANUAL', ref: null }
+
+// `userId` is nullable because the nightly reorder job has no user behind it.
+// The column has always allowed it; nothing had ever needed it until something
+// other than a person started raising orders.
 export async function createOrder(
   number: string,
   input: OrderInput,
   totals: OrderTotalsPatch,
   approvalRequired: boolean,
-  userId: string,
+  userId: string | null,
+  source: OrderSource = MANUAL_SOURCE,
 ): Promise<string> {
   return prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<{ id: string }[]>`
@@ -559,6 +571,7 @@ export async function createOrder(
         "fx_rate", "tax_mode", "subtotal", "discount_amount", "carriage_amount", "tax_amount", "total",
         "raised_date", "required_by_date", "expected_date", "payment_terms", "delivery_terms",
         "notes_supplier", "notes_internal", "approval_required",
+        "source_kind", "source_ref",
         "created_by_user_id", "updated_by_user_id"
       ) VALUES (
         ${number}, 'DRAFT', ${input.supplierId}, ${input.shipToKind}, ${JSON.stringify(input.shipTo)}::jsonb,
@@ -567,7 +580,9 @@ export async function createOrder(
         ${totals.taxAmount}::numeric, ${totals.total}::numeric,
         CURRENT_DATE, ${input.requiredByDate}::date, ${input.expectedDate}::date,
         ${input.paymentTerms}, ${input.deliveryTerms}, ${input.notesSupplier}, ${input.notesInternal},
-        ${approvalRequired}, ${userId}, ${userId}
+        ${approvalRequired},
+        ${source.kind}, ${source.ref === null ? null : JSON.stringify(source.ref)}::jsonb,
+        ${userId}, ${userId}
       )
       RETURNING "id"
     `

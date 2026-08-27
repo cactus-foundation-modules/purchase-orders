@@ -86,6 +86,16 @@ export const PoConfigSchema = z.object({
   // of sites drop-ship, and plenty have no catalogue to adjust.
   stockOnReceipt: z.boolean().default(false),
 
+  // Whether the nightly job may raise draft orders on its own.
+  //
+  // OFF by default, and deliberately so. Reorder levels are worth setting up
+  // and reading long before anybody wants a machine acting on them at four in
+  // the morning, and an update that quietly starts raising purchase orders on a
+  // live site is not an update anybody would thank us for. With it off the
+  // Reorder tab still works out and shows everything; the buttons still raise
+  // orders; it is only the job that holds off.
+  reorderAutomatic: z.boolean().default(false),
+
   defaultShipToKind: z.enum(['WAREHOUSE', 'CUSTOMER', 'OTHER']).default('WAREHOUSE'),
   warehouse: ShipToSchema.default({}),
 
