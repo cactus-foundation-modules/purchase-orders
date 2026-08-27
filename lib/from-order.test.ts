@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CLOSED_SHOP_ORDER_STATUSES,
   carriageFor,
   livePos,
   planFromOrder,
@@ -265,5 +266,20 @@ describe('the idempotency guard', () => {
   it('counts every other status, received and closed included', () => {
     const statuses = ['AWAITING_APPROVAL', 'APPROVED', 'SENT', 'ACKNOWLEDGED', 'PART_RECEIVED', 'RECEIVED', 'CLOSED', 'ON_HOLD'] as const
     for (const status of statuses) expect(livePos([po({ status })])).toHaveLength(1)
+  })
+})
+
+describe('the customer orders that have stopped being worth buying for', () => {
+  // The panel hides its button on these, but the panel is not the only way to
+  // the route, so the run checks the same set. One set, two readers: a status
+  // added to one and not the other is a cancelled order somebody buys for.
+  it('names cancelled and refunded, and nothing else', () => {
+    expect([...CLOSED_SHOP_ORDER_STATUSES].sort()).toEqual(['CANCELLED', 'REFUNDED'])
+  })
+
+  it('leaves every status somebody is still owed goods on alone', () => {
+    for (const status of ['PENDING', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'PARTIALLY_REFUNDED', 'ON_HOLD']) {
+      expect(CLOSED_SHOP_ORDER_STATUSES.has(status)).toBe(false)
+    }
   })
 })

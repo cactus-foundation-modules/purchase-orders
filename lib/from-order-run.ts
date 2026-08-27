@@ -3,6 +3,7 @@ import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
 import { createOrder, type OrderInput, type OrderLineInput } from './db'
 import {
+  CLOSED_SHOP_ORDER_STATUSES,
   listPosForShopOrder,
   livePos,
   planFromShopOrder,
@@ -60,6 +61,14 @@ export async function raisePurchaseOrdersFromShopOrder(
 
   const order = await readShopOrder(options.orderId)
   if (!order) return { ...empty, refused: 'That order could not be read.' }
+
+  // Cancelled or refunded. The panel hides its button on those, but the panel is
+  // not the only way to this route and an order can be refunded while somebody
+  // has the screen open. Buying the goods in for an order nobody is paying for
+  // is the one mistake here that costs real money.
+  if (CLOSED_SHOP_ORDER_STATUSES.has(order.status)) {
+    return { ...empty, refused: `${order.orderNumber} is ${order.status.toLowerCase()}, so nothing is being ordered for it.` }
+  }
 
   // Idempotency. Pressing the button twice must not order everything twice, and
   // the second press has to SAY so rather than quietly doing nothing. Cancelled

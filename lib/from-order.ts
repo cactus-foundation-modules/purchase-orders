@@ -206,6 +206,13 @@ export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFrom
   }))
 }
 
+/** Customer-order statuses where buying the goods in has stopped making sense.
+ *
+ *  Checked on the run as well as on the panel. The panel hides the button, but
+ *  the button is not the only way to reach the route, and an order refunded
+ *  while somebody had the screen open would otherwise still buy the goods. */
+export const CLOSED_SHOP_ORDER_STATUSES = new Set(['CANCELLED', 'REFUNDED'])
+
 /** The ones that stand in the way of raising this order again. */
 export function livePos(raised: PoRaisedFromShopOrder[]): PoRaisedFromShopOrder[] {
   return raised.filter((po) => LIVE_STATUSES.includes(po.status))

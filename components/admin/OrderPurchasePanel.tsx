@@ -1,6 +1,7 @@
 import { headers } from 'next/headers'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import {
+  CLOSED_SHOP_ORDER_STATUSES,
   listPosForShopOrder,
   livePos,
   planFromShopOrder,
@@ -25,10 +26,6 @@ import { RaisePurchaseOrders } from './RaisePurchaseOrders'
 // through, and totalled by the same `orderTotals` the draft will be written
 // with, so what somebody reads here is what they get when they press it.
 
-/** Statuses where buying the goods in has stopped making sense. The drafts
- *  already raised are still listed - somebody has to go and cancel them. */
-const CLOSED_STATUSES = new Set(['CANCELLED', 'REFUNDED'])
-
 export async function OrderPurchasePanel({
   orderId,
   orderNumber,
@@ -49,7 +46,7 @@ export async function OrderPurchasePanel({
   const order = await readShopOrder(orderId)
   const plan = order ? await planFromShopOrder(order) : null
 
-  const stillOpen = !CLOSED_STATUSES.has(orderStatus)
+  const stillOpen = !CLOSED_SHOP_ORDER_STATUSES.has(orderStatus)
   const canRaise = access.canCreate && stillOpen && live.length === 0 && (plan?.groups.length ?? 0) > 0
 
   // Nothing raised, nothing to raise and nothing to explain: say nothing at all.
