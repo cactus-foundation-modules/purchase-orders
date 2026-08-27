@@ -1,6 +1,6 @@
 {
   "name": "cactus-module-purchase-orders",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Purchase Orders module for Cactus",
   "license": "MIT",
   "private": true

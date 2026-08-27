@@ -71,16 +71,8 @@ export async function getCapabilities(): Promise<PoCapabilities> {
   return value
 }
 
-/** Drop the cached probe. Call after anything that installs or removes a module. */
-export function resetCapabilitiesCache(): void {
-  cached = null
-}
-
-/**
- * Wording for a tab that is switched off because the module it needs is not
- * here. An honest empty state naming the missing module, never a silent absence
- * - a tab that simply vanishes reads as a bug, and one that errors reads worse.
- */
-export function missingModuleMessage(what: string, moduleName: string): string {
-  return `${what} needs the ${moduleName} module, which is not installed on this site.`
-}
+// A cache-busting helper and a message builder used to live here. Nothing ever
+// called either: the thirty seconds a probe is held for is shorter than any
+// install or uninstall takes to redeploy, and the one tab that switches itself
+// off says so in its own words rather than in a template. Both were removed in
+// the Stage 10 pass - a helper with no caller is a promise nobody is keeping.

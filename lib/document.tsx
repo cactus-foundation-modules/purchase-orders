@@ -272,14 +272,17 @@ export async function poDocumentPageSetup(): Promise<DocPageSetup> {
 // in a list, not an import.
 //
 // The stand-in below is the awkward part and it is deliberate. A shared footer
-// may hold the SHOP's footer blocks, and those read `_ctx.invoice.*` - handed a
-// purchase order they would throw, and the whole PDF with them. So the context
-// passed to the footer carries this order in the shape those blocks read, as
-// plain data. Nothing is imported from the shop module and nothing is typed
-// against it: this is a JSON shape, not a dependency. Only the fields a FOOTER
-// can print are filled - the trading identity, the document's own number and its
-// totals; lines, customers and tax breakdowns are left empty rather than
-// invented, because no footer block reads them.
+// may hold the SHOP's footer blocks, and those read `_ctx.invoice.*`. Shop was
+// taught in the Stage 10 pass to tolerate a document that has no invoice on it,
+// so the worst case is now a blank token rather than a thrown block taking the
+// whole PDF page with it - but blank is not what anybody wants in the footer of
+// a purchase order. So the context passed to the footer carries this order in
+// the shape those blocks read, as plain data, and the footer prints the real
+// number and the real total. Nothing is imported from the shop module and
+// nothing is typed against it: this is a JSON shape, not a dependency. Only the
+// fields a FOOTER can print are filled - the trading identity, the document's
+// own number and its totals; lines, customers and tax breakdowns are left empty
+// rather than invented, because no footer block reads them.
 
 type FooterCompatibleContext = PoDocContext & { invoice: Record<string, unknown> }
 

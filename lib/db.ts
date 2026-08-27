@@ -62,14 +62,6 @@ function address(value: unknown): PoAddress {
   }
 }
 
-export const EMPTY_SHIP_TO: PoShipTo = {
-  name: '',
-  contact: '',
-  phone: '',
-  address: EMPTY_ADDRESS,
-  instructions: '',
-}
-
 function shipTo(value: unknown): PoShipTo {
   const raw = (value ?? {}) as Partial<PoShipTo>
   return {

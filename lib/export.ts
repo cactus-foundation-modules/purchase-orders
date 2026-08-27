@@ -81,13 +81,6 @@ const BILL_COLUMNS = [
   'approved_at', 'posted_at', 'has_attachment', 'lines', 'created_at',
 ] as const
 
-export const EXPORT_COLUMNS: Record<PoExportKind, readonly string[]> = {
-  orders: ORDER_COLUMNS,
-  lines: LINE_COLUMNS,
-  receipts: RECEIPT_COLUMNS,
-  bills: BILL_COLUMNS,
-}
-
 /**
  * One export, over a window of days.
  *

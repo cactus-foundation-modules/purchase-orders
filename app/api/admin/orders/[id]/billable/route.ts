@@ -5,6 +5,7 @@ import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, getSupplier } from '@/modules/purchase-orders/lib/db'
 import { listBillableLines, listBookCategories } from '@/modules/purchase-orders/lib/bills'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
+import type { PoBillableOrder } from '@/modules/purchase-orders/lib/types'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -28,17 +29,21 @@ export async function GET(_request: NextRequest, { params }: Params) {
     getPoConfigCached(),
   ])
 
+  // Typed rather than assembled loose, so a field the bill screen relies on
+  // cannot quietly stop being sent.
+  const billable: PoBillableOrder = {
+    id: order.id,
+    number: order.number,
+    supplierId: order.supplierId,
+    supplierName: order.supplierName,
+    currency: order.currency,
+    fxRate: order.fxRate,
+    paymentTerms: order.paymentTerms,
+    lines,
+  }
+
   return NextResponse.json({
-    order: {
-      id: order.id,
-      number: order.number,
-      supplierId: order.supplierId,
-      supplierName: order.supplierName,
-      currency: order.currency,
-      fxRate: order.fxRate,
-      paymentTerms: order.paymentTerms,
-      lines,
-    },
+    order: billable,
     categories,
     paymentTermsDays: supplier?.paymentTermsDays ?? null,
     // The supplier's own default first, then the site's. A line that ends up

@@ -224,14 +224,6 @@ export async function recordStockResult(id: string, result: PoStockResult): Prom
   `
 }
 
-/** Whether this order has ever been acknowledged, for the status recompute. */
-export async function orderAcknowledged(orderId: string): Promise<boolean> {
-  const rows = await prisma.$queryRaw<{ acknowledged_at: Date | null }[]>`
-    SELECT "acknowledged_at" FROM "po_orders" WHERE "id" = ${orderId} LIMIT 1
-  `
-  return Boolean(rows[0]?.acknowledged_at)
-}
-
 /**
  * The orders with something still to come.
  *
