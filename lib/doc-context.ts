@@ -46,6 +46,10 @@ export type PoDocLine = {
   lineTotal: string
   expectedDate: string | null
   qtyCancelled: string
+  /** The delivery service this line has to be sent on. The cost is deliberately
+   *  not projected: what the supplier is owed for carriage is the order's own
+   *  carriageAmount, and a second per-line figure beside it only confuses. */
+  serviceName: string | null
 }
 
 export type PoDocShipTo = {
@@ -162,6 +166,7 @@ export const SAMPLE_PO_CONTEXT: PoDocContext = {
         lineTotal: '1980.00',
         expectedDate: '2026-04-24',
         qtyCancelled: '0.000',
+        serviceName: 'Pre-assembled delivery',
       },
       {
         id: 'sample-2',
@@ -177,6 +182,7 @@ export const SAMPLE_PO_CONTEXT: PoDocContext = {
         lineTotal: '660.00',
         expectedDate: null,
         qtyCancelled: '0.000',
+        serviceName: null,
       },
     ],
     shipTo: {

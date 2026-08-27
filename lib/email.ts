@@ -46,9 +46,14 @@ function linesHtml(ctx: PoDocContext): string {
     .map((line) => {
       const qty = formatQty(Number(line.qty) - Number(line.qtyCancelled))
       const code = line.supplierSku ? ` (${escapeHtml(line.supplierSku)})` : ''
+      // The delivery service as a sub-line, exactly as the document prints it.
+      // This is the copy most suppliers actually read.
+      const service = line.serviceName
+        ? `<br /><span style="color:#666">${escapeHtml(line.serviceName)}</span>`
+        : ''
       return (
         '<tr>' +
-        `<td>${escapeHtml(line.description)}${code}</td>` +
+        `<td>${escapeHtml(line.description)}${code}${service}</td>` +
         `<td align="center">${escapeHtml(qty)} ${escapeHtml(line.unit)}</td>` +
         `<td align="right">${escapeHtml(formatMoney(line.lineTotal, ctx.order.currency))}</td>` +
         '</tr>'

@@ -210,6 +210,13 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     <td style={{ padding: '0.375rem 0.5rem 0.375rem 0', borderTop: '1px solid var(--color-border, #ddd)' }}>
                       {line.description}
                       {line.supplierSku ? ` (${line.supplierSku})` : ''}
+                      {/* The service this one has to go on. It is the only thing
+                          on the line they have to treat differently. */}
+                      {line.serviceName && (
+                        <div style={{ color: 'var(--color-text-secondary, #666)', fontSize: '0.8125rem' }}>
+                          {line.serviceName}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '0.375rem 0.5rem', textAlign: 'right', borderTop: '1px solid var(--color-border, #ddd)' }}>
                       {line.qty} {line.unit}

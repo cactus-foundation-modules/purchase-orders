@@ -56,6 +56,10 @@ type LineForm = {
   taxRatePercent: string
   expectedDate: string
   qtyCancelled: string
+  // The delivery service this line has to go on, and what it costs per unit.
+  // The cost is not in the line total - it is summed into the order's carriage.
+  serviceName: string
+  serviceCost: string
 }
 
 type Form = {
@@ -103,6 +107,8 @@ function newLine(patch: Partial<LineForm> = {}): LineForm {
     taxRatePercent: '20',
     expectedDate: '',
     qtyCancelled: '0',
+    serviceName: '',
+    serviceCost: '',
     ...patch,
   }
 }
@@ -177,6 +183,8 @@ function formFromOrder(order: PoOrder): Form {
         taxRatePercent: l.taxRatePercent,
         expectedDate: l.expectedDate ?? '',
         qtyCancelled: l.qtyCancelled,
+        serviceName: l.serviceName ?? '',
+        serviceCost: l.serviceCost ?? '',
       }),
     ),
   }
@@ -381,6 +389,8 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         categoryId: null,
         expectedDate: l.expectedDate || null,
         qtyCancelled: l.qtyCancelled || '0',
+        serviceName: l.serviceName || null,
+        serviceCost: l.serviceCost || null,
       })),
     }
   }
@@ -893,6 +903,26 @@ function LineEditor({ lines, currency, lineTotals, hasCatalogue, supplierId, onC
                     aria-label={`Line ${index + 1} description`}
                   />
                   {line.productId && <span style={muted}>From the catalogue</span>}
+                  {/* The delivery service sits under the description rather than
+                      in columns of its own: the table is already nine wide, and
+                      this reads the way it prints on the document. */}
+                  <div style={{ display: 'flex', gap: '0.375rem', marginTop: '0.25rem' }}>
+                    <input
+                      style={{ ...input, flex: 1, minWidth: 120 }}
+                      value={line.serviceName}
+                      placeholder="Delivery service"
+                      onChange={(e) => onChange(line.key, { serviceName: e.target.value })}
+                      aria-label={`Line ${index + 1} delivery service`}
+                    />
+                    <input
+                      style={{ ...input, width: 80, textAlign: 'right' }}
+                      value={line.serviceCost}
+                      placeholder="Cost"
+                      title="What the service costs per unit. It is not in the line total - put it in Carriage as well if the supplier is charging you for it."
+                      onChange={(e) => onChange(line.key, { serviceCost: e.target.value })}
+                      aria-label={`Line ${index + 1} delivery service cost, per unit`}
+                    />
+                  </div>
                 </td>
                 <td style={td}>
                   <input
@@ -1124,6 +1154,17 @@ function OrderView({
                   <tr key={l.id}>
                     <td style={td}>
                       {l.description}
+                      {l.serviceName && (
+                        <div style={muted}>
+                          {l.serviceName}
+                          {l.serviceCost && (
+                            <>
+                              {' - '}
+                              <Money value={l.serviceCost} currency={order.currency} /> a unit, not in the line total
+                            </>
+                          )}
+                        </div>
+                      )}
                       {Number(l.qtyCancelled) > 0 && <div style={muted}>{l.qtyCancelled} cancelled</div>}
                     </td>
                     <td style={td}>{l.supplierSku ?? '—'}</td>

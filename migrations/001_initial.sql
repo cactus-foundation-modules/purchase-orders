@@ -178,6 +178,11 @@ CREATE TABLE IF NOT EXISTS "po_order_lines" (
     "line_total"           NUMERIC(12,2) NOT NULL DEFAULT 0,
     "expected_date"        DATE,
     "qty_cancelled"        NUMERIC(12,3) NOT NULL DEFAULT 0,
+    -- The delivery service this line has to be sent on, and what it costs. Not
+    -- in the line total: service_cost is summed into po_orders.carriage_amount.
+    -- Also in 003, for installs that predate it.
+    "service_name"         TEXT,
+    "service_cost"         NUMERIC(12,4),
     "source_order_item_id" TEXT,
     "created_at"           TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_at"           TIMESTAMPTZ NOT NULL DEFAULT now(),

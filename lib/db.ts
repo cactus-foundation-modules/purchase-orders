@@ -125,6 +125,8 @@ function mapLine(r: Record<string, unknown>): PoOrderLine {
     lineTotal: dec(r.line_total),
     expectedDate: day(r.expected_date),
     qtyCancelled: dec(r.qty_cancelled),
+    serviceName: (r.service_name as string | null) ?? null,
+    serviceCost: decOrNull(r.service_cost),
     qtyReceived: dec(r.qty_received),
     qtyInvoiced: dec(r.qty_invoiced),
     qtyReturned: dec(r.qty_returned),
@@ -509,6 +511,9 @@ export type OrderLineInput = {
   categoryId: string | null
   expectedDate: string | null
   qtyCancelled: string
+  serviceName: string | null
+  /** Per unit, and never added into the line total - see PoOrderLine. */
+  serviceCost: string | null
 }
 
 export type OrderInput = {
@@ -641,13 +646,15 @@ async function insertLines(
       INSERT INTO "po_order_lines" (
         "order_id", "position", "product_id", "product_name", "supplier_sku", "our_sku",
         "description", "qty", "unit", "unit_cost", "discount_percent", "tax_rate_percent",
-        "tax_rate_code", "vat_treatment", "category_id", "line_total", "expected_date", "qty_cancelled"
+        "tax_rate_code", "vat_treatment", "category_id", "line_total", "expected_date", "qty_cancelled",
+        "service_name", "service_cost"
       ) VALUES (
         ${orderId}, ${index}, ${line.productId}, ${line.productName}, ${line.supplierSku}, ${line.ourSku},
         ${line.description}, ${line.qty}::numeric, ${line.unit}, ${line.unitCost}::numeric,
         ${line.discountPercent}::numeric, ${line.taxRatePercent}::numeric,
         ${line.taxRateCode}, ${line.vatTreatment}, ${line.categoryId},
-        ${lineTotals[index] ?? '0'}::numeric, ${line.expectedDate}::date, ${line.qtyCancelled}::numeric
+        ${lineTotals[index] ?? '0'}::numeric, ${line.expectedDate}::date, ${line.qtyCancelled}::numeric,
+        ${line.serviceName}, ${line.serviceCost}::numeric
       )
     `
   }

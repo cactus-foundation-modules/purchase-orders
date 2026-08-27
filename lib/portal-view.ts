@@ -34,6 +34,11 @@ export type PoPortalLine = {
   qty: string
   unit: string
   expectedDate: string | null
+  /** A conscious addition to an otherwise tight allow-list: the supplier cannot
+   *  send a line on the right service without being told which one. What that
+   *  service costs stays behind - it is on the document as carriage, and a
+   *  per-line figure beside it is nothing they need. */
+  serviceName: string | null
 }
 
 /** Something the supplier has already told us, as it reads back to them. */
@@ -154,6 +159,7 @@ export function portalView(order: PoOrder, events: PoPortalEvent[]): PoPortalVie
         qty: String(Number(line.qty) - Number(line.qtyCancelled)),
         unit: line.unit,
         expectedDate: line.expectedDate,
+        serviceName: line.serviceName,
       })),
     events,
   }

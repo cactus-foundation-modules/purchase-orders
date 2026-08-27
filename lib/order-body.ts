@@ -54,6 +54,15 @@ export const OrderLineBody = z.object({
   categoryId: z.string().max(100).nullable().default(null),
   expectedDate: DateOnly.default(null),
   qtyCancelled: Qty.default('0'),
+  // The delivery service the line has to be sent on. Both default to null, so
+  // an existing client and the nightly reorder job carry on unchanged. The cost
+  // is validated like a unit cost rather than left a free string: it goes
+  // straight into a NUMERIC(12,4) column, and anything that is not a number
+  // there is a 500 rather than a form error.
+  serviceName: z.string().max(200).nullable().default(null),
+  // An emptied box is allowed through as blank and becomes null in toOrderInput,
+  // the same as a name somebody deleted. Anything else has to look like money.
+  serviceCost: UnitCost.or(z.literal('')).nullable().default(null),
 })
 
 export const OrderBody = z.object({
@@ -119,6 +128,8 @@ export function toOrderInput(body: OrderBodyInput): OrderInput {
       categoryId: orNull(line.categoryId),
       expectedDate: line.expectedDate,
       qtyCancelled: line.qtyCancelled,
+      serviceName: orNull(line.serviceName),
+      serviceCost: orNull(line.serviceCost),
     })),
   }
 }

@@ -103,6 +103,10 @@ async function raiseOneOrder(
     categoryId: null,
     expectedDate: null,
     qtyCancelled: '0',
+    // A reorder is a shelf being topped up on whatever the standing arrangement
+    // is. There is no customer waiting, so no service to name.
+    serviceName: null,
+    serviceCost: null,
   }))
 
   const input: OrderInput = {

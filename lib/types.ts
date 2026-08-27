@@ -98,6 +98,14 @@ export type PoOrderLine = {
   lineTotal: string
   expectedDate: string | null
   qtyCancelled: string
+  /** The delivery service this line has to be sent on, in the supplier's own
+   *  words - "Pre-assembled delivery, expected 12 May". It rides on the product
+   *  line rather than a line of its own, so nothing counts it as outstanding. */
+  serviceName: string | null
+  /** What that service costs, per unit, and deliberately NOT part of the line
+   *  total. It is summed across the lines into the order's carriageAmount,
+   *  which is where this module has always carried delivery money. */
+  serviceCost: string | null
   /** Derived, never stored - see lib/progress.ts. */
   qtyReceived: string
   qtyInvoiced: string

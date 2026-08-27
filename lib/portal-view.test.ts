@@ -30,6 +30,8 @@ function line(patch: Partial<PoOrderLine> = {}): PoOrderLine {
     lineTotal: '1980.00',
     expectedDate: '2026-04-24',
     qtyCancelled: '0.000',
+    serviceName: 'Pre-assembled delivery, two-man',
+    serviceCost: '39.0000',
     qtyReceived: '0.000',
     qtyInvoiced: '0.000',
     qtyReturned: '0.000',
@@ -99,9 +101,11 @@ describe('the supplier projection', () => {
     expect(wire).not.toContain('user-9')
     expect(wire).not.toContain('supplier-1')
     // No money at all: the document above the panel already prints their own
-    // prices, and the panel has no use for a total.
+    // prices, and the panel has no use for a total. That includes what we are
+    // paying for the delivery service - they get its name, never its cost.
     expect(wire).not.toContain('2376.00')
     expect(wire).not.toContain('165.0000')
+    expect(wire).not.toContain('39.0000')
   })
 
   it('carries what they do need to answer', () => {
@@ -113,6 +117,9 @@ describe('the supplier projection', () => {
     expect(view.lines).toHaveLength(1)
     expect(view.lines[0]!.description).toBe('Oak desk 1600mm')
     expect(view.lines[0]!.qty).toBe('12')
+    // A deliberate disclosure: they cannot send a line on the right service
+    // without being told which one it is.
+    expect(view.lines[0]!.serviceName).toBe('Pre-assembled delivery, two-man')
   })
 
   it('takes the cancelled quantity off what they can be short of', () => {

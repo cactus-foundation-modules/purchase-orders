@@ -65,7 +65,7 @@ const LINE_COLUMNS = [
   'description', 'supplier_sku', 'our_sku', 'product_id',
   'qty_ordered', 'qty_cancelled', 'qty_received', 'qty_invoiced', 'qty_returned', 'qty_outstanding',
   'unit', 'unit_cost', 'discount_percent', 'tax_rate_percent', 'tax_rate_code', 'vat_treatment',
-  'category_id', 'line_total', 'expected_date',
+  'category_id', 'line_total', 'expected_date', 'service_name', 'service_cost',
 ] as const
 
 const RECEIPT_COLUMNS = [
@@ -148,7 +148,7 @@ async function exportLines(from: string, to: string): Promise<ExportFile> {
            o."currency", l."position", l."description", l."supplier_sku", l."our_sku", l."product_id",
            l."qty", l."qty_cancelled", l."unit", l."unit_cost", l."discount_percent",
            l."tax_rate_percent", l."tax_rate_code", l."vat_treatment", l."category_id",
-           l."line_total", l."expected_date",
+           l."line_total", l."expected_date", l."service_name", l."service_cost",
            ${LINE_PROGRESS_SQL}
       FROM "po_order_lines" l
       JOIN "po_orders" o ON o."id" = l."order_id"
@@ -172,7 +172,7 @@ async function exportLines(from: string, to: string): Promise<ExportFile> {
         outstanding.toFixed(3),
         text(r.unit), num(r.unit_cost), num(r.discount_percent), num(r.tax_rate_percent),
         text(r.tax_rate_code), text(r.vat_treatment), text(r.category_id),
-        num(r.line_total), day(r.expected_date),
+        num(r.line_total), day(r.expected_date), text(r.service_name), num(r.service_cost),
       ]
     }),
   }

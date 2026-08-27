@@ -183,6 +183,7 @@ export async function loadPoDocContext(
         lineTotal: line.lineTotal,
         expectedDate: line.expectedDate,
         qtyCancelled: line.qtyCancelled,
+        serviceName: line.serviceName,
       })),
       shipTo: {
         name: order.shipTo.name,

@@ -648,6 +648,9 @@ export function PoDocLines(props: LinesProps) {
             const cancelled = Number(line.qtyCancelled)
             const discount = Number(line.discountPercent ?? 0)
             const detail: string[] = []
+            // First in the list on purpose: it is the one thing on the line the
+            // supplier has to act on differently from every other order.
+            if (line.serviceName) detail.push(line.serviceName)
             if (showOurSku && line.ourSku) detail.push(`Our code ${line.ourSku}`)
             if (props.showLineDates !== 'no' && line.expectedDate) detail.push(`Expected ${formatDate(line.expectedDate)}`)
             if (props.showDiscount !== 'no' && discount > 0) detail.push(`Less ${formatQty(discount)}%`)
