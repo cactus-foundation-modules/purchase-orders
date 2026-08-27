@@ -183,6 +183,59 @@ export async function sendOrderToSupplier(
 }
 
 /**
+ * Asks a supplier where a late order has got to.
+ *
+ * Throws, unlike the cancellation note, and deliberately: the caller records a
+ * chase in the order's history only when one actually went, and a log full of
+ * chases nobody received is worse than no log at all - it is the thing that stops
+ * the next one being sent. The runner catches it and reports the failure.
+ *
+ * No attachment. The supplier already has the order; sending the PDF again reads
+ * as a fresh one, and a supplier who files it twice is a supplier who ships it
+ * twice.
+ */
+export async function sendOrderChase(
+  supplierName: string,
+  orderNumber: string,
+  recipients: SupplierRecipients,
+  vars: { dueDate: string; daysLate: number; lines: { description: string; supplierSku: string | null; unit: string; qtyOutstanding: string }[] },
+  portalLink: string | null,
+): Promise<void> {
+  if (!isEmailConfigured()) {
+    throw new Error('Email is not set up on this site, so nothing can be chased.')
+  }
+  const rows = vars.lines
+    .map(
+      (line) =>
+        '<tr>' +
+        `<td>${escapeHtml(line.description)}${line.supplierSku ? ` (${escapeHtml(line.supplierSku)})` : ''}</td>` +
+        `<td align="center">${escapeHtml(formatQty(line.qtyOutstanding))} ${escapeHtml(line.unit)}</td>` +
+        '</tr>',
+    )
+    .join('')
+
+  const rendered = await renderEmailTemplate('purchase-orders.chase', {
+    supplierName: supplierName || 'there',
+    orderNumber,
+    dueDate: vars.dueDate,
+    daysLate: vars.daysLate === 1 ? 'a day' : `${vars.daysLate} days`,
+    lines: `<table cellpadding="6" cellspacing="0" border="0" width="100%">${rows}</table>`,
+    portalLink: portalLinkHtml(portalLink),
+    siteName: await siteName(),
+  })
+  if (!rendered) {
+    throw new Error('The chase email is switched off in Settings, Emails, so nothing was sent.')
+  }
+  await sendEmail({
+    to: recipients.to,
+    ...(recipients.cc.length ? { cc: recipients.cc } : {}),
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+  })
+}
+
+/**
  * Tells a supplier an order they were sent is cancelled.
  *
  * Best-effort and never throws: the order has already been cancelled by the time

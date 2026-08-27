@@ -1,10 +1,14 @@
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import PurchaseOrdersNav from '@/modules/purchase-orders/components/admin/PurchaseOrdersNav'
-import { NotYet } from '@/modules/purchase-orders/components/admin/ui'
+import { ReportsScreen } from '@/modules/purchase-orders/components/admin/ReportsScreen'
 
 export const metadata = { title: 'Reports — Purchase Orders — Admin' }
 
+// The one tab that needs nothing else installed. Committed spend, late orders,
+// the two accruals and what is being spent with whom all come out of this
+// module's own tables - a shop makes the lines easier to type and the books put
+// names on the categories, and neither is required for any of it to be true.
 export default async function ReportsPage() {
   const user = await getSessionFromCookie()
   if (!user) return null
@@ -16,11 +20,7 @@ export default async function ReportsPage() {
   return (
     <div>
       <PurchaseOrdersNav />
-      <div className="page-header"><h1 className="page-title">Reports</h1></div>
-      <NotYet
-        title="Purchasing reports arrive in a later release"
-        message="What you have committed to but not yet received, what you spend with whom, what is overdue, and what has arrived but never been invoiced."
-      />
+      <ReportsScreen />
     </div>
   )
 }

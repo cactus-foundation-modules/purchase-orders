@@ -38,9 +38,15 @@ things.
   accept, offer a different date on, or report a shortage against, and change
   nothing at all. Scoped to one order, expiring, revocable, and stored only as
   a hash.
-
-The reports follow in a later release, and that tab is already in place saying
-so.
+- Reports: what you have committed to and not yet received, what is late, goods
+  in without an invoice, invoices in without the goods, and what you spend with
+  whom, month by month and by category.
+- Chasing: a note to a supplier whose order is late, on the schedule you set -
+  or one you send yourself from the Reports tab.
+- Four spreadsheets to take away: orders, order lines, deliveries and supplier
+  invoices.
+- A tile on the admin dashboard: what is out with suppliers, what it is worth,
+  what is late, and how many invoices are waiting to be checked.
 
 ## Installation
 

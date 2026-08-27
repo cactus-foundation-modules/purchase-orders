@@ -1,6 +1,6 @@
 import type { EmailTemplateDef } from '@/lib/email/registry'
 
-// The emails this module sends: four to a supplier, and one to you when a
+// The emails this module sends: five to a supplier, and one to you when a
 // supplier answers back through their own link. Declared for core's single email
 // editor (Settings > Emails), which owns the wording, the wrapper design and the
 // sending; this file is only the defaults.
@@ -63,6 +63,29 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     mergeTags: ['supplierName', 'returnNumber', 'orderNumber', 'creditExpected', 'reason', 'lines', 'siteName'],
     requiredTags: ['returnNumber'],
     rawTags: ['lines'],
+    transactional: true,
+  },
+  {
+    // The one that goes out on its own, without anybody pressing anything.
+    // Written to be short and to sound like a person rather than a system: a
+    // supplier who is genuinely late does not need a lecture, and one who is
+    // late because nobody told us the date moved needs somewhere to say so -
+    // which is what the link is for.
+    key: 'purchase-orders.chase',
+    label: 'Chasing a late purchase order',
+    subject: 'Still waiting on purchase order {{orderNumber}}',
+    bodyHtml:
+      '<p>Hello {{supplierName}},</p>' +
+      '<p>Our purchase order <strong>{{orderNumber}}</strong> was due on {{dueDate}} and has not arrived. ' +
+      'That is {{daysLate}} now, so we thought we would ask.</p>' +
+      '<p>Still to come:</p>' +
+      '<table>{{lines}}</table>' +
+      '{{portalLink}}' +
+      '<p>If it is already on its way, do ignore this.</p>' +
+      '<p>Thank you,<br />{{siteName}}</p>',
+    mergeTags: ['supplierName', 'orderNumber', 'dueDate', 'daysLate', 'lines', 'portalLink', 'siteName'],
+    requiredTags: ['orderNumber'],
+    rawTags: ['lines', 'portalLink'],
     transactional: true,
   },
   {

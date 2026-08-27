@@ -382,7 +382,9 @@ export function PurchaseOrdersSettingsTab() {
         <p style={{ ...muted, marginTop: '0.5rem' }}>
           With the link on, every order you send carries one of its own. The supplier can read that order, accept it,
           offer a different date or say something is short - and change none of it. Each link is listed on the order
-          itself and can be stopped there. Chasing arrives with a later release, and nothing is chased in the meantime.
+          itself and can be stopped there. With chasing on, a supplier who is late gets a short note asking where the
+          order has got to - once, and then on the repeat above; set the repeat to zero to ask only the once. Either
+          way the Reports tab works out who is late, and you can send one from there yourself.
         </p>
       </div>
 

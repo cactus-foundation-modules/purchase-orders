@@ -637,3 +637,144 @@ export type PoReorderRunResult = {
   /** Set when the run could do nothing at all - no catalogue, say. */
   skipped: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Reporting, chasing and export
+// ---------------------------------------------------------------------------
+//
+// Every money figure below is in the site's BASE currency, converted once at the
+// rate stored on the row it came from - the order's rate for anything still on
+// order, the bill's own rate for anything invoiced. Mixing a euro order into a
+// sterling total without saying so is the one thing a purchasing report must
+// never do, so the screen says which currency it is in, out loud.
+
+/** One supplier's share of what the site has committed to and not yet received. */
+export type PoCommitmentSupplier = {
+  supplierId: string
+  supplierName: string
+  value: string
+  orderCount: number
+  lineCount: number
+}
+
+/** One line of an accrual: goods here without an invoice, or the other way round. */
+export type PoAccrualRow = {
+  orderId: string
+  orderNumber: string
+  supplierId: string
+  supplierName: string
+  description: string
+  qty: string
+  value: string
+}
+
+/** An order past its date with something still owing. */
+export type PoOverdueOrder = {
+  orderId: string
+  orderNumber: string
+  status: PoStatus
+  supplierId: string
+  supplierName: string
+  dueDate: string
+  daysLate: number
+  outstandingLines: number
+  outstandingValue: string
+  /** Off the audit log. Null when nobody has chased this one. */
+  lastChasedAt: string | null
+}
+
+/** One month of the spend chart. Empty months are present, with zeroes. */
+export type PoSpendPoint = {
+  key: string
+  label: string
+  billed: string
+  credited: string
+  net: string
+}
+
+/** Spend with one supplier over the chosen window. */
+export type PoSpendSupplier = {
+  supplierId: string
+  supplierName: string
+  billed: string
+  credited: string
+  net: string
+  billCount: number
+}
+
+/** Spend under one bookkeeping category. The name is resolved where the books
+ *  are installed; otherwise only the id is known, and the screen says so. */
+export type PoSpendCategory = {
+  categoryId: string | null
+  categoryName: string | null
+  net: string
+  lineCount: number
+}
+
+/** Everything the Reports tab draws, in one payload. */
+export type PoReports = {
+  baseCurrency: string
+  /** The window the spend halves cover, as plain days. */
+  from: string
+  to: string
+  today: string
+  hasBooks: boolean
+  committed: {
+    total: string
+    orderCount: number
+    suppliers: PoCommitmentSupplier[]
+  }
+  overdue: PoOverdueOrder[]
+  receivedNotInvoiced: { total: string; rows: PoAccrualRow[] }
+  invoicedNotReceived: { total: string; rows: PoAccrualRow[] }
+  spend: {
+    billed: string
+    credited: string
+    net: string
+    byMonth: PoSpendPoint[]
+    bySupplier: PoSpendSupplier[]
+    byCategory: PoSpendCategory[]
+  }
+  chase: {
+    enabled: boolean
+    afterDays: number
+    repeatDays: number
+    decisions: PoChaseDecision[]
+  }
+}
+
+/** Whether one order is due a chase today, and the sentence saying why not. */
+export type PoChaseDecision = {
+  orderId: string
+  orderNumber: string
+  supplierId: string
+  supplierName: string
+  dueDate: string | null
+  daysLate: number
+  lastChasedAt: string | null
+  due: boolean
+  reason: string
+}
+
+/** What one chase run actually sent. */
+export type PoChaseRunResult = {
+  chased: { orderId: string; orderNumber: string; supplierName: string; to: string }[]
+  failed: { orderId: string; orderNumber: string; message: string }[]
+  /** Considered and left alone. */
+  skipped: number
+  /** Set when the run did nothing at all because the owner has it switched off. */
+  heldBack: string | null
+}
+
+/** The four things purchasing will hand you as a spreadsheet. */
+export const PO_EXPORT_KINDS = ['orders', 'lines', 'receipts', 'bills'] as const
+export type PoExportKind = (typeof PO_EXPORT_KINDS)[number]
+
+/** The tile on the admin dashboard. */
+export type PoDashboardSummary = {
+  baseCurrency: string
+  openOrders: number
+  committedValue: string
+  overdueCount: number
+  billsToLookAt: number
+}
