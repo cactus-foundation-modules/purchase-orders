@@ -182,3 +182,79 @@ export type CatalogueProduct = {
   supplier: string | null
   costPrice: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Receiving
+// ---------------------------------------------------------------------------
+
+export type PoReceiptLine = {
+  id: string
+  orderLineId: string
+  qtyAccepted: string
+  qtyRejected: string
+  rejectReason: string | null
+  conditionNote: string | null
+  /** Snapshotted off the order line for display, never stored here. */
+  description: string
+  supplierSku: string | null
+  productId: string | null
+  unit: string
+}
+
+/** What one delivery's stock write did, as it is shown back to whoever pressed
+ *  the button. Mirrors core's InventoryAdjustmentOutcome plus the line it came
+ *  from - nothing here is typed against the shop, which may not be installed. */
+export type PoStockLineResult = {
+  orderLineId: string
+  productId: string | null
+  description: string
+  ok: boolean
+  before: number | null
+  after: number | null
+  message?: string
+}
+
+export type PoStockResult = {
+  /** Which module did the moving, in words: "Shop". */
+  adjuster?: string
+  at?: string
+  byUserId?: string | null
+  lines?: PoStockLineResult[]
+  /** Set when the whole attempt failed rather than individual lines. */
+  error?: string
+}
+
+export type PoReceiptSummary = {
+  id: string
+  number: string
+  orderId: string
+  orderNumber: string
+  supplierName: string
+  receivedDate: string
+  deliveryNoteRef: string | null
+  carrier: string | null
+  receivedByUserId: string | null
+  receivedByName: string | null
+  stockApplied: boolean
+  lineCount: number
+  createdAt: string
+}
+
+export type PoReceipt = PoReceiptSummary & {
+  notes: string | null
+  stockAppliedAt: string | null
+  stockResult: PoStockResult
+  lines: PoReceiptLine[]
+}
+
+/** An order with something still to come, as the Receiving tab lists them. */
+export type PoAwaitingOrder = {
+  id: string
+  number: string
+  status: PoStatus
+  supplierName: string
+  expectedDate: string | null
+  requiredByDate: string | null
+  outstandingLines: number
+  receiptCount: number
+}

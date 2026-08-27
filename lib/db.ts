@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
-import { LINE_PROGRESS_SQL } from './progress'
+import { LINE_PROGRESS_SQL, receiptStatus } from './progress'
+import { statusAfterReceipts } from './receiving'
 import type {
   CatalogueProduct,
   PoRevisionSummary,
@@ -872,4 +873,86 @@ export async function shopTradingIdentity(): Promise<Record<string, string> | nu
     // fallback identity", not to an error page on somebody's document.
     return null
   }
+}
+
+/**
+ * Brings an order's status back in line with what has actually turned up.
+ *
+ * The one status change in this module that no human asks for. Every other one
+ * goes through the transition route, which is guarded by lib/lifecycle.ts and
+ * writes its own audit line; this one is arithmetic - a line's worth of goods
+ * arrived, so the order is now part received - and it is written here beside
+ * `setOrderStatus` rather than anywhere clever, so there is still exactly one
+ * file that writes `po_orders.status`.
+ *
+ * Returns the new status when it moved, or null when it did not, which is what
+ * the caller logs.
+ */
+export async function syncOrderReceiptStatus(
+  orderId: string,
+  userId: string,
+): Promise<PoStatus | null> {
+  const order = await getOrder(orderId)
+  if (!order) return null
+
+  const computed = receiptStatus(
+    order.lines.map((line) => ({
+      qty: line.qty,
+      qtyCancelled: line.qtyCancelled,
+      qtyReceived: line.qtyReceived,
+    })),
+  )
+  const next = statusAfterReceipts(order.status, computed, Boolean(order.acknowledgedAt))
+  if (!next) return null
+
+  await setOrderStatus(orderId, next, {}, userId)
+  return next
+}
+
+/**
+ * Cancels the balance of one order line.
+ *
+ * Its own operation rather than part of an edit, because by the time anybody
+ * wants it the order is usually part received - and `updateOrder` replaces every
+ * line wholesale, which a line with a delivery against it will not allow (and
+ * should not). Nothing is deleted: the quantity ordered stays as it was, the
+ * cancelled quantity rises to meet it, and the line stops being outstanding.
+ *
+ * `qtyCancelled` is clamped so it can never exceed what was ordered, nor fall
+ * below what has already arrived - a line cannot be cancelled out from under a
+ * delivery that is sitting in the yard.
+ */
+export async function cancelOrderLineBalance(
+  orderId: string,
+  lineId: string,
+  userId: string,
+): Promise<{ ok: boolean; reason?: string; qtyCancelled?: string }> {
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT l."id", l."qty", l."qty_cancelled", ${LINE_PROGRESS_SQL}
+      FROM "po_order_lines" l
+     WHERE l."id" = ${lineId} AND l."order_id" = ${orderId}
+     LIMIT 1
+  `
+  const row = rows[0]
+  if (!row) return { ok: false, reason: 'That line is not on this order any more.' }
+
+  const qty = Number(row.qty)
+  const received = Number(row.qty_received ?? 0)
+  const alreadyCancelled = Number(row.qty_cancelled ?? 0)
+  const target = Math.max(0, qty - received)
+
+  if (target <= alreadyCancelled) {
+    return { ok: false, reason: 'There is nothing outstanding on that line to cancel.' }
+  }
+
+  const cancelled = target.toFixed(3)
+  await prisma.$executeRaw`
+    UPDATE "po_order_lines"
+       SET "qty_cancelled" = ${cancelled}::numeric, "updated_at" = now()
+     WHERE "id" = ${lineId} AND "order_id" = ${orderId}
+  `
+  await prisma.$executeRaw`
+    UPDATE "po_orders" SET "updated_by_user_id" = ${userId}, "updated_at" = now() WHERE "id" = ${orderId}
+  `
+  return { ok: true, qtyCancelled: cancelled }
 }

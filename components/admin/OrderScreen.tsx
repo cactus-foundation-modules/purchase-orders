@@ -8,10 +8,12 @@ import { availableTransitions, canSend, editMode, TRANSITIONS } from '@/modules/
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
+import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receiving'
 import type {
   CatalogueProduct,
   PoAuditEntry,
   PoOrder,
+  PoReceiptSummary,
   PoRevisionSummary,
   PoStatus,
   PoSupplier,
@@ -206,6 +208,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const [order, setOrder] = useState<PoOrder | null>(null)
   const [history, setHistory] = useState<PoAuditEntry[]>([])
   const [revisions, setRevisions] = useState<PoRevisionSummary[]>([])
+  const [receipts, setReceipts] = useState<PoReceiptSummary[]>([])
   // Why this order is changing. Only asked for on an amendment - an order the
   // supplier is already holding - and required there, because "what changed" is
   // the first thing they will ask.
@@ -225,15 +228,23 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   // synchronous render pass.
   const loadOrder = useCallback(
     () =>
-      fetch(`/api/m/purchase-orders/admin/orders/${orderId}`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
+      Promise.all([
+        fetch(`/api/m/purchase-orders/admin/orders/${orderId}`).then((r) => (r.ok ? r.json() : null)),
+        // Deliveries come back on their own request rather than on the order's,
+        // because the order screen is drawn far more often than a delivery is
+        // booked in and the join is only earning its keep on one of those.
+        fetch(`/api/m/purchase-orders/admin/orders/${orderId}/receipts`)
+          .then((r) => (r.ok ? r.json() : { receipts: [] }))
+          .catch(() => ({ receipts: [] })),
+      ])
+        .then(([data, deliveries]) => {
           if (data?.order) {
             setOrder(data.order)
             setHistory(data.history ?? [])
             setRevisions(data.revisions ?? [])
             setForm(formFromOrder(data.order))
           }
+          setReceipts(deliveries?.receipts ?? [])
           setLoaded(true)
         })
         .catch(() => setLoaded(true)),
@@ -399,6 +410,19 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     } finally {
       setSending(false)
     }
+  }
+
+  // Cancelling the balance of one line, which is NOT an edit: an amendment
+  // rewrites every line wholesale and refuses to touch one that has a delivery
+  // against it, which is exactly the line somebody wants to give up on.
+  async function cancelLine(lineId: string) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/lines/${lineId}`, { method: 'POST' })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not cancel that line.')
+      return
+    }
+    await loadOrder()
   }
 
   async function deleteOrder() {
@@ -637,6 +661,10 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           sending={sending}
           history={history}
           revisions={revisions}
+          receipts={receipts}
+          receivingHref={`/${adminPath}/m/purchase-orders/receiving/${orderId}`}
+          canReceive={access.canReceive}
+          onCancelLine={access.canCreate && mode === 'amend' ? cancelLine : null}
         />
       )}
     </div>
@@ -888,10 +916,16 @@ type ViewProps = {
   sending: boolean
   history: PoAuditEntry[]
   revisions: PoRevisionSummary[]
+  receipts: PoReceiptSummary[]
+  receivingHref: string
+  canReceive: boolean
+  /** Null unless this order is one whose lines can still be given up on. */
+  onCancelLine: ((lineId: string) => void) | null
 }
 
 function OrderView({
   order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
+  receipts, receivingHref, canReceive, onCancelLine,
 }: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -950,32 +984,51 @@ function OrderView({
                 <th style={th}>Their code</th>
                 <th style={thRight}>Ordered</th>
                 <th style={thRight}>Received</th>
+                <th style={thRight}>Still due</th>
                 <th style={thRight}>Invoiced</th>
                 <th style={thRight}>Cost</th>
                 <th style={thRight}>Line total</th>
+                {onCancelLine && <th style={th} />}
               </tr>
             </thead>
             <tbody>
-              {order.lines.map((l) => (
-                <tr key={l.id}>
-                  <td style={td}>
-                    {l.description}
-                    {Number(l.qtyCancelled) > 0 && <div style={muted}>{l.qtyCancelled} cancelled</div>}
-                  </td>
-                  <td style={td}>{l.supplierSku ?? '—'}</td>
-                  <td style={tdRight}>
-                    {l.qty} {l.unit}
-                  </td>
-                  <td style={tdRight}>{l.qtyReceived}</td>
-                  <td style={tdRight}>{l.qtyInvoiced}</td>
-                  <td style={tdRight}>
-                    <Money value={l.unitCost} currency={order.currency} />
-                  </td>
-                  <td style={tdRight}>
-                    <Money value={l.lineTotal} currency={order.currency} />
-                  </td>
-                </tr>
-              ))}
+              {order.lines.map((l) => {
+                const left = outstanding(l)
+                return (
+                  <tr key={l.id}>
+                    <td style={td}>
+                      {l.description}
+                      {Number(l.qtyCancelled) > 0 && <div style={muted}>{l.qtyCancelled} cancelled</div>}
+                    </td>
+                    <td style={td}>{l.supplierSku ?? '—'}</td>
+                    <td style={tdRight}>
+                      {l.qty} {l.unit}
+                    </td>
+                    <td style={tdRight}>{l.qtyReceived}</td>
+                    <td style={tdRight}>{left > 0 ? left : '—'}</td>
+                    <td style={tdRight}>{l.qtyInvoiced}</td>
+                    <td style={tdRight}>
+                      <Money value={l.unitCost} currency={order.currency} />
+                    </td>
+                    <td style={tdRight}>
+                      <Money value={l.lineTotal} currency={order.currency} />
+                    </td>
+                    {onCancelLine && (
+                      <td style={td}>
+                        {left > 0 && (
+                          <button
+                            style={linkButton}
+                            onClick={() => onCancelLine(l.id)}
+                            title="The rest of this line is never coming"
+                          >
+                            Give up on the rest
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -998,6 +1051,38 @@ function OrderView({
           )}
         </div>
       )}
+
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>Deliveries</h2>
+          {canReceive && isReceivable(order.status) && (
+            <Link href={receivingHref} className="btn btn-secondary btn-sm">
+              Book goods in
+            </Link>
+          )}
+        </div>
+        {receipts.length === 0 ? (
+          <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+            {isReceivable(order.status)
+              ? 'Nothing has turned up against this one yet.'
+              : 'Nothing was ever booked in against this order.'}
+          </p>
+        ) : (
+          <table style={table}>
+            <tbody>
+              {receipts.map((r) => (
+                <tr key={r.id}>
+                  <td style={td}>{r.number}</td>
+                  <td style={td}>{formatDay(r.receivedDate)}</td>
+                  <td style={td}>{r.deliveryNoteRef ?? '—'}</td>
+                  <td style={td}>{r.receivedByName ?? 'Somebody'}</td>
+                  <td style={td}>{r.stockApplied ? 'Added to stock' : ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div style={card}>
         <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>The document</h2>
