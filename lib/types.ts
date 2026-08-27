@@ -191,8 +191,22 @@ export type CatalogueProduct = {
   id: string
   name: string
   sku: string | null
+  /** The supplier's own code for it, where the shop has been told one. */
+  supplierSku: string | null
   supplier: string | null
+  /** What the line will be drafted at. The supplier's current list price where
+   *  their catalogue names this code and price lists are switched on, and the
+   *  shop's own `cost_price` otherwise - see `costSource`. */
   costPrice: string | null
+  costSource: PoCostSource
+  /** The list that priced it, so the editor can say where the number came from
+   *  rather than leaving somebody to wonder. Null unless `costSource` is
+   *  CATALOGUE. */
+  catalogueName: string | null
+  /** True when the supplier's list carries this code but has marked it as no
+   *  longer sold. Worth knowing BEFORE the order goes rather than when it is
+   *  queried a week later. */
+  discontinued: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -594,6 +608,10 @@ export type PoReorderSuggestion = {
   available: number
   suggestedQty: number
   unitCost: string
+  /** Where `unitCost` came from - see `unitCostFor` in lib/reordering.ts. */
+  costSource: PoCostSource
+  /** The price list that priced it, where one did. */
+  catalogueName: string | null
   taxRatePercent: string
   supplierSku: string | null
   /** Net of tax, at the suggested quantity. */
@@ -789,4 +807,136 @@ export type PoDashboardSummary = {
   committedValue: string
   overdueCount: number
   billsToLookAt: number
+}
+
+// ---------------------------------------------------------------------------
+// Supplier catalogues
+//
+// The supplier's own price list, kept as data so an order can be drafted at what
+// they are charging today rather than at whatever was typed into the product
+// when it was created. Off by default - `supplierCatalogues` in the settings.
+// ---------------------------------------------------------------------------
+
+/** One price list belonging to one supplier, as the Catalogues tab lists it. */
+export type PoSupplierCatalogue = {
+  id: string
+  supplierId: string
+  supplierName: string
+  name: string
+  nameKey: string
+  /** Where the list came from. Provenance only - nothing fetches it. */
+  sourceUrl: string | null
+  /** The shop catalogue row this was picked from, and its name at the time.
+   *  A soft link: shop may be uninstalled and the row may be renamed or
+   *  deleted, and this record still has to read sensibly afterwards. */
+  shopCatalogueId: string | null
+  shopCatalogueName: string | null
+  currency: string
+  effectiveFrom: string | null
+  lastImportedAt: string | null
+  itemCount: number
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+/** One line of a supplier's price list. */
+export type PoCatalogueItem = {
+  id: string
+  catalogueId: string
+  supplierSku: string
+  /** Trimmed, uppercased and stripped of punctuation - what matching uses. */
+  supplierSkuKey: string
+  description: string
+  unitCost: string | null
+  packSize: string | null
+  minimumOrderQty: string | null
+  leadTimeDays: number | null
+  discountGroup: string | null
+  discontinued: boolean
+}
+
+/** What a supplier's current list says about one code, ready to price a line
+ *  with. Keyed by `supplierSkuKey` wherever a lookup is handed about. */
+export type PoCatalogueCost = {
+  catalogueId: string
+  catalogueName: string
+  supplierSku: string
+  description: string
+  unitCost: string | null
+  discontinued: boolean
+  leadTimeDays: number | null
+  minimumOrderQty: string | null
+}
+
+/** Why a purchase order line is priced the way it is.
+ *
+ *  Worth carrying rather than inferring: "the same number as the product" and
+ *  "the supplier's list happens to agree with the product" look identical on
+ *  the screen and mean quite different things when the price is queried. */
+export const PO_COST_SOURCES = ['CATALOGUE', 'PRODUCT', 'NONE'] as const
+export type PoCostSource = (typeof PO_COST_SOURCES)[number]
+
+/** One thing the supplier's list and the shop disagree about. */
+export type PoCatalogueFinding = {
+  kind: 'UNKNOWN_CODE' | 'DISCONTINUED' | 'PRICE_MOVED'
+  productId: string
+  productName: string
+  /** The code the shop is selling this under - `supplier_sku`, or our own SKU
+   *  where the product has never been given one of theirs. */
+  code: string
+  /** Blank where the finding is that the code is not in the list at all. */
+  catalogueName: string
+  /** The shop's `cost_price`, and the supplier's list price, where both exist. */
+  ourCost: string | null
+  theirCost: string | null
+  /** The sentence shown on the screen. */
+  message: string
+}
+
+/** What the whole reconciliation found, for one supplier. */
+export type PoCatalogueReconciliation = {
+  supplierId: string
+  supplierName: string
+  /** Products the shop files under this supplier, and how many of their codes
+   *  the current lists actually name. */
+  productCount: number
+  matchedCount: number
+  findings: PoCatalogueFinding[]
+  /** Codes in the lists that nothing in the shop is sold under. Not a problem -
+   *  a supplier sells far more than any one shop lists - so it is a count and
+   *  not a finding each. */
+  unsoldCodeCount: number
+}
+
+/** One way an incoming price list differs from the one it replaces.
+ *
+ *  RENAMED is the interesting one and the reason this comparison happens at
+ *  all: a supplier who reissues the same chair under a new code leaves every
+ *  product filed against the old one unbuyable, and nothing else would say so. */
+export type PoCatalogueChange = {
+  kind: 'ADDED' | 'REMOVED' | 'RENAMED' | 'REPRICED' | 'DISCONTINUED' | 'RESTORED'
+  supplierSku: string
+  description: string
+  /** The code this one appears to have become, on a RENAMED. */
+  becomes: string | null
+  wasCost: string | null
+  nowCost: string | null
+  message: string
+}
+
+/** What an import is about to do, shown before it does it. */
+export type PoCatalogueImportPreview = {
+  catalogueId: string
+  catalogueName: string
+  /** Which spreadsheet column filled which field. */
+  columns: Record<string, string | null>
+  itemCount: number
+  blankRows: number
+  duplicateRows: number
+  problems: { row: number; message: string }[]
+  changes: PoCatalogueChange[]
+  /** Everything the comparison found, summarised, because a range refresh can
+   *  easily produce a thousand changes and nobody reads a thousand lines. */
+  changeCounts: Record<PoCatalogueChange['kind'], number>
 }

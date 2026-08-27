@@ -1034,6 +1034,9 @@ function LineEditor({ lines, currency, lineTotals, hasCatalogue, supplierId, onC
                     productName: p.name,
                     description: p.name,
                     ourSku: p.sku ?? '',
+                    // The supplier's own code where the catalogue carries one,
+                    // so a line goes out under the code they will recognise.
+                    supplierSku: p.supplierSku ?? '',
                     unitCost: p.costPrice ?? '0',
                   })
                   setTerm('')
@@ -1042,6 +1045,13 @@ function LineEditor({ lines, currency, lineTotals, hasCatalogue, supplierId, onC
                 {p.name}
               </button>
               {p.sku && <span style={{ marginLeft: '0.5rem', ...muted }}>{p.sku}</span>}
+              {p.costSource === 'CATALOGUE' && (
+                <span style={{ marginLeft: '0.5rem', ...muted }}>
+                  {p.discontinued
+                    ? `No longer sold on ${p.catalogueName}`
+                    : `Priced off ${p.catalogueName}`}
+                </span>
+              )}
             </li>
           ))}
         </ul>

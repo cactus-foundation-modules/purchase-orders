@@ -303,6 +303,7 @@ export function ReorderScreen({ canEdit }: { canEdit: boolean }) {
                     <td style={tdRight}>{line.suggestedQty}</td>
                     <td style={tdRight}>
                       <Money value={line.unitCost} currency={plan.currency} />
+                      {line.costSource === 'CATALOGUE' && <div style={muted}>{line.catalogueName}</div>}
                     </td>
                     <td style={tdRight}>
                       <Money value={line.lineValue} currency={plan.currency} />

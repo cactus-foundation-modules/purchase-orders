@@ -1,5 +1,8 @@
+import { catalogueSkuKey } from './catalogue-import'
 import { fromPence, lineAmounts, scaled } from './totals'
 import type {
+  PoCatalogueCost,
+  PoCostSource,
   PoReorderPlan,
   PoReorderReview,
   PoReorderSuggestion,
@@ -46,6 +49,9 @@ export type ReorderProductFacts = {
   sku: string | null
   /** The free-text supplier name the catalogue files this product under. */
   supplierName: string | null
+  /** The supplier's own code for it, where the shop has been told one. What a
+   *  price list is matched on; blank falls back to `sku`. */
+  supplierSku: string | null
   costPrice: string | null
   stockCount: number | null
   trackInventory: boolean
@@ -78,6 +84,11 @@ export type ReorderFacts = {
   lastCosts: Record<string, ReorderLastCost>
   /** Whether the owner has switched the nightly run on. */
   automatic: boolean
+  /** The suppliers' own price lists, keyed `<supplierId>::<normalised code>`.
+   *  Absent on a site with price lists switched off, which is the default and
+   *  which leaves every suggestion priced exactly as it was before they
+   *  existed - see `unitCostFor`. */
+  catalogueCosts?: Record<string, PoCatalogueCost>
 }
 
 /** Normalised supplier name, matching lib/db.ts's `supplierNameKey`. Repeated
@@ -153,6 +164,53 @@ function isBlocked(value: ReorderSupplierFacts | Blocked): value is Blocked {
 }
 
 /**
+ * What one suggested line is drafted at, and where the figure came from.
+ *
+ * Three sources in order of authority, and the order is the whole point:
+ *
+ * 1. **The supplier's own current price list.** What they are charging today,
+ *    published by them. Nothing beats it.
+ * 2. **What they last charged us.** Off the last order line, which is a real
+ *    price somebody really paid, if not necessarily this month's.
+ * 3. **The shop's `cost_price`.** Frequently whatever was typed in when the
+ *    product was created and never touched again.
+ *
+ * Before price lists existed this was 2 then 3, and that is exactly what it
+ * still is on a site with them switched off - `catalogueCosts` is absent and
+ * the first branch never fires.
+ *
+ * A list entry with no price on it does not win: a code somebody has recorded
+ * without a figure is a code with no price, not a price of nothing.
+ */
+export function unitCostFor(
+  product: ReorderProductFacts,
+  supplierId: string,
+  lastCost: string | null,
+  catalogueCosts?: Record<string, PoCatalogueCost>,
+): { unitCost: string; costSource: PoCostSource; catalogueName: string | null; supplierSku: string | null } {
+  const code = product.supplierSku?.trim() || product.sku?.trim() || ''
+  const listed = code && catalogueCosts ? catalogueCosts[`${supplierId}::${catalogueSkuKey(code)}`] : undefined
+
+  if (listed?.unitCost != null) {
+    return {
+      unitCost: listed.unitCost,
+      costSource: 'CATALOGUE',
+      catalogueName: listed.catalogueName,
+      supplierSku: listed.supplierSku,
+    }
+  }
+  if (lastCost != null) {
+    return { unitCost: lastCost, costSource: 'PRODUCT', catalogueName: null, supplierSku: product.supplierSku }
+  }
+  return {
+    unitCost: product.costPrice ?? '0',
+    costSource: product.costPrice == null ? 'NONE' : 'PRODUCT',
+    catalogueName: null,
+    supplierSku: product.supplierSku,
+  }
+}
+
+/**
  * Everything the levels say should be bought, grouped into one order per
  * supplier, and an honest answer for everything that cannot be.
  *
@@ -215,10 +273,8 @@ export function planReorder(facts: ReorderFacts): PoReorderReview {
 
     const suggestedQty = reorderQuantity(available, rule.reorderPoint, rule.reorderQty)
     const last = facts.lastCosts[`${product.id}::${supplier.id}`]
-    // What this supplier last charged beats what the catalogue thinks the thing
-    // costs: the second is frequently whatever was typed in when the product was
-    // created and never touched again.
-    const unitCost = last?.unitCost ?? product.costPrice ?? '0'
+    const priced = unitCostFor(product, supplier.id, last?.unitCost ?? null, facts.catalogueCosts)
+    const unitCost = priced.unitCost
     const taxRatePercent = reorderTaxRate(supplier)
     const net = lineAmounts({ qty: String(suggestedQty), unitCost }, 'EXCLUSIVE').net
 
@@ -236,8 +292,10 @@ export function planReorder(facts: ReorderFacts): PoReorderReview {
       available,
       suggestedQty,
       unitCost,
+      costSource: priced.costSource,
+      catalogueName: priced.catalogueName,
       taxRatePercent,
-      supplierSku: last?.supplierSku ?? null,
+      supplierSku: priced.supplierSku ?? last?.supplierSku ?? null,
       lineValue: fromPence(net),
       lastSuggestedAt: rule.lastSuggestedAt,
       blockedReason: null,
@@ -272,6 +330,8 @@ function bare(
     available: (inStock ?? 0) + onOrder,
     suggestedQty,
     unitCost: '0',
+    costSource: 'NONE',
+    catalogueName: null,
     taxRatePercent: '0',
     supplierSku: null,
     lineValue: '0.00',

@@ -96,6 +96,19 @@ export const PoConfigSchema = z.object({
   // orders; it is only the job that holds off.
   reorderAutomatic: z.boolean().default(false),
 
+  // Whether suppliers' own price lists are kept here at all.
+  //
+  // OFF by default, and for the same reason the nightly reorder run is. An
+  // empty catalogue prices nothing, so switching this on before a list has been
+  // imported would change no order - but it would put a tab in front of
+  // everybody that most sites will never fill in, and a site that buys from one
+  // supplier at agreed prices is perfectly well served by the cost on the
+  // product. With it on, an order line for a code the supplier's current list
+  // names is drafted at THAT price rather than at whatever the catalogue's
+  // cost_price says, and the Catalogues tab will say which codes have moved,
+  // gone or been discontinued underneath us.
+  supplierCatalogues: z.boolean().default(false),
+
   defaultShipToKind: z.enum(['WAREHOUSE', 'CUSTOMER', 'OTHER']).default('WAREHOUSE'),
   warehouse: ShipToSchema.default({}),
 

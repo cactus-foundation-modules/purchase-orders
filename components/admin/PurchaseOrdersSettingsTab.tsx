@@ -350,6 +350,24 @@ export function PurchaseOrdersSettingsTab() {
       </div>
 
       <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Suppliers&rsquo; price lists</h3>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={config.supplierCatalogues}
+            onChange={(e) => set('supplierCatalogues', e.target.checked)}
+          />
+          Price orders off suppliers&rsquo; own price lists
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          Off, an order line is drafted at what the product says it costs. On, a line for a code one of that
+          supplier&rsquo;s lists names is drafted at THEIR price instead, and the line says which list it came from. You
+          can keep lists on file either way - the Catalogues tab works with this off, and nothing is priced off them
+          until you switch it on.
+        </p>
+      </div>
+
+      <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Chasing and the supplier link</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input type="checkbox" checked={config.chaseEnabled} onChange={(e) => set('chaseEnabled', e.target.checked)} />

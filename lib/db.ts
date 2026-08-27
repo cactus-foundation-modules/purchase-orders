@@ -17,6 +17,7 @@ import type {
 } from './types'
 import type { PoAddress } from './config'
 import { getCapabilities } from './capabilities'
+import { hasSupplierSkuColumn } from './catalogues'
 
 // Everything here is raw SQL. This module owns po_ tables and reads nothing
 // else's through Prisma's client, because the shop and bookkeeping models are
@@ -328,11 +329,17 @@ export async function searchCatalogue(
 
   const like = `%${term.trim()}%`
   const capped = Math.max(1, Math.min(100, Math.trunc(limit)))
+  // `supplier_sku` arrived in shop v0.1.356, so it is probed rather than
+  // assumed. Selecting a column an older shop has never heard of would throw
+  // into the catch below and turn the whole product picker into an empty list.
+  const withCode = await hasSupplierSkuColumn()
   try {
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT "id", "name", "sku", "supplier", "cost_price"
+      SELECT "id", "name", "sku", "supplier", "cost_price",
+             ${withCode ? Prisma.sql`"supplier_sku"` : Prisma.sql`NULL::text AS "supplier_sku"`}
         FROM "shp_products"
-       WHERE ("name" ILIKE ${like} OR "sku" ILIKE ${like})
+       WHERE ("name" ILIKE ${like} OR "sku" ILIKE ${like}
+              ${withCode ? Prisma.sql`OR "supplier_sku" ILIKE ${like}` : Prisma.empty})
          ${supplierNameKeyValue
            ? Prisma.sql`AND lower(regexp_replace(btrim(COALESCE("supplier", '')), '\\s+', ' ', 'g')) = ${supplierNameKeyValue}`
            : Prisma.empty}
@@ -343,8 +350,16 @@ export async function searchCatalogue(
       id: r.id as string,
       name: r.name as string,
       sku: (r.sku as string | null) ?? null,
+      supplierSku: (r.supplier_sku as string | null) ?? null,
       supplier: (r.supplier as string | null) ?? null,
       costPrice: decOrNull(r.cost_price),
+      // The product's own cost until a price list says otherwise. Overlaying
+      // that is `applyCatalogueCosts` in lib/catalogues.ts, called by the route
+      // where the supplier is known - this function is handed a name key, and a
+      // list belongs to a supplier record.
+      costSource: decOrNull(r.cost_price) == null ? 'NONE' : 'PRODUCT',
+      catalogueName: null,
+      discontinued: false,
     }))
   } catch {
     return []

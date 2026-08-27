@@ -1,8 +1,10 @@
 import { prisma } from '@/lib/db/prisma'
 import { getCapabilities } from './capabilities'
+import { catalogueSkuKey } from './catalogue-import'
+import { catalogueCostsBySupplier, costKey } from './catalogues'
 import { reorderNameKey, reorderTaxRate, type ReorderSupplierFacts } from './reordering'
 import { fromPence, scaled } from './totals'
-import type { PoShipTo, PoStatus } from './types'
+import type { PoCatalogueCost, PoCostSource, PoShipTo, PoStatus } from './types'
 
 // Everything needed to turn one customer order into purchase orders, and
 // nothing that writes.
@@ -329,9 +331,19 @@ export type FromOrderLine = {
   qty: number
   ourSku: string | null
   supplierSku: string | null
-  /** The catalogue's cost price. See `planFromOrder` for why it is never the
-   *  price the customer paid. */
+  /** What the line will be bought at. See `planFromOrder` for why it is never
+   *  the price the customer paid. */
   unitCost: string
+  /** Where that figure came from - the supplier's own price list where one
+   *  names this code, and the shop's `cost_price` otherwise. */
+  costSource: PoCostSource
+  /** The price list that priced it, so the panel can say so. Null unless
+   *  `costSource` is CATALOGUE. */
+  catalogueName: string | null
+  /** Set when the supplier's list carries this code and has marked it as no
+   *  longer sold. The line is still drafted - it is a draft, and a person is
+   *  going to read it - but it says so. */
+  discontinued: boolean
   serviceName: string | null
   serviceCost: string | null
 }
@@ -366,19 +378,29 @@ export type FromOrderPlan = {
  * Pure: it takes the facts and returns the plan, so the screen that shows
  * somebody what is about to happen and the run that does it cannot disagree.
  *
- * **The cost is the catalogue's `cost_price`, never the order line's
- * `unit_price`.** On this platform the delivery charge is added straight into
- * the price of the goods at checkout, so `unit_price` is the goods AND the
- * carriage fused into one figure. Paying a supplier that would pay them our
- * customer's delivery charge as though it were part of the product, and then
- * pay the carriage again underneath. The two are identical on a free delivery
- * service, which is why this is worth saying twice.
+ * **The cost is never the order line's `unit_price`.** On this platform the
+ * delivery charge is added straight into the price of the goods at checkout, so
+ * `unit_price` is the goods AND the carriage fused into one figure. Paying a
+ * supplier that would pay them our customer's delivery charge as though it were
+ * part of the product, and then pay the carriage again underneath. The two are
+ * identical on a free delivery service, which is why this is worth saying twice.
+ *
+ * What it IS: the supplier's own current price list where one names this code
+ * and price lists are switched on, and the shop's `cost_price` in every other
+ * case - which is what this did in full before lists existed, and what it still
+ * does on every site that has not switched them on. `catalogueCosts` defaults
+ * to empty, so a caller that knows nothing about lists gets the old behaviour
+ * exactly. Each line says which of the two it used in `costSource`.
  *
  * Nothing is ever dropped in silence: a line with no supplier, no product or no
  * matching supplier record comes back in `skipped` with a sentence a person can
  * act on.
  */
-export function planFromOrder(order: ShopOrderFacts, suppliers: ReorderSupplierFacts[]): FromOrderPlan {
+export function planFromOrder(
+  order: ShopOrderFacts,
+  suppliers: ReorderSupplierFacts[],
+  catalogueCosts: Map<string, PoCatalogueCost> = new Map(),
+): FromOrderPlan {
   const byNameKey = new Map(suppliers.map((s) => [s.nameKey, s]))
   const groups = new Map<string, FromOrderGroup>()
   const skipped: FromOrderSkipped[] = []
@@ -421,16 +443,23 @@ export function planFromOrder(order: ShopOrderFacts, suppliers: ReorderSupplierF
       lines: [],
       carriageAmount: '0.00',
     }
+    // Blank falls back to our own code, which is what a supplier who has never
+    // given us one of theirs will be reading it as anyway.
+    const supplierSku = item.supplierSku ?? item.sku
+    const listed = supplierSku ? catalogueCosts.get(costKey(supplier.id, catalogueSkuKey(supplierSku))) : undefined
+    const listCost = listed?.unitCost ?? null
+
     group.lines.push({
       itemId: item.itemId,
       productId: item.productId,
       productName: item.productName,
       qty: item.quantity,
       ourSku: item.sku,
-      // Blank falls back to our own code, which is what a supplier who has never
-      // given us one of theirs will be reading it as anyway.
-      supplierSku: item.supplierSku ?? item.sku,
-      unitCost: item.costPrice ?? '0',
+      supplierSku,
+      unitCost: listCost ?? item.costPrice ?? '0',
+      costSource: listCost != null ? 'CATALOGUE' : item.costPrice != null ? 'PRODUCT' : 'NONE',
+      catalogueName: listCost != null ? (listed?.catalogueName ?? null) : null,
+      discontinued: listed?.discontinued ?? false,
       serviceName: serviceNameFor(item.lineMeta),
       serviceCost: serviceCostFor(item.lineMeta),
     })
@@ -463,4 +492,39 @@ export function carriageFor(lines: Array<{ qty: number; serviceCost: string | nu
     0,
   )
   return fromPence(Math.round(tenThousandths / 100))
+}
+
+/**
+ * The suppliers this customer order will actually be split between.
+ *
+ * Worked out from the items rather than from the whole supplier list, so the
+ * price-list lookup asks about the two suppliers on this order and not the two
+ * hundred on the site. Pure, and it deliberately repeats the planner's matching
+ * rule rather than sharing a helper with it - the rule is three lines, and a
+ * lookup that quietly disagreed with the grouping would price nothing.
+ */
+export function supplierIdsForOrder(order: ShopOrderFacts, suppliers: ReorderSupplierFacts[]): string[] {
+  const byNameKey = new Map(suppliers.map((s) => [s.nameKey, s]))
+  const ids = new Set<string>()
+  for (const item of order.items) {
+    if (!item.supplierName) continue
+    const supplier = byNameKey.get(reorderNameKey(item.supplierName))
+    if (supplier) ids.add(supplier.id)
+  }
+  return [...ids]
+}
+
+/**
+ * The plan for one customer order, with the suppliers and their price lists
+ * read for you.
+ *
+ * The one entry point both callers use - the panel that previews it and the run
+ * that writes it - so the screen and the button cannot be looking at two
+ * different sets of prices. `planFromOrder` itself stays pure and stays
+ * testable; this is the three lines of reading in front of it.
+ */
+export async function planFromShopOrder(order: ShopOrderFacts): Promise<FromOrderPlan> {
+  const suppliers = await readSuppliersForOrder()
+  const costs = await catalogueCostsBySupplier(supplierIdsForOrder(order, suppliers))
+  return planFromOrder(order, suppliers, costs)
 }

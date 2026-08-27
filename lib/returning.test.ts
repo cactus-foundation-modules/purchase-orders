@@ -21,6 +21,7 @@ const all: PoAccess = {
   canApprove: true,
   canReceive: true,
   canBills: true,
+  canCatalogues: true,
   canSettings: true,
 }
 

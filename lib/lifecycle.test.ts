@@ -10,6 +10,7 @@ const buyer: PoAccess = {
   canApprove: false,
   canReceive: false,
   canBills: false,
+  canCatalogues: false,
   canSettings: false,
 }
 

@@ -5,9 +5,8 @@ import { createOrder, type OrderInput, type OrderLineInput } from './db'
 import {
   listPosForShopOrder,
   livePos,
-  planFromOrder,
+  planFromShopOrder,
   readShopOrder,
-  readSuppliersForOrder,
   type FromOrderGroup,
   type FromOrderPlan,
   type FromOrderSkipped,
@@ -75,7 +74,7 @@ export async function raisePurchaseOrdersFromShopOrder(
     }
   }
 
-  const plan = planFromOrder(order, await readSuppliersForOrder())
+  const plan = await planFromShopOrder(order)
   if (plan.groups.length === 0) {
     return {
       ...empty,

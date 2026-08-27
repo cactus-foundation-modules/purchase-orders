@@ -3,9 +3,8 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import {
   listPosForShopOrder,
   livePos,
-  planFromOrder,
+  planFromShopOrder,
   readShopOrder,
-  readSuppliersForOrder,
 } from '@/modules/purchase-orders/lib/from-order'
 import { formatMoney } from '@/modules/purchase-orders/lib/money'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
@@ -48,7 +47,7 @@ export async function OrderPurchasePanel({
   const live = livePos(raised)
 
   const order = await readShopOrder(orderId)
-  const plan = order ? planFromOrder(order, await readSuppliersForOrder()) : null
+  const plan = order ? await planFromShopOrder(order) : null
 
   const stillOpen = !CLOSED_STATUSES.has(orderStatus)
   const canRaise = access.canCreate && stillOpen && live.length === 0 && (plan?.groups.length ?? 0) > 0
@@ -100,10 +99,29 @@ export async function OrderPurchasePanel({
                       taxRatePercent: group.taxRatePercent,
                     })),
                   })
+                  // Where the prices came from. Only ever said when a price
+                  // list actually did the pricing - on the sites that have not
+                  // switched them on there is nothing to say, and a line saying
+                  // "priced off the product" on every order would be noise.
+                  const priced = group.lines.filter((line) => line.costSource === 'CATALOGUE')
+                  const dropped = group.lines.filter((line) => line.discontinued)
                   return (
                     <li key={group.supplierId}>
                       {group.supplierName} - {group.lines.length}{' '}
                       {group.lines.length === 1 ? 'line' : 'lines'}, {formatMoney(totals.total, group.currency)}
+                      {priced.length > 0 && (
+                        <span style={{ color: 'var(--color-text-secondary)' }}>
+                          {' '}
+                          ({priced.length === group.lines.length ? 'all' : priced.length} priced off their own list)
+                        </span>
+                      )}
+                      {dropped.length > 0 && (
+                        <div style={{ color: 'var(--color-warning)' }}>
+                          {dropped.length === 1
+                            ? `${dropped[0]!.supplierSku ?? dropped[0]!.productName} is marked as no longer sold on their list.`
+                            : `${dropped.length} of these are marked as no longer sold on their list.`}
+                        </div>
+                      )}
                     </li>
                   )
                 })}

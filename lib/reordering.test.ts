@@ -33,6 +33,7 @@ function product(patch: Partial<ReorderProductFacts> = {}): ReorderProductFacts 
     id: 'p1',
     name: 'Task chair',
     sku: 'CHR-1',
+    supplierSku: null,
     supplierName: 'Northern Clay Co.',
     costPrice: '40.00',
     stockCount: 4,

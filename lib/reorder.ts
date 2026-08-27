@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { getCapabilities } from './capabilities'
+import { catalogueCostsBySupplier, hasSupplierSkuColumn } from './catalogues'
 import type {
   ReorderFacts,
   ReorderLastCost,
@@ -142,6 +143,9 @@ export type ReorderCatalogueProduct = {
   id: string
   name: string
   sku: string | null
+  /** The supplier's own code, where the shop has one. Null on a shop older than
+   *  v0.1.356, which has no such column - see `hasSupplierSkuColumn`. */
+  supplierSku: string | null
   supplier: string | null
   costPrice: string | null
   stockCount: number | null
@@ -181,8 +185,10 @@ export async function searchReorderProducts(term: string, limit = 25): Promise<R
   const like = `%${term.trim()}%`
   const capped = Math.max(1, Math.min(100, Math.trunc(limit)))
   try {
+    const withCode = await hasSupplierSkuColumn()
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT "id", "name", "sku", "supplier", "cost_price", "stock_count", "low_stock_threshold", "track_inventory"
+      SELECT "id", "name", "sku", "supplier", "cost_price", "stock_count", "low_stock_threshold", "track_inventory",
+             ${withCode ? Prisma.sql`"supplier_sku"` : Prisma.sql`NULL::text AS "supplier_sku"`}
         FROM "shp_products"
        WHERE "track_inventory" = true
          AND ("name" ILIKE ${like} OR "sku" ILIKE ${like})
@@ -200,6 +206,7 @@ function mapCatalogueProduct(r: Record<string, unknown>): ReorderCatalogueProduc
     id: r.id as string,
     name: r.name as string,
     sku: (r.sku as string | null) ?? null,
+    supplierSku: (r.supplier_sku as string | null) ?? null,
     supplier: (r.supplier as string | null) ?? null,
     costPrice: r.cost_price === null || r.cost_price === undefined ? null : String(r.cost_price),
     stockCount: r.stock_count === null || r.stock_count === undefined ? null : Number(r.stock_count),
@@ -250,14 +257,22 @@ export async function gatherReorderFacts(automatic: boolean): Promise<ReorderFac
     readLastCosts(productIds),
   ])
 
-  return { rules, products, suppliers, onOrder, lastCosts, automatic }
+  // Every supplier's lists, in one query. `catalogueCostsBySupplier` is itself
+  // gated on the settings switch, so this is an empty object on the sites that
+  // have not asked for price lists - and the planner falls straight back to what
+  // the supplier last charged, exactly as it always has.
+  const catalogueCosts = Object.fromEntries(await catalogueCostsBySupplier(suppliers.map((s) => s.id)))
+
+  return { rules, products, suppliers, onOrder, lastCosts, automatic, catalogueCosts }
 }
 
 async function readProducts(ids: string[]): Promise<Record<string, ReorderProductFacts>> {
   if (ids.length === 0) return {}
+  const withCode = await hasSupplierSkuColumn()
   try {
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT "id", "name", "sku", "supplier", "cost_price", "stock_count", "track_inventory"
+      SELECT "id", "name", "sku", "supplier", "cost_price", "stock_count", "track_inventory",
+             ${withCode ? Prisma.sql`"supplier_sku"` : Prisma.sql`NULL::text AS "supplier_sku"`}
         FROM "shp_products"
        WHERE "id" = ANY(${ids}::text[])
     `
@@ -268,6 +283,7 @@ async function readProducts(ids: string[]): Promise<Record<string, ReorderProduc
         id: mapped.id,
         name: mapped.name,
         sku: mapped.sku,
+        supplierSku: mapped.supplierSku,
         supplierName: mapped.supplier,
         costPrice: mapped.costPrice,
         stockCount: mapped.stockCount,

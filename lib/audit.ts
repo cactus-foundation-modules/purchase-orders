@@ -10,7 +10,7 @@ import type { PoAuditEntry } from './types'
 // line failed to write is a bookkeeping annoyance; an approval that failed
 // because the log was busy is an outage.
 
-export type AuditEntityType = 'order' | 'supplier' | 'receipt' | 'return' | 'bill' | 'settings'
+export type AuditEntityType = 'order' | 'supplier' | 'receipt' | 'return' | 'bill' | 'catalogue' | 'settings'
 
 export async function recordAudit(
   entityType: AuditEntityType,

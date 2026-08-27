@@ -4,10 +4,14 @@ import { usePathname } from 'next/navigation'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
 import { TabStrip } from '@/components/admin/TabStrip'
 
-// One sidebar link, seven tabs behind it. The tabs whose screens arrive in a
+// One sidebar link, eight tabs behind it. The tabs whose screens arrive in a
 // later release are here from the start, each with an honest empty state saying
 // so - a tab that appears later reads as a surprise, and one that is missing
 // reads as a module that cannot do the job.
+//
+// Catalogues is here whether or not price lists are switched on, for that same
+// reason: the tab says it is switched off and where the switch is, which beats
+// a tab that materialises the day somebody flicks it.
 
 const TABS = [
   { label: 'Orders', segment: 'orders' },
@@ -15,6 +19,7 @@ const TABS = [
   { label: 'Bills', segment: 'bills' },
   { label: 'Returns', segment: 'returns' },
   { label: 'Suppliers', segment: 'suppliers' },
+  { label: 'Catalogues', segment: 'catalogues' },
   { label: 'Reorder', segment: 'reorder' },
   { label: 'Reports', segment: 'reports' },
 ]

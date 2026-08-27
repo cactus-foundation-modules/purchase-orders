@@ -4,6 +4,7 @@ import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getCapabilities } from '@/modules/purchase-orders/lib/capabilities'
 import { getSupplier, searchCatalogue } from '@/modules/purchase-orders/lib/db'
+import { applyCatalogueCosts, catalogueCostsForSupplier } from '@/modules/purchase-orders/lib/catalogues'
 
 // The product picker behind the line editor. On a site with no catalogue this
 // answers with an empty list and hasCatalogue false, which is what the line
@@ -31,5 +32,13 @@ export async function GET(request: NextRequest) {
   }
 
   const products = await searchCatalogue(term, supplierNameKey)
-  return NextResponse.json({ products, hasCatalogue: true })
+
+  // The supplier's own price beats the shop's cost where their list names the
+  // code. `catalogueCostsForSupplier` is itself gated on the settings switch, so
+  // this is an empty map - and every product comes back untouched - on a site
+  // that has not asked for price lists. No supplier chosen yet means no list to
+  // price from: a price is a price FROM somebody.
+  const costs = supplierId ? await catalogueCostsForSupplier(supplierId) : new Map()
+
+  return NextResponse.json({ products: applyCatalogueCosts(products, costs), hasCatalogue: true })
 }
