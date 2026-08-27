@@ -7,6 +7,7 @@ import { getOrder, getSupplier, recordOrderSent, setOrderStatus } from '@/module
 import { loadPoDocContext, supplierParty, wordingSnapshot } from '@/modules/purchase-orders/lib/document'
 import { sendOrderToSupplier, supplierRecipients } from '@/modules/purchase-orders/lib/email'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
+import { mintPortalLink } from '@/modules/purchase-orders/lib/portal'
 import { canSend } from '@/modules/purchase-orders/lib/lifecycle'
 
 type Params = { params: Promise<{ id: string }> }
@@ -53,8 +54,14 @@ export async function POST(request: NextRequest, { params }: Params) {
   // while it is part received and it is still an amendment.
   const kind = order.sentAt ? 'amended' : 'sent'
 
+  // The supplier's own link, minted here so it can travel in the email. Null
+  // where the owner has the supplier link switched off, in which case the
+  // template's link paragraph renders as nothing at all rather than as an empty
+  // invitation.
+  const portalLink = await mintPortalLink(id, order.number, user.id)
+
   try {
-    await sendOrderToSupplier(ctx, recipients, kind, parsed.data.note ?? null)
+    await sendOrderToSupplier(ctx, recipients, kind, parsed.data.note ?? null, portalLink)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'The order could not be sent.'
     return NextResponse.json({ error: message }, { status: 502 })
@@ -77,7 +84,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     'order',
     id,
     kind === 'sent' ? 'order.sent' : 'order.amendment-sent',
-    { to: recipients.to, cc: recipients.cc, revision: order.revision, note: parsed.data.note ?? null },
+    {
+      to: recipients.to,
+      cc: recipients.cc,
+      revision: order.revision,
+      note: parsed.data.note ?? null,
+      portalLink: Boolean(portalLink),
+    },
     user.id,
   )
 

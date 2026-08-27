@@ -11,8 +11,10 @@ import { poReturnDocumentPdf } from '@/modules/purchase-orders/lib/return-pdf'
 import type { PoDocContext } from '@/modules/purchase-orders/lib/doc-context'
 import type { PoRetDocContext } from '@/modules/purchase-orders/lib/return-doc-context'
 
-// The three emails this module sends a supplier: here is your order, here is the
-// amended one, and please treat that one as cancelled.
+// The emails this module sends a supplier: here is your order, here is the
+// amended one, please treat that one as cancelled, and here are the goods coming
+// back. Plus one that comes the other way, telling the buyer a supplier has
+// answered through their own link.
 //
 // The wording, the on/off switch and the wrapper design all come from core's
 // Settings > Emails (the defaults are in lib/email-templates.ts). This file only
@@ -91,6 +93,23 @@ async function orderAttachment(orderNumber: string): Promise<EmailAttachment | n
   }
 }
 
+/**
+ * The supplier's own link, as the paragraph that goes in the email - or nothing
+ * at all where there is no link to give them.
+ *
+ * Built here, as markup, and declared as a rawTag on both order templates. The
+ * alternative - a bare URL merged into a sentence the template holds - leaves a
+ * site with the portal switched off sending "see it online:" followed by
+ * nothing, which is worse than not mentioning it.
+ */
+function portalLinkHtml(url: string | null): string {
+  if (!url) return ''
+  return (
+    '<p>You can see this order, accept it, or tell us about a delay or a shortage here:<br />' +
+    `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a></p>`
+  )
+}
+
 export type SupplierRecipients = { to: string; cc: string[] }
 
 /** Who the order goes to: the supplier's ordering address, with whatever else the
@@ -117,6 +136,7 @@ export async function sendOrderToSupplier(
   recipients: SupplierRecipients,
   kind: 'sent' | 'amended',
   reason?: string | null,
+  portalLink?: string | null,
 ): Promise<void> {
   if (!isEmailConfigured()) {
     throw new Error('Email is not set up on this site. Add a Brevo key or SMTP details in Settings, Emails.')
@@ -133,6 +153,7 @@ export async function sendOrderToSupplier(
           requiredByDate: order.requiredByDate ?? 'as soon as you can',
           shipTo: shipToHtml(ctx),
           lines: linesHtml(ctx),
+          portalLink: portalLinkHtml(portalLink ?? null),
           siteName: name,
         }
       : {
@@ -141,6 +162,7 @@ export async function sendOrderToSupplier(
           revision: String(order.revision),
           amendmentReason: (reason ?? '').trim(),
           orderTotal: formatMoney(order.total, order.currency),
+          portalLink: portalLinkHtml(portalLink ?? null),
           siteName: name,
         }
 
@@ -191,6 +213,39 @@ export async function sendOrderCancelled(
     })
   } catch (error) {
     console.error('[purchase-orders] cancellation email failed for', orderNumber, error)
+  }
+}
+
+/**
+ * Tells the buyer that a supplier has said something through their link.
+ *
+ * The other direction from everything else in this file, and the reason the
+ * portal is worth having at all: a supplier offering a later date, or saying half
+ * the order is short, is only useful if somebody reads it, and nobody sits
+ * watching a purchase order screen waiting.
+ *
+ * Best-effort and never throws. The supplier has already been told their message
+ * landed by the time this runs, and it did - it is in the order's own history
+ * whether this email sends or not.
+ */
+export async function sendPortalReplyToBuyer(
+  to: string,
+  supplierName: string,
+  orderNumber: string,
+  what: string,
+): Promise<void> {
+  if (!isEmailConfigured() || !to.includes('@')) return
+  try {
+    const rendered = await renderEmailTemplate('purchase-orders.portal-reply', {
+      supplierName: supplierName || 'A supplier',
+      orderNumber,
+      what,
+      siteName: await siteName(),
+    })
+    if (!rendered) return
+    await sendEmail({ to, subject: rendered.subject, html: rendered.html, text: rendered.text })
+  } catch (error) {
+    console.error('[purchase-orders] could not tell anybody about a portal reply to', orderNumber, error)
   }
 }
 

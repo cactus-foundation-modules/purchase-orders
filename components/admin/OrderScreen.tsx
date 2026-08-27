@@ -7,6 +7,8 @@ import { useAdminPath } from '@/components/admin/AdminPathContext'
 import { availableTransitions, canSend, editMode, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
+import { PO_PORTAL_EVENT_LABELS } from '@/modules/purchase-orders/lib/portal-view'
+import type { PoPortalAdminEvent, PoPortalTokenSummary } from '@/modules/purchase-orders/lib/portal-view'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receiving'
 import type {
@@ -180,6 +182,14 @@ function formFromOrder(order: PoOrder): Form {
   }
 }
 
+/** What the supplier link endpoint hands back for one order. */
+type PortalState = {
+  enabled: boolean
+  lifetimeDays: number
+  tokens: PoPortalTokenSummary[]
+  events: PoPortalAdminEvent[]
+}
+
 export type FormDefaults = {
   baseCurrency: string
   defaultShipToKind: 'WAREHOUSE' | 'CUSTOMER' | 'OTHER'
@@ -216,6 +226,13 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const [receipts, setReceipts] = useState<PoReceiptSummary[]>([])
   const [returns, setReturns] = useState<PoReturnSummary[]>([])
   const [bills, setBills] = useState<PoBillSummary[]>([])
+  // The supplier's link, and what they have said through it. Its own request
+  // again: most orders never have a link at all, and the join would be earning
+  // its keep on a minority of order screens.
+  const [portal, setPortal] = useState<PortalState | null>(null)
+  // Handed back once, when it is made. There is no way to ask for it again -
+  // only the hash is stored - so it stays on screen until the page is left.
+  const [newLink, setNewLink] = useState<string | null>(null)
   // Why this order is changing. Only asked for on an amendment - an order the
   // supplier is already holding - and required there, because "what changed" is
   // the first thing they will ask.
@@ -253,8 +270,11 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         fetch(`/api/m/purchase-orders/admin/bills?orderId=${encodeURIComponent(orderId ?? '')}`)
           .then((r) => (r.ok ? r.json() : { bills: [] }))
           .catch(() => ({ bills: [] })),
+        fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal`)
+          .then((r) => (r.ok ? r.json() : null))
+          .catch(() => null),
       ])
-        .then(([data, deliveries, sentBack, invoices]) => {
+        .then(([data, deliveries, sentBack, invoices, supplierLink]) => {
           if (data?.order) {
             setOrder(data.order)
             setHistory(data.history ?? [])
@@ -264,6 +284,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           setReceipts(deliveries?.receipts ?? [])
           setReturns(sentBack?.returns ?? [])
           setBills(invoices?.bills ?? [])
+          setPortal(supplierLink ?? null)
           setLoaded(true)
         })
         .catch(() => setLoaded(true)),
@@ -439,6 +460,64 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/lines/${lineId}`, { method: 'POST' })
     if (!res.ok) {
       setError((await res.json().catch(() => ({}))).error ?? 'Could not cancel that line.')
+      return
+    }
+    await loadOrder()
+  }
+
+  async function loadPortal() {
+    const data = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+    setPortal(data ?? null)
+  }
+
+  async function makePortalLink() {
+    setError(null)
+    setNewLink(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal`, { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(data.error ?? 'Could not make a link for that one.')
+      return
+    }
+    setNewLink(data.url ?? null)
+    await loadPortal()
+  }
+
+  async function revokePortalLink(tokenId: string) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal/${tokenId}`, { method: 'DELETE' })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not stop that link.')
+      return
+    }
+    await loadPortal()
+  }
+
+  async function revokeAllPortalLinks() {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal`, { method: 'DELETE' })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not stop those links.')
+      return
+    }
+    setNewLink(null)
+    await loadPortal()
+  }
+
+  // Taking the supplier up on a date they offered. The whole order reloads
+  // afterwards rather than the date being patched in here, because the date is
+  // now on the order and the order is what the screen draws.
+  async function applyPortalDate(eventId: string) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ eventId }),
+    })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not use that date.')
       return
     }
     await loadOrder()
@@ -689,6 +768,12 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           canReceive={access.canReceive}
           canBills={access.canBills}
           onCancelLine={access.canCreate && mode === 'amend' ? cancelLine : null}
+          portal={portal}
+          newLink={newLink}
+          onMakeLink={access.canCreate ? makePortalLink : null}
+          onRevokeLink={access.canCreate ? revokePortalLink : null}
+          onRevokeAllLinks={access.canCreate ? revokeAllPortalLinks : null}
+          onApplyDate={access.canCreate ? applyPortalDate : null}
         />
       )}
     </div>
@@ -952,12 +1037,21 @@ type ViewProps = {
   canBills: boolean
   /** Null unless this order is one whose lines can still be given up on. */
   onCancelLine: ((lineId: string) => void) | null
+  /** Null until the supplier link has loaded, which is a request of its own. */
+  portal: PortalState | null
+  /** The link just made, shown once. Only its hash is stored, so this is the
+   *  only moment anybody can copy it. */
+  newLink: string | null
+  onMakeLink: (() => void) | null
+  onRevokeLink: ((tokenId: string) => void) | null
+  onRevokeAllLinks: (() => void) | null
+  onApplyDate: ((eventId: string) => void) | null
 }
 
 function OrderView({
   order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
   receipts, returns, bills, receivingHref, returnsBase, billsBase, canReceive, canBills,
-  onCancelLine,
+  onCancelLine, portal, newLink, onMakeLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
 }: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -1241,6 +1335,16 @@ function OrderView({
         )}
       </div>
 
+      <SupplierLinkCard
+        order={order}
+        portal={portal}
+        newLink={newLink}
+        onMakeLink={onMakeLink}
+        onRevokeLink={onRevokeLink}
+        onRevokeAllLinks={onRevokeAllLinks}
+        onApplyDate={onApplyDate}
+      />
+
       {revisions.length > 0 && (
         <div style={card}>
           <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>Revisions</h2>
@@ -1316,6 +1420,151 @@ function OrderView({
           </table>
         )}
       </div>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+type SupplierLinkProps = {
+  order: PoOrder
+  portal: PortalState | null
+  newLink: string | null
+  onMakeLink: (() => void) | null
+  onRevokeLink: ((tokenId: string) => void) | null
+  onRevokeAllLinks: (() => void) | null
+  onApplyDate: ((eventId: string) => void) | null
+}
+
+/**
+ * The supplier's own link to this order, and everything they have said through
+ * it.
+ *
+ * Two things worth knowing about this card. The link itself is shown once, at
+ * the moment it is made, because only its hash is stored - so there is no screen
+ * that can show it again and no backup that leaks it. And what the supplier says
+ * is a PROPOSAL: the only button here that changes the order is the one that
+ * takes them up on a date, and somebody in this building presses it.
+ */
+function SupplierLinkCard({ order, portal, newLink, onMakeLink, onRevokeLink, onRevokeAllLinks, onApplyDate }: SupplierLinkProps) {
+  // Null while it is still loading. Drawing an empty card first and filling it in
+  // afterwards reads as a fault on a fast connection.
+  if (!portal) return null
+
+  const live = portal.tokens.filter((token) => token.live)
+
+  return (
+    <>
+      <div style={card}>
+        <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>The supplier&apos;s link</h2>
+
+        {!portal.enabled ? (
+          <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+            Supplier links are switched off. Turn them on in Settings, Purchase Orders, and the link goes out with the
+            order.
+          </p>
+        ) : (
+          <>
+            <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
+              A link to this one order and nothing else. The supplier can read it, accept it, offer a different date or
+              tell you something is short. They cannot change a thing on it. Links last {portal.lifetimeDays} days and
+              can be stopped at any time.
+            </p>
+
+            {newLink && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                <Field label="The new link" hint="Copy it now. It is not stored, so this is the only time it can be shown.">
+                  <input style={input} readOnly value={newLink} onFocus={(e) => e.currentTarget.select()} />
+                </Field>
+              </div>
+            )}
+
+            {portal.tokens.length === 0 ? (
+              <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
+                {order.sentAt
+                  ? 'No link has been made for this order yet.'
+                  : 'Send this order to the supplier and a link goes out with it.'}
+              </p>
+            ) : (
+              <table style={table}>
+                <thead>
+                  <tr>
+                    <th style={th}>Made</th>
+                    <th style={th}>By</th>
+                    <th style={th}>Until</th>
+                    <th style={th}>Opened</th>
+                    <th style={th} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {portal.tokens.map((token) => (
+                    <tr key={token.id}>
+                      <td style={td}>{formatWhen(token.createdAt)}</td>
+                      <td style={td}>{token.createdByName ?? 'The order email'}</td>
+                      <td style={td}>
+                        {token.revokedAt ? `Stopped ${formatWhen(token.revokedAt)}` : formatWhen(token.expiresAt)}
+                      </td>
+                      <td style={td}>
+                        {token.useCount === 0 ? 'Never' : `${token.useCount} times, last ${formatWhen(token.lastUsedAt)}`}
+                      </td>
+                      <td style={td}>
+                        {token.live && onRevokeLink && (
+                          <button style={{ ...linkButton, color: 'var(--color-danger)' }} onClick={() => onRevokeLink(token.id)}>
+                            Stop it
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+              {onMakeLink && (
+                <button className="btn btn-secondary" onClick={onMakeLink} disabled={!order.sentAt}>
+                  Make a link
+                </button>
+              )}
+              {live.length > 1 && onRevokeAllLinks && (
+                <button className="btn btn-secondary" onClick={onRevokeAllLinks} style={{ color: 'var(--color-danger)' }}>
+                  Stop every link
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {portal.events.length > 0 && (
+        <div style={card}>
+          <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>What the supplier said</h2>
+          <p style={{ ...muted, marginTop: 0 }}>
+            Nothing here has changed the order. A date is yours to accept; anything else is yours to act on.
+          </p>
+          <table style={table}>
+            <tbody>
+              {portal.events.map((event) => (
+                <tr key={event.id}>
+                  <td style={td}>{PO_PORTAL_EVENT_LABELS[event.kind]}</td>
+                  <td style={td}>{event.summary}</td>
+                  <td style={td}>{formatWhen(event.createdAt)}</td>
+                  <td style={td}>
+                    {/* Only where it would actually change something. A button
+                        that sets the date it is already on is a button that
+                        teaches people the buttons do nothing. */}
+                    {event.proposedDate && event.proposedDate !== order.expectedDate && onApplyDate && (
+                      <button style={linkButton} onClick={() => onApplyDate(event.id)}>
+                        Use {event.proposedDate}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   )
 }

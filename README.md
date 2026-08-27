@@ -30,9 +30,17 @@ things.
 - Returns and debit notes, with the credit tracked until it arrives.
 - Supplier bills, with a three-way match against what was ordered and what was
   delivered, their own invoice attached, and a query-or-approve flow.
+- Approved bills and supplier credits going through to the books by themselves,
+  where UK Bookkeeping is installed.
+- Reorder levels per product, and the draft orders that follow when a count
+  drops below one - grouped by supplier and mindful of their minimum.
+- A link for the supplier: their own view of their own order, which they can
+  accept, offer a different date on, or report a shortage against, and change
+  nothing at all. Scoped to one order, expiring, revocable, and stored only as
+  a hash.
 
-Reordering, the supplier portal, the handoff into the books and the reports
-follow in later releases, and their tabs are already in place saying so.
+The reports follow in a later release, and that tab is already in place saying
+so.
 
 ## Installation
 

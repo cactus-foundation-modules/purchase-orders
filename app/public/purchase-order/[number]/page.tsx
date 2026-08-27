@@ -1,11 +1,18 @@
 import type { Metadata } from 'next'
+import { headers } from 'next/headers'
 import { notFound } from 'next/navigation'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { DocumentFooterRegion } from '@/lib/documents/page-settings'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
-import { getOrderIdByNumber } from '@/modules/purchase-orders/lib/db'
+import { getOrder, getOrderIdByNumber } from '@/modules/purchase-orders/lib/db'
+import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { verifyPoPrintToken } from '@/modules/purchase-orders/lib/print-token'
 import { loadPoDocContext, renderPoDocument, renderPoRunningFooter } from '@/modules/purchase-orders/lib/document'
+import { listPortalEvents, resolvePortalToken, touchPortalToken } from '@/modules/purchase-orders/lib/portal'
+import { PORTAL_TOKEN_QUERY_KEY } from '@/modules/purchase-orders/lib/portal-token'
+import { allowPortalReadIp, allowPortalReadToken, portalClientIpFrom } from '@/modules/purchase-orders/lib/portal-rate-limit'
+import { portalView } from '@/modules/purchase-orders/lib/portal-view'
+import { SupplierPortalPanel } from '@/modules/purchase-orders/components/public/SupplierPortalPanel'
 
 // The purchase order document on its own: no site header, no footer, nothing but
 // the designed document. Two consumers - somebody in the admin pressing "View
@@ -17,7 +24,7 @@ import { loadPoDocContext, renderPoDocument, renderPoRunningFooter } from '@/mod
 // against inside a route handler. Rendering it as a page hands the job back to
 // Next, which does have one. Quote for Shop learned that the expensive way.
 //
-// WHO MAY OPEN IT. Two keys and no third:
+// WHO MAY OPEN IT. Three keys and no fourth:
 //
 //  1. A short-lived signed token (lib/print-token.ts). This exists because the
 //     printing browser fetches this page over HTTP from the site's own public
@@ -25,13 +32,17 @@ import { loadPoDocContext, renderPoDocument, renderPoRunningFooter } from '@/mod
 //     it, for as long as the print takes and no longer.
 //  2. A signed-in user holding purchase-orders.access, which is what keeps the
 //     page working after the token behind it has aged out.
+//  3. The supplier's own link (lib/portal.ts): 32 random bytes, stored as a
+//     hash, scoped to this one order, revocable, and only while the owner has
+//     the supplier link switched on. That key also brings the reply panel with
+//     it - the other two get the document and nothing else, because nobody in
+//     this building needs a button that accepts an order on the supplier's
+//     behalf.
 //
 // It is emphatically NOT world-readable by number. Unlike a shop invoice - which
 // a customer files and comes back to years later - a purchase order is what this
 // business is paying and at what price, the numbers run in sequence, and nobody
-// outside the building has any business reading one. The supplier portal, when it
-// arrives, mints its own scoped and revocable token rather than borrowing either
-// of these.
+// outside the building has any business reading one.
 //
 // The site chrome is removed by CSS rather than by opting out of a layout,
 // because a module's public pages are always wrapped by core's public layout and
@@ -76,20 +87,41 @@ export default async function PurchaseOrderDocumentPage({
 
   const query = (await searchParams) ?? {}
   const token = typeof query.t === 'string' ? query.t : null
+  const portalKey = typeof query[PORTAL_TOKEN_QUERY_KEY] === 'string' ? query[PORTAL_TOKEN_QUERY_KEY] : null
   const print = query.print === '1'
 
+  const id = await getOrderIdByNumber(number)
+
   let allowed = verifyPoPrintToken(number, token)
+  let portalTokenId: string | null = null
+
+  // The supplier's key, checked before the session because the supplier has no
+  // session and would otherwise pay for a permission lookup they can never pass.
+  if (!allowed && portalKey) {
+    const requestHeaders = await headers()
+    const ip = portalClientIpFrom((name) => requestHeaders.get(name))
+    // The address limit applies even to a key that turns out to be rubbish,
+    // which is exactly the request worth limiting.
+    if (allowPortalReadIp(ip)) {
+      const config = await getPoConfigCached()
+      const resolved = config.portalEnabled ? await resolvePortalToken(portalKey) : null
+      // Scoped to one order, and the order in the address bar has to be the one
+      // the key was minted for. A supplier who works out that the next number
+      // along exists still cannot open it.
+      if (resolved && resolved.orderId === id && allowPortalReadToken(resolved.hash)) {
+        allowed = true
+        portalTokenId = resolved.id
+      }
+    }
+  }
+
   if (!allowed) {
-    // The session path, checked second because the printing browser has no
-    // session and would otherwise pay for a permission lookup on every page.
     const user = await getSessionFromCookie()
     allowed = Boolean(user && (await getPoAccess(user)).canAccess)
   }
   // A bad token and no session is a 404, not a 403: there is nothing to be gained
   // by confirming that this order number exists.
   if (!allowed) notFound()
-
-  const id = await getOrderIdByNumber(number)
   if (!id) notFound()
 
   const ctx = await loadPoDocContext(id, { print })
@@ -101,10 +133,31 @@ export default async function PurchaseOrderDocumentPage({
   // something nobody can see.
   const runningFooter = print ? await renderPoRunningFooter(ctx) : null
 
+  // The supplier's half of the page. Built from an explicit projection of the
+  // order rather than from the order row, so a field added to po_orders next
+  // year cannot arrive here on its own - see lib/portal-view.ts.
+  // Never on paper: the PDF is the document, and a printed page with a "yes, we
+  // can supply this" button on it helps nobody.
+  let panel = null
+  if (portalTokenId && portalKey && !print) {
+    await touchPortalToken(portalTokenId)
+    const [order, events] = await Promise.all([getOrder(id), listPortalEvents(id, 20)])
+    if (order) {
+      const view = portalView(
+        order,
+        events.map((event) => ({ id: event.id, kind: event.kind, createdAt: event.createdAt, summary: event.summary })),
+      )
+      panel = <SupplierPortalPanel view={view} token={portalKey} />
+    }
+  }
+
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: BARE_CSS }} />
-      <div className="po-view">{document}</div>
+      <div className="po-view">
+        {document}
+        {panel}
+      </div>
       <DocumentFooterRegion>{runningFooter}</DocumentFooterRegion>
     </>
   )

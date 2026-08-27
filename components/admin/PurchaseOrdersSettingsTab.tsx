@@ -380,8 +380,9 @@ export function PurchaseOrdersSettingsTab() {
           </Field>
         </div>
         <p style={{ ...muted, marginTop: '0.5rem' }}>
-          Chasing and the supplier link are both switched on here and arrive with a later release. Nothing is sent to
-          anybody in the meantime.
+          With the link on, every order you send carries one of its own. The supplier can read that order, accept it,
+          offer a different date or say something is short - and change none of it. Each link is listed on the order
+          itself and can be stopped there. Chasing arrives with a later release, and nothing is chased in the meantime.
         </p>
       </div>
 
