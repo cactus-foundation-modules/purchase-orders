@@ -349,3 +349,194 @@ export type PoAwaitingOrder = {
   outstandingLines: number
   receiptCount: number
 }
+
+// ---------------------------------------------------------------------------
+// VAT, as a bill line carries it
+// ---------------------------------------------------------------------------
+//
+// Structurally copied from the bookkeeping module rather than imported: that
+// directory does not exist at build time on a site without the books, and a
+// static import would break the build there. The STRINGS have to match, because
+// Stage 6 hands them straight across - so if bookkeeping ever grows a treatment,
+// this list wants the same one.
+
+export const PO_VAT_RATE_CODES = ['standard', 'reduced', 'zero', 'exempt', 'outside_scope'] as const
+export type PoVatRateCode = (typeof PO_VAT_RATE_CODES)[number]
+
+export const PO_VAT_RATE_LABELS: Record<PoVatRateCode, string> = {
+  standard: 'Standard rate',
+  reduced: 'Reduced rate',
+  zero: 'Zero rated',
+  exempt: 'Exempt',
+  outside_scope: 'Outside the scope of VAT',
+}
+
+export const PO_VAT_TREATMENTS = [
+  'domestic',
+  'ni_eu_acquisition',
+  'ni_eu_dispatch',
+  'reverse_charge_services',
+  'import_pva',
+  'domestic_reverse_charge',
+  'outside_scope',
+] as const
+export type PoVatTreatment = (typeof PO_VAT_TREATMENTS)[number]
+
+export const PO_VAT_TREATMENT_LABELS: Record<PoVatTreatment, string> = {
+  domestic: 'UK domestic',
+  ni_eu_acquisition: 'Goods bought into Northern Ireland from the EU',
+  ni_eu_dispatch: 'Goods sold from Northern Ireland to the EU',
+  reverse_charge_services: 'Services bought from overseas (reverse charge)',
+  import_pva: 'Imported goods (postponed VAT accounting)',
+  domestic_reverse_charge: 'UK reverse charge (e.g. construction)',
+  outside_scope: 'Outside the scope of VAT',
+}
+
+/** A bookkeeping category, as the bill line picker offers it. Empty on a site
+ *  with no books - the column is then a plain string nobody has to fill in. */
+export type PoBookCategory = {
+  id: string
+  code: string
+  name: string
+}
+
+// ---------------------------------------------------------------------------
+// Supplier bills and the three-way match
+// ---------------------------------------------------------------------------
+
+export const BILL_STATUSES = ['DRAFT', 'QUERIED', 'APPROVED', 'POSTED', 'VOID'] as const
+export type PoBillStatus = (typeof BILL_STATUSES)[number]
+
+export const PO_BILL_STATUS_LABELS: Record<PoBillStatus, string> = {
+  DRAFT: 'Draft',
+  QUERIED: 'Queried',
+  APPROVED: 'Approved to pay',
+  POSTED: 'In the books',
+  VOID: 'Void',
+}
+
+export const MATCH_STATUSES = ['NOT_MATCHED', 'MATCHED', 'VARIANCE'] as const
+export type PoMatchStatus = (typeof MATCH_STATUSES)[number]
+
+export const PO_MATCH_STATUS_LABELS: Record<PoMatchStatus, string> = {
+  NOT_MATCHED: 'Nothing to check against',
+  MATCHED: 'Agrees with the order',
+  VARIANCE: 'Does not agree',
+}
+
+/** What kind of disagreement one flag is about. */
+export const BILL_VARIANCE_KINDS = ['PRICE', 'QUANTITY', 'NOT_RECEIVED', 'NOT_ORDERED'] as const
+export type PoBillVarianceKind = (typeof BILL_VARIANCE_KINDS)[number]
+
+/** One thing the three-way match does not like. Stored on the bill as JSON, so
+ *  what was queried - or what somebody approved anyway - is on the record. */
+export type PoBillVariance = {
+  kind: PoBillVarianceKind
+  /** Null for a charge that is on the invoice and not on the order at all. */
+  orderLineId: string | null
+  description: string
+  /** Signed, in the bill's own currency: positive means the supplier wants more. */
+  amount: string
+  /** One sentence a human can act on, written by lib/billing.ts. */
+  message: string
+}
+
+export type PoBillLine = {
+  id: string
+  orderLineId: string | null
+  description: string
+  qty: string
+  unitCost: string
+  taxRatePercent: string
+  taxRateCode: string | null
+  vatTreatment: string | null
+  categoryId: string | null
+  lineTotal: string
+}
+
+export type PoBillSummary = {
+  id: string
+  supplierId: string
+  supplierName: string
+  orderId: string | null
+  orderNumber: string | null
+  supplierInvoiceNumber: string
+  invoiceDate: string
+  dueDate: string | null
+  currency: string
+  total: string
+  status: PoBillStatus
+  matchStatus: PoMatchStatus
+  varianceCount: number
+  hasAttachment: boolean
+  lineCount: number
+  createdByUserId: string | null
+  createdByName: string | null
+  createdAt: string
+}
+
+/** The supplier's own invoice, as it was uploaded. Null when nobody attached one. */
+export type PoBillAttachment = {
+  mediaId: string
+  url: string
+  name: string
+  mimeType: string
+  sizeBytes: number
+}
+
+export type PoBill = PoBillSummary & {
+  fxRate: string
+  subtotal: string
+  carriageAmount: string
+  taxAmount: string
+  variance: PoBillVariance[]
+  queryNote: string | null
+  approvedByUserId: string | null
+  approvedByName: string | null
+  approvedAt: string | null
+  postedAt: string | null
+  booksOutcome: Record<string, unknown>
+  attachment: PoBillAttachment | null
+  updatedAt: string
+  lines: PoBillLine[]
+}
+
+/** One of an order's lines as the bill screen offers it: what was ordered, what
+ *  turned up, and what has already been invoiced on OTHER bills. */
+export type PoBillableLine = {
+  orderLineId: string
+  description: string
+  supplierSku: string | null
+  unit: string
+  unitCost: string
+  taxRatePercent: string
+  taxRateCode: string | null
+  vatTreatment: string | null
+  categoryId: string | null
+  qtyOrdered: string
+  qtyCancelled: string
+  qtyReceived: string
+  /** Across every other bill. This bill's own lines are never in here. */
+  qtyInvoiced: string
+}
+
+/** The order the bill screen is billing against, and its lines. */
+export type PoBillableOrder = {
+  id: string
+  number: string
+  supplierId: string
+  supplierName: string
+  currency: string
+  fxRate: string
+  paymentTerms: string | null
+  lines: PoBillableLine[]
+}
+
+/** What the Bills tab says at the top: the money nobody has agreed to pay yet. */
+export type PoBillTotals = {
+  openCount: number
+  openTotal: string
+  queriedCount: number
+  approvedCount: number
+  approvedTotal: string
+}

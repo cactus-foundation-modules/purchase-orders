@@ -12,6 +12,7 @@ import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receivi
 import type {
   CatalogueProduct,
   PoAuditEntry,
+  PoBillSummary,
   PoOrder,
   PoReceiptSummary,
   PoReturnSummary,
@@ -20,12 +21,14 @@ import type {
   PoSupplier,
 } from '@/modules/purchase-orders/lib/types'
 import {
+  BillStatusBadge,
   card,
   Field,
   formatDay,
   formatWhen,
   input,
   linkButton,
+  MatchBadge,
   Money,
   muted,
   ReturnStatusBadge,
@@ -212,6 +215,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const [revisions, setRevisions] = useState<PoRevisionSummary[]>([])
   const [receipts, setReceipts] = useState<PoReceiptSummary[]>([])
   const [returns, setReturns] = useState<PoReturnSummary[]>([])
+  const [bills, setBills] = useState<PoBillSummary[]>([])
   // Why this order is changing. Only asked for on an amendment - an order the
   // supplier is already holding - and required there, because "what changed" is
   // the first thing they will ask.
@@ -245,8 +249,12 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         fetch(`/api/m/purchase-orders/admin/returns?orderId=${encodeURIComponent(orderId ?? '')}`)
           .then((r) => (r.ok ? r.json() : { returns: [] }))
           .catch(() => ({ returns: [] })),
+        // And the invoices, for the same reason again.
+        fetch(`/api/m/purchase-orders/admin/bills?orderId=${encodeURIComponent(orderId ?? '')}`)
+          .then((r) => (r.ok ? r.json() : { bills: [] }))
+          .catch(() => ({ bills: [] })),
       ])
-        .then(([data, deliveries, sentBack]) => {
+        .then(([data, deliveries, sentBack, invoices]) => {
           if (data?.order) {
             setOrder(data.order)
             setHistory(data.history ?? [])
@@ -255,6 +263,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           }
           setReceipts(deliveries?.receipts ?? [])
           setReturns(sentBack?.returns ?? [])
+          setBills(invoices?.bills ?? [])
           setLoaded(true)
         })
         .catch(() => setLoaded(true)),
@@ -673,9 +682,12 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           revisions={revisions}
           receipts={receipts}
           returns={returns}
+          bills={bills}
           receivingHref={`/${adminPath}/m/purchase-orders/receiving/${orderId}`}
           returnsBase={`/${adminPath}/m/purchase-orders/returns`}
+          billsBase={`/${adminPath}/m/purchase-orders/bills`}
           canReceive={access.canReceive}
+          canBills={access.canBills}
           onCancelLine={access.canCreate && mode === 'amend' ? cancelLine : null}
         />
       )}
@@ -930,17 +942,22 @@ type ViewProps = {
   revisions: PoRevisionSummary[]
   receipts: PoReceiptSummary[]
   returns: PoReturnSummary[]
+  bills: PoBillSummary[]
   receivingHref: string
   /** `/…/m/purchase-orders/returns`, for the list and for raising a new one. */
   returnsBase: string
+  /** `/…/m/purchase-orders/bills`, for the list and for entering a new one. */
+  billsBase: string
   canReceive: boolean
+  canBills: boolean
   /** Null unless this order is one whose lines can still be given up on. */
   onCancelLine: ((lineId: string) => void) | null
 }
 
 function OrderView({
   order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
-  receipts, returns, receivingHref, returnsBase, canReceive, onCancelLine,
+  receipts, returns, bills, receivingHref, returnsBase, billsBase, canReceive, canBills,
+  onCancelLine,
 }: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -1135,6 +1152,51 @@ function OrderView({
                       <Money value={r.creditExpected} currency={r.currency} />
                     </td>
                     <td style={td}>{r.creditRef ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* Invoices against this order. Shown from the moment the order has gone
+          out rather than waiting for a delivery: plenty of suppliers invoice on
+          despatch, and a few ask for the money before anything moves at all. */}
+      {(bills.length > 0 || order.sentAt) && (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>Bills</h2>
+            {canBills && (
+              <Link href={`${billsBase}/new?orderId=${order.id}`} className="btn btn-secondary btn-sm">
+                Enter a bill
+              </Link>
+            )}
+          </div>
+          {bills.length === 0 ? (
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+              Nobody has invoiced you for this one yet.
+            </p>
+          ) : (
+            <table style={table}>
+              <tbody>
+                {bills.map((b) => (
+                  <tr key={b.id}>
+                    <td style={td}>
+                      <Link href={`${billsBase}/${b.id}`} style={{ color: 'var(--color-primary)' }}>
+                        {b.supplierInvoiceNumber}
+                      </Link>
+                    </td>
+                    <td style={td}>{formatDay(b.invoiceDate)}</td>
+                    <td style={td}>
+                      <BillStatusBadge status={b.status} />
+                    </td>
+                    <td style={td}>
+                      <MatchBadge status={b.matchStatus} count={b.varianceCount} />
+                    </td>
+                    <td style={tdRight}>
+                      <Money value={b.total} currency={b.currency} />
+                    </td>
                   </tr>
                 ))}
               </tbody>

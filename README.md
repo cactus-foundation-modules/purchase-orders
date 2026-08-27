@@ -23,10 +23,16 @@ things.
   order value, carriage-paid thresholds.
 - Purchase orders: draft, line editor, approval where you want one, and the
   full order lifecycle through to closed or cancelled.
-- An audit trail of every change.
+- The order as a document you design yourself, printed as a PDF and emailed to
+  the supplier, with every revision kept exactly as it was sent.
+- Receiving: tick off what turned up, flag what came in over, and optionally
+  move a stock count.
+- Returns and debit notes, with the credit tracked until it arrives.
+- Supplier bills, with a three-way match against what was ordered and what was
+  delivered, their own invoice attached, and a query-or-approve flow.
 
-Receiving, returns, supplier bills, reordering and the supplier portal follow
-in later releases, and their tabs are already in place saying so.
+Reordering, the supplier portal, the handoff into the books and the reports
+follow in later releases, and their tabs are already in place saying so.
 
 ## Installation
 
@@ -36,7 +42,9 @@ Install the module from the Cactus admin panel under Modules.
 
 Settings live under Settings, Purchase Orders. Grant `purchase-orders.access`
 to whichever role(s) should see the section, `purchase-orders.create` to raise
-and edit orders, `purchase-orders.approve` to approve them, and
+and edit orders, `purchase-orders.approve` to approve them,
+`purchase-orders.receive` to book deliveries in and send goods back,
+`purchase-orders.bills` to enter and approve supplier invoices, and
 `purchase-orders.settings` to change the settings.
 
 ## License

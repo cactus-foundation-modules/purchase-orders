@@ -1,7 +1,10 @@
 'use client'
 
 import type { CSSProperties, ReactNode } from 'react'
-import { PO_RETURN_STATUS_LABELS, PO_STATUS_LABELS, type PoReturnStatus, type PoStatus } from '@/modules/purchase-orders/lib/types'
+import {
+  PO_BILL_STATUS_LABELS, PO_MATCH_STATUS_LABELS, PO_RETURN_STATUS_LABELS, PO_STATUS_LABELS,
+  type PoBillStatus, type PoMatchStatus, type PoReturnStatus, type PoStatus,
+} from '@/modules/purchase-orders/lib/types'
 
 // The chrome every purchasing screen shares. Colours are semantic tokens
 // throughout: a hardcoded hex in module chrome is a defect on this platform, and
@@ -146,6 +149,75 @@ export function ReturnStatusBadge({ status }: { status: PoReturnStatus }) {
       }}
     >
       {PO_RETURN_STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+/**
+ * The same badge for a supplier's invoice.
+ *
+ * Queried is the one that wants the eye: a bill somebody has asked a question
+ * about and then forgotten is money sitting on the wrong side of an argument.
+ * Approved is a good thing that has happened, and a void one is simply gone.
+ */
+const BILL_TONE: Record<PoBillStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+  DRAFT: 'default',
+  QUERIED: 'warning',
+  APPROVED: 'success',
+  POSTED: 'primary',
+  VOID: 'error',
+}
+
+export function BillStatusBadge({ status }: { status: PoBillStatus }) {
+  return (
+    <span
+      style={{
+        ...TONE_STYLE[BILL_TONE[status]],
+        display: 'inline-block',
+        borderRadius: 999,
+        padding: '2px 8px',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {PO_BILL_STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+/**
+ * What the three-way match made of a bill.
+ *
+ * "Nothing to check against" is deliberately not a warning colour. A bill with
+ * no purchase order behind it is perfectly ordinary - the electricity does not
+ * arrive on a PO - and painting it amber would train everybody to ignore amber
+ * by the time it means something.
+ */
+const MATCH_TONE: Record<PoMatchStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+  NOT_MATCHED: 'default',
+  MATCHED: 'success',
+  VARIANCE: 'warning',
+}
+
+export function MatchBadge({ status, count = 0 }: { status: PoMatchStatus; count?: number }) {
+  const label =
+    status === 'VARIANCE' && count > 0
+      ? `${count === 1 ? 'One thing' : `${count} things`} to look at`
+      : PO_MATCH_STATUS_LABELS[status]
+  return (
+    <span
+      style={{
+        ...TONE_STYLE[MATCH_TONE[status]],
+        display: 'inline-block',
+        borderRadius: 999,
+        padding: '2px 8px',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
     </span>
   )
 }
