@@ -456,6 +456,32 @@ export async function saveBillMatch(
   `
 }
 
+/**
+ * What the books said, and - only when they took it - the stamp that says so.
+ *
+ * Two writes rather than one, and the status write is guarded on APPROVED: the
+ * only path from "approved to pay" to "in the books" is a set of books actually
+ * accepting the entry. A bill that is void, or that somebody unapproved while a
+ * slow handoff was in flight, is left exactly where it is.
+ */
+export async function setBillBooksOutcome(
+  id: string,
+  outcome: unknown,
+  posted: boolean,
+): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE "po_bills"
+       SET "books_outcome" = ${JSON.stringify(outcome ?? {})}::jsonb, "updated_at" = now()
+     WHERE "id" = ${id}
+  `
+  if (!posted) return
+  await prisma.$executeRaw`
+    UPDATE "po_bills"
+       SET "status" = 'POSTED', "posted_at" = now(), "updated_at" = now()
+     WHERE "id" = ${id} AND "status" = 'APPROVED'
+  `
+}
+
 export async function setBillAttachment(id: string, mediaId: string | null): Promise<void> {
   await prisma.$executeRaw`
     UPDATE "po_bills" SET "attachment_media_id" = ${mediaId}, "updated_at" = now()

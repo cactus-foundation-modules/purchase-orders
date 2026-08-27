@@ -133,7 +133,7 @@ export async function listReturns(
 export async function getReturn(id: string): Promise<PoReturn | null> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT ${SUMMARY_SELECT}, t."notes", t."books_outcome", t."stock_applied_at", t."stock_result",
-           t."updated_at"
+           t."fx_rate", t."updated_at"
       ${SUMMARY_FROM}
      WHERE t."id" = ${id}
      LIMIT 1
@@ -168,6 +168,10 @@ export async function getReturn(id: string): Promise<PoReturn | null> {
   return {
     ...mapSummary(r),
     notes: (r.notes as string | null) ?? null,
+    // Base currency per 1 unit of the return's own currency, as the order was
+    // raised at. Null on a return raised before the column was ever filled in,
+    // which is the same thing as "the site's own money".
+    fxRate: r.fx_rate == null ? '1' : dec(r.fx_rate),
     taxAmount: (taxPence / 100).toFixed(2),
     stockAppliedAt: stamp(r.stock_applied_at),
     stockResult: ((r.stock_result as PoStockResult | null) ?? {}) as PoStockResult,
@@ -386,6 +390,16 @@ export async function releaseReturnStock(id: string, result: PoStockResult): Pro
     UPDATE "po_returns"
        SET "stock_applied" = false, "stock_applied_at" = NULL,
            "stock_result" = ${JSON.stringify(result)}::jsonb
+     WHERE "id" = ${id}
+  `
+}
+
+/** What the books said about the credit. Stored whatever the answer was: a
+ *  refusal is the thing the screen needs in order to offer the button again. */
+export async function setReturnBooksOutcome(id: string, outcome: unknown): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE "po_returns"
+       SET "books_outcome" = ${JSON.stringify(outcome ?? {})}::jsonb, "updated_at" = now()
      WHERE "id" = ${id}
   `
 }

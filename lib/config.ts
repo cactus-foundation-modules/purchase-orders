@@ -111,6 +111,13 @@ export const PoConfigSchema = z.object({
   // books may not be installed, and this module never holds a foreign key into
   // another module's tables.
   defaultCategoryId: z.string().default(''),
+
+  // Whether approving a bill also files it in the books. On by default, because
+  // a site that has installed both modules has said what it wants; off is for
+  // the owner whose accountant keys purchases in from the bank instead, and who
+  // would otherwise find every invoice in there twice. Nothing happens either
+  // way on a site with no bookkeeping module - there is nowhere to send it.
+  postApprovedBillsToBooks: z.boolean().default(true),
 })
 
 export type PoConfig = z.infer<typeof PoConfigSchema>

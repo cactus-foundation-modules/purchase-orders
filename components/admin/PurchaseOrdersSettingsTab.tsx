@@ -236,12 +236,20 @@ export function PurchaseOrdersSettingsTab() {
             />
           </Field>
         </div>
-        {!capabilities?.hasBooks && (
-          <p style={{ ...muted, marginTop: '0.375rem' }}>
-            There are no books on this site, so approved bills stop at approved. Install the UK Bookkeeping module and
-            they carry through.
-          </p>
-        )}
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.75rem' }}>
+          <input
+            type="checkbox"
+            checked={config.postApprovedBillsToBooks}
+            disabled={!capabilities?.hasBooks}
+            onChange={(e) => set('postApprovedBillsToBooks', e.target.checked)}
+          />
+          Put approved bills straight into the books
+        </label>
+        <p style={{ ...muted, marginTop: '0.375rem' }}>
+          {capabilities?.hasBooks
+            ? 'Approving a supplier invoice files it as an expense, with its VAT and their own invoice attached. Turn it off if somebody else keys purchases in and you would rather not have them twice. Supplier credits follow the same setting.'
+            : 'There are no books on this site, so approved bills stop at approved. Install the UK Bookkeeping module and they carry through.'}
+        </p>
       </div>
 
       <div style={card}>

@@ -8,6 +8,8 @@ import {
 } from '@/modules/purchase-orders/lib/returning'
 import { ReturnTransitionBody } from '@/modules/purchase-orders/lib/return-body'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
+import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
+import { sendReturnCreditToBooks } from '@/modules/purchase-orders/lib/book-handoff'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -58,9 +60,20 @@ export async function POST(request: NextRequest, { params }: Params) {
     user.id,
   )
 
+  // The credit reaching the books, where there are any. Fired here and nowhere
+  // earlier: a credit promised and never received is not an entry in anybody's
+  // accounts, which is rather the point of keeping the two statuses apart.
+  // Never fails the transition - the money has already come back.
+  const config = await getPoConfigCached()
+  const books =
+    check.to === 'CREDITED' && config.postApprovedBillsToBooks
+      ? await sendReturnCreditToBooks(id)
+      : null
+
   return NextResponse.json({
     ok: true,
     status: check.to,
     outstanding: creditOutstanding(ret.creditExpected, creditReceived ?? ret.creditReceived),
+    books,
   })
 }

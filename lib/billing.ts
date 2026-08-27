@@ -284,9 +284,10 @@ export function varianceTotal(flags: PoBillVariance[]): string {
 // agreeing to pay somebody is a different job from raising the order or booking
 // the goods in, which is exactly why it is a permission of its own.
 //
-// POSTED is not reachable from here. It belongs to the bookkeeping handoff,
-// which is a later release - and a status that says an entry is in the books
-// when no books were ever written to would be the worst kind of lie.
+// POSTED is deliberately not one of these. It is not a decision anybody makes:
+// it is what a set of books accepting the entry looks like from here, so it is
+// written by the handoff and by nothing else. A status that says an entry is in
+// the books when no books were ever written to would be the worst kind of lie.
 
 export type PoBillTransition = 'query' | 'resolve' | 'approve' | 'unapprove' | 'void'
 
@@ -305,7 +306,11 @@ export const BILL_TRANSITIONS: Record<PoBillTransition, Rule> = {
   // anything.
   approve: { from: ['DRAFT', 'QUERIED'], to: 'APPROVED', label: 'Approved to pay' },
   unapprove: { from: ['APPROVED'], to: 'DRAFT', label: 'Approval taken back' },
-  void: { from: ['DRAFT', 'QUERIED', 'APPROVED'], to: 'VOID', label: 'Voided' },
+  // Voiding is allowed from POSTED as well, and it is the ONLY way out of it.
+  // An entry is in a set of books by then, so the way back is a message saying
+  // so - which voiding sends - rather than an approval quietly taken back while
+  // the books go on believing the invoice stands.
+  void: { from: ['DRAFT', 'QUERIED', 'APPROVED', 'POSTED'], to: 'VOID', label: 'Voided' },
 }
 
 export type BillTransitionCheck =
@@ -353,6 +358,19 @@ export function isBillEditable(status: PoBillStatus): boolean {
  *  of - a later delivery must not quietly tidy it away. */
 export function isMatchLive(status: PoBillStatus): boolean {
   return isBillEditable(status)
+}
+
+/**
+ * Whether this bill could be sent to a set of books.
+ *
+ * Approved, because nothing goes to the books until somebody has agreed to pay
+ * it. And posted, because the retry has to work twice: the entry lands, the
+ * supplier's PDF fails to attach behind it, and pressing the button again is how
+ * that gets put right. The books' own side is idempotent, so a second go records
+ * nothing twice.
+ */
+export function isBillPostable(status: PoBillStatus): boolean {
+  return status === 'APPROVED' || status === 'POSTED'
 }
 
 // ---------------------------------------------------------------------------

@@ -11,8 +11,9 @@ import {
   PO_VAT_RATE_CODES, PO_VAT_RATE_LABELS, PO_VAT_TREATMENTS, PO_VAT_TREATMENT_LABELS,
 } from '@/modules/purchase-orders/lib/types'
 import {
-  billTotals, dueDateFor, isBillEditable, varianceTotal, type PoBillTransition,
+  billTotals, dueDateFor, isBillEditable, isBillPostable, varianceTotal, type PoBillTransition,
 } from '@/modules/purchase-orders/lib/billing'
+import { readBooksOutcome } from '@/modules/purchase-orders/lib/books-outcome'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
 import {
   BillStatusBadge, card, Field, formatDay, formatWhen, input, linkButton, localToday, MatchBadge,
@@ -92,6 +93,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
   const [suppliers, setSuppliers] = useState<PoSupplier[]>([])
   const [history, setHistory] = useState<PoAuditEntry[]>([])
   const [transitions, setTransitions] = useState<PoBillTransition[]>([])
+  const [hasBooks, setHasBooks] = useState(false)
   const [order, setOrder] = useState<{ id: string; number: string; supplierName: string } | null>(null)
 
   const [supplierId, setSupplierId] = useState('')
@@ -158,6 +160,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
           setCategories(data.categories ?? [])
           setHistory(data.history ?? [])
           setTransitions(data.transitions ?? [])
+          setHasBooks(Boolean(data.hasBooks))
           setOrder(b.orderId ? { id: b.orderId, number: b.orderNumber ?? '', supplierName: b.supplierName } : null)
           setSupplierId(b.supplierId)
           setInvoiceNumber(b.supplierInvoiceNumber)
@@ -274,6 +277,10 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
     router.refresh()
   }
 
+  // Whatever the books last said about this bill, read defensively: the column
+  // is JSON and a release older than this one wrote nothing into it at all.
+  const booksOutcome = useMemo(() => readBooksOutcome(bill?.booksOutcome), [bill?.booksOutcome])
+
   async function runTransition(transition: PoBillTransition) {
     setError(null)
     setMessage(null)
@@ -289,8 +296,31 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
       setError(data.error ?? 'That did not work.')
       return
     }
-    if (data.orderClosed) setMessage(`Order ${data.orderClosed} has been closed - everything is delivered and invoiced.`)
+    const said: string[] = []
+    if (data.orderClosed) said.push(`Order ${data.orderClosed} has been closed - everything is delivered and invoiced.`)
+    // What the books said travels back with the transition, because a bill that
+    // was approved and then refused by a set of books is two things that
+    // happened and the second one is the one somebody has to act on.
+    if (data.books?.message) said.push(data.books.message)
+    if (said.length > 0) setMessage(said.join(' '))
     setNote('')
+    await load()
+    router.refresh()
+  }
+
+  /** Send it to the books, or try again after they said no. */
+  async function sendToBooks() {
+    setError(null)
+    setMessage(null)
+    setBusy(true)
+    const res = await fetch(`/api/m/purchase-orders/admin/bills/${billId}/books`, { method: 'POST' })
+    setBusy(false)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(data.error ?? 'That did not work.')
+      return
+    }
+    setMessage(data.books?.message ?? 'Sent to the books.')
     await load()
     router.refresh()
   }
@@ -834,6 +864,36 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
               on this platform is, and pretending otherwise would be worse than saying so.
             </p>
           </div>
+
+          {(hasBooks || booksOutcome) && (
+            <div style={card}>
+              <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>In the books</h2>
+              {bill.postedAt && (
+                <p style={{ margin: '0 0 0.5rem' }}>Filed in the accounts {formatWhen(bill.postedAt)}.</p>
+              )}
+              {booksOutcome ? (
+                <p
+                  style={{
+                    margin: '0 0 0.75rem',
+                    color: booksOutcome.ok ? 'var(--color-text)' : 'var(--color-error)',
+                  }}
+                >
+                  {booksOutcome.message}
+                </p>
+              ) : (
+                <p style={{ ...muted, margin: '0 0 0.75rem' }}>
+                  {isBillPostable(bill.status)
+                    ? 'This one has not been sent to the accounts yet.'
+                    : 'A bill goes to the accounts when somebody approves it.'}
+                </p>
+              )}
+              {canBills && isBillPostable(bill.status) && (
+                <button className="btn btn-secondary" onClick={sendToBooks} disabled={busy}>
+                  {booksOutcome ? 'Try the books again' : 'Send it to the books'}
+                </button>
+              )}
+            </div>
+          )}
 
           <div style={card}>
             <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>What happens next</h2>

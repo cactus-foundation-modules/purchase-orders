@@ -11,6 +11,7 @@ import {
   creditOutstanding, isReturnEditable, isReturnStockable, returnableQty, returnTotals,
   type PoReturnTransition,
 } from '@/modules/purchase-orders/lib/returning'
+import { readBooksOutcome } from '@/modules/purchase-orders/lib/books-outcome'
 import {
   card, Field, formatDay, formatWhen, input, linkButton, localToday, Money, muted,
   ReturnStatusBadge, table, td, tdRight, th, thRight,
@@ -60,6 +61,7 @@ export function ReturnScreen({ returnId, orderId, canReceive, canBills }: Props)
   const [history, setHistory] = useState<PoAuditEntry[]>([])
   const [transitions, setTransitions] = useState<PoReturnTransition[]>([])
   const [stockBlocked, setStockBlocked] = useState<string | null>(null)
+  const [hasBooks, setHasBooks] = useState(false)
 
   const [drafts, setDrafts] = useState<Record<string, LineDraft>>({})
   const [reason, setReason] = useState('')
@@ -111,6 +113,7 @@ export function ReturnScreen({ returnId, orderId, canReceive, canBills }: Props)
           setHistory(data.history ?? [])
           setTransitions(data.transitions ?? [])
           setStockBlocked(data.stockBlocked ?? null)
+          setHasBooks(Boolean(data.hasBooks))
           setReason(note.reason ?? '')
           setNotes(note.notes ?? '')
           setRaisedDate(note.raisedDate ?? localToday())
@@ -226,6 +229,27 @@ export function ReturnScreen({ returnId, orderId, canReceive, canBills }: Props)
       setError((await res.json().catch(() => ({}))).error ?? 'That did not work.')
       return
     }
+    await load()
+    router.refresh()
+  }
+
+  // Whatever the books last said about this credit, read defensively: the column
+  // is JSON and a release older than this one wrote nothing into it at all.
+  const booksOutcome = useMemo(() => readBooksOutcome(ret?.booksOutcome), [ret?.booksOutcome])
+
+  /** Send the credit to the books, or try again after they said no. */
+  async function sendToBooks() {
+    setError(null)
+    setMessage(null)
+    setBusy(true)
+    const res = await fetch(`/api/m/purchase-orders/admin/returns/${returnId}/books`, { method: 'POST' })
+    setBusy(false)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(data.error ?? 'That did not work.')
+      return
+    }
+    setMessage(data.books?.message ?? 'Sent to the books.')
     await load()
     router.refresh()
   }
@@ -584,6 +608,31 @@ export function ReturnScreen({ returnId, orderId, canReceive, canBills }: Props)
               <p style={{ ...muted, marginTop: '0.75rem' }}>{stockBlocked}</p>
             )}
           </div>
+
+          {(hasBooks || booksOutcome) && (
+            <div style={card}>
+              <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>In the books</h2>
+              {booksOutcome ? (
+                <p
+                  style={{
+                    margin: '0 0 0.75rem',
+                    color: booksOutcome.ok ? 'var(--color-text)' : 'var(--color-error)',
+                  }}
+                >
+                  {booksOutcome.message}
+                </p>
+              ) : (
+                <p style={{ ...muted, margin: '0 0 0.75rem' }}>
+                  A credit reaches the accounts once the money has actually come back.
+                </p>
+              )}
+              {canBills && (ret.status === 'CREDITED' || ret.status === 'CLOSED') && (
+                <button className="btn btn-secondary" onClick={sendToBooks} disabled={busy}>
+                  {booksOutcome ? 'Try the books again' : 'Send it to the books'}
+                </button>
+              )}
+            </div>
+          )}
 
           <div style={card}>
             <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>What happens next</h2>

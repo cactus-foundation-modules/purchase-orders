@@ -307,6 +307,8 @@ export type PoReturnSummary = {
 
 export type PoReturn = PoReturnSummary & {
   notes: string | null
+  /** Base currency per 1 unit of the return's currency. '1' where nobody set one. */
+  fxRate: string
   taxAmount: string
   stockAppliedAt: string | null
   stockResult: PoStockResult

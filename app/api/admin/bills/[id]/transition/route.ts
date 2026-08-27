@@ -11,6 +11,8 @@ import {
 import { BillTransitionBody, orNull } from '@/modules/purchase-orders/lib/bill-body'
 import { getOrder, setOrderStatus } from '@/modules/purchase-orders/lib/db'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
+import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
+import { sendBillToBooks, sendBillVoidToBooks } from '@/modules/purchase-orders/lib/book-handoff'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -69,6 +71,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     user.id,
   )
 
+  // The books, where there are any and the owner asked for it. Never fails the
+  // transition: the bill is approved, or it is withdrawn, and a bookkeeping
+  // module that is mid-VAT-return or simply broken does not get to undo that.
+  // What it said is stored on the bill, and the screen offers the button again.
+  const books = await handOver(transition, check.to, id, bill.status, note)
+
   // An order that is fully delivered, fully invoiced and owed no credit has
   // nothing left to happen to it. Closing it here saves somebody going round
   // afterwards ticking off orders that finished weeks ago - and it is refused
@@ -76,7 +84,43 @@ export async function POST(request: NextRequest, { params }: Params) {
   // one screen showing that a supplier owes money.
   const autoClosed = check.to === 'APPROVED' ? await maybeCloseOrder(bill.orderId, user.id) : null
 
-  return NextResponse.json({ ok: true, status: check.to, match, orderClosed: autoClosed })
+  // Re-read rather than assume: the handoff is what promotes an approved bill to
+  // "in the books", and the screen has to be told which of the two it ended on.
+  const after = books ? await getBill(id) : null
+
+  return NextResponse.json({
+    ok: true,
+    status: after?.status ?? check.to,
+    match,
+    orderClosed: autoClosed,
+    books,
+  })
+}
+
+/**
+ * The bookkeeping handoff for one transition, or null where there is none.
+ *
+ * Approving files the invoice. Voiding takes it back out again, but only when it
+ * was actually in there - a draft that never reached a set of books has nothing
+ * to withdraw, and telling the books about it would be a message about an entry
+ * that does not exist.
+ */
+async function handOver(
+  transition: PoBillTransition,
+  to: string,
+  billId: string,
+  from: string,
+  note: string | null,
+) {
+  if (transition === 'approve') {
+    const config = await getPoConfigCached()
+    if (!config.postApprovedBillsToBooks) return null
+    return (await sendBillToBooks(billId)).outcome
+  }
+  if (to === 'VOID' && from === 'POSTED') {
+    return sendBillVoidToBooks(billId, note ?? 'Withdrawn in Purchase Orders.')
+  }
+  return null
 }
 
 async function maybeCloseOrder(orderId: string | null, userId: string): Promise<string | null> {

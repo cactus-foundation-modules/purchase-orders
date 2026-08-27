@@ -12,6 +12,7 @@ import {
   availableBillTransitions, billTotals, isBillEditable, isMatchLive, validateBillDrafts,
 } from '@/modules/purchase-orders/lib/billing'
 import { BillBody, billDrafts, orNull } from '@/modules/purchase-orders/lib/bill-body'
+import { hasBookSinks } from '@/modules/purchase-orders/lib/book-sinks'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -37,11 +38,12 @@ export async function GET(_request: NextRequest, { params }: Params) {
 
   if (isMatchLive(existing.status)) await refreshBillMatch(id)
 
-  const [bill, billable, categories, history] = await Promise.all([
+  const [bill, billable, categories, history, hasBooks] = await Promise.all([
     getBill(id),
     existing.orderId ? listBillableLines(existing.orderId, id) : Promise.resolve([]),
     listBookCategories(),
     listAudit('bill', id),
+    hasBookSinks(),
   ])
   if (!bill) return errorResponse('That bill is not here any more.', 404)
 
@@ -50,6 +52,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     billable,
     categories,
     history,
+    hasBooks,
     transitions: availableBillTransitions(bill.status, access),
   })
 }

@@ -12,6 +12,7 @@ import {
 } from '@/modules/purchase-orders/lib/returning'
 import { ReturnBody, returnDrafts, orNull } from '@/modules/purchase-orders/lib/return-body'
 import { reverseReturnStock, stockBlockedReason } from '@/modules/purchase-orders/lib/inventory'
+import { hasBookSinks } from '@/modules/purchase-orders/lib/book-sinks'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -27,10 +28,11 @@ export async function GET(_request: NextRequest, { params }: Params) {
   const ret = await getReturn(id)
   if (!ret) return errorResponse('That return is not here any more.', 404)
 
-  const [returnable, history, stockBlocked] = await Promise.all([
+  const [returnable, history, stockBlocked, hasBooks] = await Promise.all([
     listReturnableLines(ret.orderId),
     listAudit('return', id),
     stockBlockedReason(),
+    hasBookSinks(),
   ])
 
   return NextResponse.json({
@@ -38,6 +40,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
     returnable,
     history,
     stockBlocked,
+    hasBooks,
     transitions: availableReturnTransitions(ret.status, access),
   })
 }
