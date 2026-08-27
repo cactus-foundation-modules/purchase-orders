@@ -200,3 +200,130 @@ export function purchaseOrderDocumentStarters() {
     },
   ]
 }
+
+// ---------------------------------------------------------------------------
+// The returns note
+// ---------------------------------------------------------------------------
+//
+// A second layout type on the same module, collected the same way. Two starters
+// rather than three: a returns note is a docket, not a sales document, and the
+// difference between "plain" and "standard" on one page of it would be a choice
+// nobody wanted to make.
+//
+// The Document style block and the Divider are the SAME blocks the order uses -
+// declared on both layout types in the manifest rather than written twice - so a
+// business that has designed its purchasing paperwork once has designed both.
+
+const RETURN_STANDARD_CONTENT = [
+  logo(48),
+  block('PoRetHeader', 'po-ret-head', {
+    heading: '', fontFamily: '', titleSize: 'medium', sides: 'logo-left', rule: 'hairline',
+    factsLayout: 'columns', numberStyle: 'row',
+    returnLabel: 'Return', showDate: 'yes', dateLabel: 'Date',
+    orderLabel: 'Against order', showAccount: 'yes', accountLabel: 'Account', showIntro: 'yes',
+  }),
+  block('PoRetParties', 'po-ret-parties', {
+    fontFamily: '', order: 'to-first', columns: '2',
+    showTo: 'yes', toLabel: 'Returned to', showFrom: 'yes', fromLabel: 'Returned by',
+    showAccount: 'yes', accountLabel: 'Account',
+    showContact: 'yes', showEmail: 'yes', showPhone: 'yes', showRegistration: 'no',
+  }),
+  block('PoRetReason', 'po-ret-reason', {
+    showHeading: 'yes', heading: 'Why they are going back', capsHeading: 'yes',
+    look: 'panel', fontFamily: '',
+  }),
+  block('PoRetLines', 'po-ret-lines', {
+    fontFamily: '', headStyle: 'rule', rowRules: 'every', zebra: 'no', headCase: 'caps',
+    descWidth: 'auto', showSupplierSku: 'yes', showReceipt: 'yes',
+    itemLabel: 'Description', codeLabel: 'Your code', qtyLabel: 'Going back',
+    costLabel: 'Unit cost', totalLabel: 'Credit due',
+  }),
+  block('PoRetTotals', 'po-ret-totals', {
+    fontFamily: '', emphasis: 'rule', width: 'normal',
+    subtotalLabel: 'Goods', showTax: 'yes', taxLabel: 'VAT',
+    totalLabel: 'Credit due', showCurrency: 'yes', note: '',
+  }),
+  block('PoRetNotes', 'po-ret-notes', {
+    showHeading: 'yes', heading: 'Notes', showTerms: 'yes', termsHeading: 'Terms',
+    capsHeading: 'yes', fontFamily: '',
+  }),
+]
+
+/** What the note renders when nothing at all has been published - which is every
+ *  site until somebody publishes one. Same reasoning as the order: a returns
+ *  note may never refuse to print, because a courier is standing there. */
+export const PO_RETURN_FALLBACK_DATA = {
+  content: RETURN_STANDARD_CONTENT,
+  root: { props: {} },
+  zones: {},
+}
+
+export function purchaseReturnDocumentStarters() {
+  return [
+    {
+      id: 'starter-po-return-standard',
+      name: 'Standard returns note',
+      description: 'Heading, both addresses, why the goods are going back, what is in the box and what you expect to be credited.',
+      publishByDefault: true,
+      data: PO_RETURN_FALLBACK_DATA,
+    },
+    {
+      id: 'starter-po-return-designed',
+      name: 'Designed returns note',
+      description: 'The same note with your own accent colour, the reason in a panel where nobody can miss it, a banded line table and the amount you are owed spelled out at the top.',
+      data: {
+        content: [
+          // Colours are site tokens, not values, exactly as the order's designed
+          // starter uses them - so this is the SHAPE of a designed note in
+          // whatever colours the site already wears.
+          block('PoDocStyle', 'po-ret-style', {
+            accent: 'var(--color-primary)', labelColour: 'var(--color-primary)', titleColour: '',
+            tableHeadBg: 'var(--color-bg-subtle)', tableHeadInk: '',
+            panelBg: 'var(--color-bg-subtle)', panelInk: '', zebraBg: '',
+            ruleWeight: 'thick', corners: 'square', density: 'normal',
+            bodyFont: '', headingFont: '',
+          }),
+          logo(72),
+          block('PoRetHeader', 'po-ret-head', {
+            heading: '', fontFamily: '', titleSize: 'display', sides: 'logo-left', rule: 'accent',
+            factsLayout: 'stacked', numberStyle: 'lead',
+            returnLabel: 'Return', showDate: 'yes', dateLabel: 'Raised',
+            orderLabel: 'Against order', showAccount: 'yes', accountLabel: 'Account', showIntro: 'yes',
+          }),
+          block('PoRetParties', 'po-ret-parties', {
+            fontFamily: '', order: 'to-first', columns: '2',
+            showTo: 'yes', toLabel: 'Returned to', showFrom: 'yes', fromLabel: 'Returned by',
+            showAccount: 'yes', accountLabel: 'Account',
+            showContact: 'yes', showEmail: 'yes', showPhone: 'yes', showRegistration: 'no',
+          }),
+          block('PoRetNotice', 'po-ret-notice', {
+            lead: 'Please credit {{CREDIT_EXPECTED}} against order {{ORDER_NUMBER}}.',
+            body: 'Quote {{RETURN_NUMBER}} on your credit note. Anything sent back to us against this return will be refused.',
+            panelStyle: 'panel', hideWhenEmpty: 'yes', fontFamily: '',
+          }),
+          block('PoRetReason', 'po-ret-reason', {
+            showHeading: 'yes', heading: 'Why they are going back', capsHeading: 'yes',
+            look: 'outline', fontFamily: '',
+          }),
+          block('PoRetLines', 'po-ret-lines', {
+            fontFamily: '', headStyle: 'filled', rowRules: 'every', zebra: 'no', headCase: 'caps',
+            descWidth: 'half', showSupplierSku: 'yes', showReceipt: 'yes',
+            itemLabel: 'Description', codeLabel: 'Your code', qtyLabel: 'Going back',
+            costLabel: 'Unit cost', totalLabel: 'Credit due',
+          }),
+          block('PoRetTotals', 'po-ret-totals', {
+            fontFamily: '', emphasis: 'accent', width: 'normal',
+            subtotalLabel: 'Goods', showTax: 'yes', taxLabel: 'VAT',
+            totalLabel: 'Credit due', showCurrency: 'yes', note: '',
+          }),
+          block('PoRetNotes', 'po-ret-notes', {
+            showHeading: 'yes', heading: 'Notes', showTerms: 'yes', termsHeading: 'Terms',
+            capsHeading: 'yes', fontFamily: '',
+          }),
+        ],
+        root: { props: {} },
+        zones: {},
+      },
+    },
+  ]
+}

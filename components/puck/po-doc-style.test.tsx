@@ -171,7 +171,10 @@ describe('the manifest and the blocks agree', () => {
   it('declares every block on the purchase order document layout type', () => {
     for (const [name] of PARTS) expect(declared).toContain(name)
     expect(declared).toContain('PoDocStyle')
-    expect(declared.length).toBe(13)
+    // Thirteen on the order, plus the returns note's own eight. The style block
+    // and the divider are shared rather than counted twice - see
+    // po-return-doc.test.tsx, which pins that sharing from the other side.
+    expect(declared.length).toBe(21)
   })
 
   it('injects the order into every block that reads one, and no others', () => {

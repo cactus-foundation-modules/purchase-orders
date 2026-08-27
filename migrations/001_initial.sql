@@ -268,6 +268,13 @@ CREATE TABLE IF NOT EXISTS "po_returns" (
     "fx_rate"            NUMERIC(18,8),
     "notes"              TEXT,
     "books_outcome"      JSONB       NOT NULL DEFAULT '{}',
+    -- Whether the goods going back have been taken off the shelf, and what
+    -- happened when they were. Claimed in a conditional UPDATE before anything
+    -- moves, exactly as po_receipts does it, so two clicks cannot deduct twice.
+    -- (Added by 002 as well, for installs that already ran this file.)
+    "stock_applied"      BOOLEAN     NOT NULL DEFAULT false,
+    "stock_applied_at"   TIMESTAMPTZ,
+    "stock_result"       JSONB       NOT NULL DEFAULT '{}',
     "created_by_user_id" TEXT,
     "created_at"         TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_at"         TIMESTAMPTZ NOT NULL DEFAULT now(),

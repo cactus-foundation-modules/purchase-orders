@@ -78,3 +78,54 @@ export function poDocumentBasePath(orderNumber: string): string {
 export function poDocumentPath(orderNumber: string): string {
   return `${poDocumentBasePath(orderNumber)}?t=${signPoPrintToken(orderNumber)}`
 }
+
+// ---------------------------------------------------------------------------
+// Returns notes
+// ---------------------------------------------------------------------------
+//
+// The same door, a different key. A returns note is signed under its own subject
+// string, so a token minted for order PO-00147 cannot open return SRN-00014 even
+// if somebody works out that both are numbers in a URL.
+
+function returnDigest(returnNumber: string, expiresAtMinute: number): string {
+  return createHmac('sha256', getKey())
+    .update(`purchase-return:${returnNumber}:${expiresAtMinute}`)
+    .digest('base64url')
+}
+
+/** A token for one returns note, good for `PRINT_TOKEN_TTL_MINUTES`. */
+export function signPoReturnPrintToken(returnNumber: string, ttlMinutes = PRINT_TOKEN_TTL_MINUTES): string {
+  const expiresAtMinute = Math.floor(Date.now() / 60_000) + Math.max(1, Math.trunc(ttlMinutes))
+  return `${expiresAtMinute}.${returnDigest(returnNumber, expiresAtMinute)}`
+}
+
+/** Whether this token was issued for this returns note and has not aged out.
+ *  Constant-time, and false for anything malformed rather than throwing. */
+export function verifyPoReturnPrintToken(returnNumber: string, token: string | null | undefined): boolean {
+  if (!returnNumber || !token) return false
+  const dot = token.indexOf('.')
+  if (dot < 1) return false
+  const expiresAtMinute = Number(token.slice(0, dot))
+  if (!Number.isSafeInteger(expiresAtMinute)) return false
+  if (expiresAtMinute < Math.floor(Date.now() / 60_000)) return false
+  try {
+    const a = Buffer.from(token.slice(dot + 1))
+    const b = Buffer.from(returnDigest(returnNumber, expiresAtMinute))
+    if (a.length !== b.length) return false
+    return timingSafeEqual(a, b)
+  } catch {
+    return false
+  }
+}
+
+/** The site-relative address of one returns note's document page, with no token
+ *  on it. Nested under the module's own public base rather than claiming a second
+ *  one - a module gets exactly one. */
+export function poReturnDocumentBasePath(returnNumber: string): string {
+  return `/purchase-order/returns/${encodeURIComponent(returnNumber)}`
+}
+
+/** The same, for somebody to click. */
+export function poReturnDocumentPath(returnNumber: string): string {
+  return `${poReturnDocumentBasePath(returnNumber)}?t=${signPoReturnPrintToken(returnNumber)}`
+}

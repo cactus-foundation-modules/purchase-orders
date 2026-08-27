@@ -2,7 +2,8 @@ import { getInventoryAdjuster } from '@/lib/inventory/adjusters'
 import type { InventoryAdjustment, InventoryAdjustmentOutcome } from '@/lib/inventory/adjusters'
 import { getPoConfigCached } from './config'
 import { claimStockApplication, recordStockResult, releaseStockApplication } from './receipts'
-import type { PoReceipt, PoStockLineResult, PoStockResult } from './types'
+import { claimReturnStock, recordReturnStockResult, releaseReturnStock } from './returns'
+import type { PoReceipt, PoReturn, PoStockLineResult, PoStockResult } from './types'
 
 // The stock seam. Everything this module knows about stock is in this file, and
 // what it knows is deliberately almost nothing: core says whether anything on
@@ -16,14 +17,18 @@ export type StockApplyOutcome =
   | { applied: false; reason: string }
   | { applied: true; result: PoStockResult }
 
-/** Why the site would not move stock right now, or null when it would. */
+/** Why the site would not move stock right now, or null when it would.
+ *
+ *  One switch covers both directions. A site where booking a delivery in adds to
+ *  a count but sending goods back never takes them off would drift upwards for
+ *  ever, which is a worse answer than not keeping the count at all. */
 export async function stockBlockedReason(): Promise<string | null> {
   const config = await getPoConfigCached()
   if (!config.stockOnReceipt) {
-    return 'Adding goods to stock is switched off in your purchasing settings.'
+    return 'Changing stock counts from purchasing is switched off in your purchasing settings.'
   }
   if (!getInventoryAdjuster()) {
-    return 'Nothing on this site keeps stock counts, so there is nothing to add to.'
+    return 'Nothing on this site keeps stock counts, so there is nothing to change.'
   }
   return null
 }
@@ -176,6 +181,184 @@ function matchOutcomes(
   const stockable = receipt.lines.filter(
     (l) => l.productId && Number(l.qtyAccepted) > 0 && Number.isInteger(Number(l.qtyAccepted)),
   )
+  return adjustments.map((adjustment, index) => {
+    const outcome = outcomes[index]
+    const line = stockable[index]
+    return {
+      orderLineId: line?.orderLineId ?? '',
+      productId: adjustment.productId,
+      description: line?.description ?? '',
+      ok: outcome?.ok ?? false,
+      before: outcome?.before ?? null,
+      after: outcome?.after ?? null,
+      message: outcome?.message,
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Returns
+// ---------------------------------------------------------------------------
+//
+// The mirror image of a delivery, with one extra rule: goods can only come OFF a
+// count they were put ON. A return raised against a delivery nobody booked onto
+// the shelf, or against an order line that never came in on a recorded delivery
+// at all, has nothing to deduct - and deducting anyway would invent a shortage
+// out of paperwork.
+
+/** Whether this return has anything a stock system could act on. */
+export function hasStockableReturnLines(ret: PoReturn): boolean {
+  return ret.lines.some((l) => l.productId && l.stockedIn && Number(l.qty) > 0)
+}
+
+/**
+ * Takes a return's quantities back off the shelf, exactly once.
+ *
+ * `stock_applied` is claimed FIRST, in a conditional UPDATE, and only then is
+ * anything moved - the same shape `applyReceiptStock` uses, because the same two
+ * clicks are available here and a count deducted twice is a phantom shortage
+ * somebody will spend an afternoon chasing.
+ */
+export async function applyReturnStock(ret: PoReturn, userId: string): Promise<StockApplyOutcome> {
+  const blocked = await stockBlockedReason()
+  if (blocked) return { applied: false, reason: blocked }
+
+  const registered = getInventoryAdjuster()
+  if (!registered) return { applied: false, reason: 'Nothing on this site keeps stock counts.' }
+
+  if (!hasStockableReturnLines(ret)) {
+    return {
+      applied: false,
+      reason:
+        'Nothing on this return came in on a delivery that was added to stock, so there is no count to take it off.',
+    }
+  }
+
+  if (!(await claimReturnStock(ret.id))) {
+    return { applied: false, reason: 'This return has already come off stock.' }
+  }
+
+  const { adjustments, refused } = planReturnAdjustments(ret, userId, -1)
+
+  let result: PoStockResult
+  try {
+    const outcomes = await registered.adjuster.adjust(adjustments)
+    result = {
+      adjuster: registered.adjuster.label,
+      at: new Date().toISOString(),
+      byUserId: userId,
+      lines: [...refused, ...matchReturnOutcomes(ret, adjustments, outcomes)],
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The stock system would not answer.'
+    await releaseReturnStock(ret.id, {
+      adjuster: registered.adjuster.label,
+      at: new Date().toISOString(),
+      byUserId: userId,
+      error: message,
+    })
+    return { applied: false, reason: `Stock was not changed: ${message}` }
+  }
+
+  await recordReturnStockResult(ret.id, result)
+  return { applied: true, result }
+}
+
+/**
+ * Puts back whatever a return took off, when the return itself is deleted.
+ *
+ * Best effort and said out loud, exactly as deleting a delivery is: the return is
+ * being unfiled on somebody's say-so, and refusing that because a stock system
+ * was busy would leave the paperwork and the shelf disagreeing in both
+ * directions at once.
+ */
+export async function reverseReturnStock(ret: PoReturn, userId: string): Promise<PoStockResult | null> {
+  if (!ret.stockApplied) return null
+  const registered = getInventoryAdjuster()
+  if (!registered) return null
+
+  const { adjustments } = planReturnAdjustments(ret, userId, 1)
+  if (adjustments.length === 0) return null
+
+  try {
+    const outcomes = await registered.adjuster.adjust(adjustments)
+    return {
+      adjuster: registered.adjuster.label,
+      at: new Date().toISOString(),
+      byUserId: userId,
+      lines: matchReturnOutcomes(ret, adjustments, outcomes),
+    }
+  } catch (error) {
+    console.error('[purchase-orders] could not put a deleted return back on stock', { return: ret.number, error })
+    return { error: error instanceof Error ? error.message : 'The stock system would not answer.' }
+  }
+}
+
+/** The stockable lines of a return, in the order the adjuster will be asked
+ *  about them. A line with no product, that never went onto a count, or that is
+ *  not a whole number of things cannot become an adjustment. */
+function stockableReturnLines(ret: PoReturn) {
+  return ret.lines.filter(
+    (l) => l.productId && l.stockedIn && Number(l.qty) > 0 && Number.isInteger(Number(l.qty)),
+  )
+}
+
+function planReturnAdjustments(
+  ret: PoReturn,
+  userId: string,
+  direction: 1 | -1,
+): { adjustments: InventoryAdjustment[]; refused: PoStockLineResult[] } {
+  const adjustments: InventoryAdjustment[] = []
+  const refused: PoStockLineResult[] = []
+
+  for (const line of ret.lines) {
+    const qty = Number(line.qty)
+    if (!line.productId || !(qty > 0)) continue
+    if (!line.stockedIn) {
+      refused.push({
+        orderLineId: line.orderLineId,
+        productId: line.productId,
+        description: line.description,
+        ok: false,
+        before: null,
+        after: null,
+        message: 'These never went onto a stock count, so there is nothing to take them off.',
+      })
+      continue
+    }
+    if (!Number.isInteger(qty)) {
+      refused.push({
+        orderLineId: line.orderLineId,
+        productId: line.productId,
+        description: line.description,
+        ok: false,
+        before: null,
+        after: null,
+        message: `${qty} is not a whole number, and a stock count only holds whole ones. Adjust this product by hand.`,
+      })
+      continue
+    }
+    adjustments.push({
+      productId: line.productId,
+      delta: qty * direction,
+      reason: direction < 0 ? 'purchase-order.return' : 'purchase-order.return-deleted',
+      ref: ret.number,
+      userId,
+      note: direction < 0 ? `Returned to supplier on ${ret.number}` : `Return ${ret.number} deleted`,
+    })
+  }
+  return { adjustments, refused }
+}
+
+/** Puts each outcome back beside the line it came from. The adjuster answers in
+ *  the order it was asked, which is the order the stockable lines were planned
+ *  in. */
+function matchReturnOutcomes(
+  ret: PoReturn,
+  adjustments: InventoryAdjustment[],
+  outcomes: InventoryAdjustmentOutcome[],
+): PoStockLineResult[] {
+  const stockable = stockableReturnLines(ret)
   return adjustments.map((adjustment, index) => {
     const outcome = outcomes[index]
     const line = stockable[index]

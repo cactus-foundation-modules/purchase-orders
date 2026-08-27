@@ -14,6 +14,7 @@ import type {
   PoAuditEntry,
   PoOrder,
   PoReceiptSummary,
+  PoReturnSummary,
   PoRevisionSummary,
   PoStatus,
   PoSupplier,
@@ -27,6 +28,7 @@ import {
   linkButton,
   Money,
   muted,
+  ReturnStatusBadge,
   StatusBadge,
   table,
   td,
@@ -209,6 +211,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const [history, setHistory] = useState<PoAuditEntry[]>([])
   const [revisions, setRevisions] = useState<PoRevisionSummary[]>([])
   const [receipts, setReceipts] = useState<PoReceiptSummary[]>([])
+  const [returns, setReturns] = useState<PoReturnSummary[]>([])
   // Why this order is changing. Only asked for on an amendment - an order the
   // supplier is already holding - and required there, because "what changed" is
   // the first thing they will ask.
@@ -236,8 +239,14 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         fetch(`/api/m/purchase-orders/admin/orders/${orderId}/receipts`)
           .then((r) => (r.ok ? r.json() : { receipts: [] }))
           .catch(() => ({ receipts: [] })),
+        // Returns come back on their own request too, and for the same reason:
+        // most orders never have one, and joining for it on every order screen
+        // would be a join earning its keep on a small minority of them.
+        fetch(`/api/m/purchase-orders/admin/returns?orderId=${encodeURIComponent(orderId ?? '')}`)
+          .then((r) => (r.ok ? r.json() : { returns: [] }))
+          .catch(() => ({ returns: [] })),
       ])
-        .then(([data, deliveries]) => {
+        .then(([data, deliveries, sentBack]) => {
           if (data?.order) {
             setOrder(data.order)
             setHistory(data.history ?? [])
@@ -245,6 +254,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
             setForm(formFromOrder(data.order))
           }
           setReceipts(deliveries?.receipts ?? [])
+          setReturns(sentBack?.returns ?? [])
           setLoaded(true)
         })
         .catch(() => setLoaded(true)),
@@ -662,7 +672,9 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           history={history}
           revisions={revisions}
           receipts={receipts}
+          returns={returns}
           receivingHref={`/${adminPath}/m/purchase-orders/receiving/${orderId}`}
+          returnsBase={`/${adminPath}/m/purchase-orders/returns`}
           canReceive={access.canReceive}
           onCancelLine={access.canCreate && mode === 'amend' ? cancelLine : null}
         />
@@ -917,7 +929,10 @@ type ViewProps = {
   history: PoAuditEntry[]
   revisions: PoRevisionSummary[]
   receipts: PoReceiptSummary[]
+  returns: PoReturnSummary[]
   receivingHref: string
+  /** `/…/m/purchase-orders/returns`, for the list and for raising a new one. */
+  returnsBase: string
   canReceive: boolean
   /** Null unless this order is one whose lines can still be given up on. */
   onCancelLine: ((lineId: string) => void) | null
@@ -925,7 +940,7 @@ type ViewProps = {
 
 function OrderView({
   order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
-  receipts, receivingHref, canReceive, onCancelLine,
+  receipts, returns, receivingHref, returnsBase, canReceive, onCancelLine,
 }: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -1083,6 +1098,50 @@ function OrderView({
           </table>
         )}
       </div>
+
+      {/* Only once something has actually turned up. Nothing can go back that
+          never arrived, and a "send something back" button on an order still
+          waiting for its first delivery is an invitation to raise a credit claim
+          the supplier will refuse. */}
+      {(returns.length > 0 || order.lines.some((l) => Number(l.qtyReceived) > 0)) && (
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>Returns</h2>
+            {canReceive && order.lines.some((l) => Number(l.qtyReceived) - Number(l.qtyReturned) > 0) && (
+              <Link href={`${returnsBase}/new?orderId=${order.id}`} className="btn btn-secondary btn-sm">
+                Send something back
+              </Link>
+            )}
+          </div>
+          {returns.length === 0 ? (
+            <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+              Nothing has gone back on this one.
+            </p>
+          ) : (
+            <table style={table}>
+              <tbody>
+                {returns.map((r) => (
+                  <tr key={r.id}>
+                    <td style={td}>
+                      <Link href={`${returnsBase}/${r.id}`} style={{ color: 'var(--color-primary)' }}>
+                        {r.number}
+                      </Link>
+                    </td>
+                    <td style={td}>{formatDay(r.raisedDate)}</td>
+                    <td style={td}>
+                      <ReturnStatusBadge status={r.status} />
+                    </td>
+                    <td style={tdRight}>
+                      <Money value={r.creditExpected} currency={r.currency} />
+                    </td>
+                    <td style={td}>{r.creditRef ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       <div style={card}>
         <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>The document</h2>

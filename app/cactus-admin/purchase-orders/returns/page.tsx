@@ -1,7 +1,7 @@
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import PurchaseOrdersNav from '@/modules/purchase-orders/components/admin/PurchaseOrdersNav'
-import { NotYet } from '@/modules/purchase-orders/components/admin/ui'
+import { ReturnsScreen } from '@/modules/purchase-orders/components/admin/ReturnsScreen'
 
 export const metadata = { title: 'Returns — Purchase Orders — Admin' }
 
@@ -16,11 +16,7 @@ export default async function ReturnsPage() {
   return (
     <div>
       <PurchaseOrdersNav />
-      <div className="page-header"><h1 className="page-title">Returns</h1></div>
-      <NotYet
-        title="Sending things back arrives in a later release"
-        message="This is where you will raise a return against an order, print a note for the courier, and keep track of the credit you are owed until it turns up."
-      />
+      <ReturnsScreen canReceive={access.canReceive} />
     </div>
   )
 }

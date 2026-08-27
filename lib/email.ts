@@ -7,7 +7,9 @@ import { formatMoney, formatQty } from '@/modules/purchase-orders/lib/money'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { poPdfFilename } from '@/modules/purchase-orders/lib/pdf'
 import { poDocumentPdf } from '@/modules/purchase-orders/lib/order-pdf'
+import { poReturnDocumentPdf } from '@/modules/purchase-orders/lib/return-pdf'
 import type { PoDocContext } from '@/modules/purchase-orders/lib/doc-context'
+import type { PoRetDocContext } from '@/modules/purchase-orders/lib/return-doc-context'
 
 // The three emails this module sends a supplier: here is your order, here is the
 // amended one, and please treat that one as cancelled.
@@ -190,4 +192,89 @@ export async function sendOrderCancelled(
   } catch (error) {
     console.error('[purchase-orders] cancellation email failed for', orderNumber, error)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Returns
+// ---------------------------------------------------------------------------
+
+/**
+ * The returns note as a file to travel with the email, or null where it would
+ * not print.
+ *
+ * Never throws, and a failure is only logged - same treatment as the order's
+ * attachment and for the same reason. A note that reaches the supplier's returns
+ * desk with the lines in the body beats one that never reaches them because a
+ * headless browser fell over.
+ */
+async function returnAttachment(returnNumber: string): Promise<EmailAttachment | null> {
+  try {
+    const [bytes, config] = await Promise.all([poReturnDocumentPdf(returnNumber), getPoConfigCached()])
+    return {
+      filename: poPdfFilename(config.returnPdfFilenamePrefix, returnNumber),
+      content: Buffer.from(bytes),
+      contentType: 'application/pdf',
+    }
+  } catch (error) {
+    console.error('[purchase-orders] could not print the document for return', returnNumber, error)
+    return null
+  }
+}
+
+/** The lines going back, assembled here and every value escaped as it goes. */
+function returnLinesHtml(ctx: PoRetDocContext): string {
+  const rows = ctx.ret.lines
+    .map((line) => {
+      const code = line.supplierSku ? ` (${escapeHtml(line.supplierSku)})` : ''
+      return (
+        '<tr>' +
+        `<td>${escapeHtml(line.description)}${code}</td>` +
+        `<td align="center">${escapeHtml(formatQty(line.qty))} ${escapeHtml(line.unit)}</td>` +
+        `<td align="right">${escapeHtml(formatMoney(line.lineTotal, ctx.ret.currency))}</td>` +
+        '</tr>'
+      )
+    })
+    .join('')
+  return `<table cellpadding="6" cellspacing="0" border="0" width="100%">${rows}</table>`
+}
+
+/**
+ * Sends one returns note to its supplier, with the document attached.
+ *
+ * Throws on anything that stops it going, exactly as sending an order does: the
+ * person who pressed the button is owed a real error rather than a green tick and
+ * a box of desks nobody is expecting.
+ */
+export async function sendReturnToSupplier(
+  ctx: PoRetDocContext,
+  recipients: SupplierRecipients,
+): Promise<void> {
+  if (!isEmailConfigured()) {
+    throw new Error('Email is not set up on this site. Add a Brevo key or SMTP details in Settings, Emails.')
+  }
+  const name = await siteName()
+  const { ret } = ctx
+
+  const rendered = await renderEmailTemplate('purchase-orders.return-sent', {
+    supplierName: ctx.supplier.name || 'there',
+    returnNumber: ret.number,
+    orderNumber: ret.orderNumber,
+    creditExpected: formatMoney(ret.creditExpected, ret.currency),
+    reason: (ret.reason ?? '').trim(),
+    lines: returnLinesHtml(ctx),
+    siteName: name,
+  })
+  if (!rendered) {
+    throw new Error('That email has been switched off in Settings, Emails.')
+  }
+
+  const attachment = await returnAttachment(ret.number)
+  await sendEmail({
+    to: recipients.to,
+    ...(recipients.cc.length ? { cc: recipients.cc } : {}),
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+    ...(attachment ? { attachments: [attachment] } : {}),
+  })
 }

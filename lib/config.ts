@@ -54,6 +54,15 @@ const WordingSchema = z.object({
   footerNote: z.string().default(''),
 })
 
+// The return note is a different document with a different job, so it gets its
+// own wording rather than borrowing the order's. "Please supply the following"
+// on a note about goods going back would be quite the mixed message.
+const ReturnWordingSchema = z.object({
+  heading: z.string().default('Returns note'),
+  intro: z.string().default('The goods below are being returned to you. Please raise a credit note against our order number.'),
+  terms: z.string().default(''),
+})
+
 export const PoConfigSchema = z.object({
   // Numbering. The sequence is shared; only the prefix is the owner's.
   orderNumberPrefix: z.string().default('PO-'),
@@ -94,7 +103,9 @@ export const PoConfigSchema = z.object({
 
   organisation: OrganisationSchema.default({}),
   wording: WordingSchema.default({}),
+  returnWording: ReturnWordingSchema.default({}),
   pdfFilenamePrefix: z.string().default('purchase-order'),
+  returnPdfFilenamePrefix: z.string().default('returns-note'),
 
   // Bookkeeping category every bill line falls back to. A plain string: the
   // books may not be installed, and this module never holds a foreign key into

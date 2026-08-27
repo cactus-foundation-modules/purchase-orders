@@ -49,6 +49,10 @@ export function PurchaseOrdersSettingsTab() {
     setConfig((prev) => (prev ? { ...prev, wording: { ...prev.wording, ...patch } } : prev))
   }
 
+  function setReturnWording(patch: Partial<PoConfig['returnWording']>) {
+    setConfig((prev) => (prev ? { ...prev, returnWording: { ...prev.returnWording, ...patch } } : prev))
+  }
+
   async function save() {
     if (!config) return
     setError(null)
@@ -292,6 +296,29 @@ export function PurchaseOrdersSettingsTab() {
           </Field>
           <Field label="Footer note">
             <textarea rows={2} style={input} value={config.wording.footerNote} onChange={(e) => setWording({ footerNote: e.target.value })} />
+          </Field>
+        </div>
+      </div>
+
+      <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Wording on a returns note</h3>
+        <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+          Its own wording, because &ldquo;please supply the following&rdquo; on a note about goods going back is quite the mixed message.
+        </p>
+        <div style={{ display: 'grid', gap: '0.75rem' }}>
+          <Field label="Heading">
+            <input style={input} value={config.returnWording.heading} onChange={(e) => setReturnWording({ heading: e.target.value })} />
+          </Field>
+          <Field label="Opening line">
+            <textarea rows={2} style={input} value={config.returnWording.intro} onChange={(e) => setReturnWording({ intro: e.target.value })} />
+          </Field>
+          <Field label="Terms" hint="Your standing terms about credits - when you expect them and in what condition goods go back.">
+            <textarea rows={3} style={input} value={config.returnWording.terms} onChange={(e) => setReturnWording({ terms: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ marginTop: '0.75rem', maxWidth: 320 }}>
+          <Field label="PDF filename starts with" hint="A saved returns note is named after this and its number.">
+            <input style={input} value={config.returnPdfFilenamePrefix} onChange={(e) => set('returnPdfFilenamePrefix', e.target.value)} />
           </Field>
         </div>
       </div>

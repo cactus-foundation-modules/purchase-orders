@@ -43,6 +43,22 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     transactional: true,
   },
   {
+    key: 'purchase-orders.return-sent',
+    label: 'Returns note sent to supplier',
+    subject: 'Returns note {{returnNumber}} against order {{orderNumber}}',
+    bodyHtml:
+      '<p>Hello {{supplierName}},</p>' +
+      '<p>We are returning the goods below against our order <strong>{{orderNumber}}</strong>. Our returns note {{returnNumber}} is attached.</p>' +
+      '<table>{{lines}}</table>' +
+      '<p>{{reason}}</p>' +
+      '<p>Please raise a credit note for {{creditExpected}}, quoting {{returnNumber}}.</p>' +
+      '<p>Thank you,<br />{{siteName}}</p>',
+    mergeTags: ['supplierName', 'returnNumber', 'orderNumber', 'creditExpected', 'reason', 'lines', 'siteName'],
+    requiredTags: ['returnNumber'],
+    rawTags: ['lines'],
+    transactional: true,
+  },
+  {
     key: 'purchase-orders.cancelled',
     label: 'Purchase order cancelled',
     subject: 'Purchase order {{orderNumber}} cancelled',

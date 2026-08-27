@@ -50,14 +50,14 @@ type HeaderProps = DocProps & {
   titlePt?: number | string; numberPt?: number | string; factsPt?: number | string; introPt?: number | string
 }
 
-const TITLE_SIZES: Record<string, string> = {
+export const TITLE_SIZES: Record<string, string> = {
   small: ' po-doc-title-sm',
   medium: '',
   large: ' po-doc-title-lg',
   display: ' po-doc-title-xl',
 }
 
-const HEAD_RULES: Record<string, string> = {
+export const HEAD_RULES: Record<string, string> = {
   hairline: '',
   accent: ' po-doc-head-accent',
   none: ' po-doc-head-flat',
@@ -216,20 +216,30 @@ export const poDocHeaderPuckRscComponent = { ...poDocHeaderPuckComponent, render
 // them anywhere other than side by side and equal - the buyer at the top under
 // the letterhead, the supplier down beside the dates, different sizes on each.
 
-type PartyProps = DocProps & {
-  heading?: string; align?: string
+// Split out from PartyProps so the returns note's blocks can reuse the address
+// column without dragging the purchase order's own context type in with it. The
+// two documents draw the same two addresses; only what surrounds them differs.
+export type PartyDisplayProps = {
+  fontFamily?: string
   showContact?: string; showEmail?: string; showPhone?: string
   showAccount?: string; showRegistration?: string
+}
+
+export type PartySizeProps = {
   headingPt?: number | string; addressPt?: number | string; registrationPt?: number | string
 }
 
-const PARTY_ALIGN: Record<string, string> = {
+type PartyProps = DocProps & PartyDisplayProps & PartySizeProps & {
+  heading?: string; align?: string
+}
+
+export const PARTY_ALIGN: Record<string, string> = {
   left: '',
   centre: ' po-doc-party-centre',
   right: ' po-doc-party-right',
 }
 
-function partySizes(props: PartyProps) {
+export function partySizes(props: PartySizeProps) {
   return sizeVars({
     '--po-doc-h2-size': props.headingPt,
     '--po-doc-party-size': props.addressPt,
@@ -237,7 +247,7 @@ function partySizes(props: PartyProps) {
   })
 }
 
-type PartyData = {
+export type PartyData = {
   name: string; addressLines: string[]; contactName: string; email: string; phone: string
   vatNumber: string; companyNumber: string; accountNumber: string
 }
@@ -245,12 +255,12 @@ type PartyData = {
 /** One address column, drawn identically wherever it appears - inside the
  *  combined block or on its own. A field with nothing in it is left off rather
  *  than printed as a blank line. */
-function PartyColumn({
+export function PartyColumn({
   party, heading, props, accountLabel,
 }: {
   party: PartyData
   heading: string
-  props: PartyProps
+  props: PartyDisplayProps
   accountLabel?: string
 }) {
   const font = fontStyle(props)
@@ -279,7 +289,7 @@ function PartyColumn({
   )
 }
 
-function hasParty(party: PartyData): boolean {
+export function hasParty(party: PartyData): boolean {
   return Boolean(party.name || party.addressLines.length > 0)
 }
 
@@ -326,20 +336,20 @@ export function PoDocParties(props: PartiesProps) {
   )
 }
 
-const PARTY_DETAIL_FIELDS = {
+export const PARTY_DETAIL_FIELDS = {
   showContact: { type: 'select' as const, label: 'Contact name', options: yesNo },
   showEmail: { type: 'select' as const, label: 'Email address', options: yesNo },
   showPhone: { type: 'select' as const, label: 'Telephone number', options: yesNo },
   showRegistration: { type: 'select' as const, label: 'VAT and company numbers', options: yesNo },
 }
 
-const PARTY_SIZE_FIELDS = {
+export const PARTY_SIZE_FIELDS = {
   headingPt: sizeField('Heading size'),
   addressPt: sizeField('Address size'),
   registrationPt: sizeField('Registration and account number size'),
 }
 
-const PARTY_ALIGN_FIELD = {
+export const PARTY_ALIGN_FIELD = {
   type: 'select' as const,
   label: 'Sits',
   options: [
@@ -565,7 +575,7 @@ type LinesProps = DocProps & {
 
 /** How much of the table the description column takes, leaving the money columns
  *  whatever is left. `auto` is the browser's own guess. */
-const DESC_WIDTHS: Record<string, string> = {
+export const DESC_WIDTHS: Record<string, string> = {
   auto: '',
   half: '50%',
   wide: '60%',
@@ -744,7 +754,7 @@ type TotalsProps = DocProps & {
   rowPt?: number | string; totalPt?: number | string; notePt?: number | string
 }
 
-const TOTALS_WIDTHS: Record<string, string> = { narrow: '18rem', normal: '22rem', wide: '28rem' }
+export const TOTALS_WIDTHS: Record<string, string> = { narrow: '18rem', normal: '22rem', wide: '28rem' }
 
 export function PoDocTotals(props: TotalsProps) {
   const { order } = useCtx(props)

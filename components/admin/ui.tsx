@@ -1,7 +1,7 @@
 'use client'
 
 import type { CSSProperties, ReactNode } from 'react'
-import { PO_STATUS_LABELS, type PoStatus } from '@/modules/purchase-orders/lib/types'
+import { PO_RETURN_STATUS_LABELS, PO_STATUS_LABELS, type PoReturnStatus, type PoStatus } from '@/modules/purchase-orders/lib/types'
 
 // The chrome every purchasing screen shares. Colours are semantic tokens
 // throughout: a hardcoded hex in module chrome is a defect on this platform, and
@@ -112,6 +112,40 @@ export function StatusBadge({ status }: { status: PoStatus }) {
       }}
     >
       {PO_STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+/**
+ * The same badge for a return, off its own shorter list.
+ *
+ * Only two get a colour: the one waiting for money that has not arrived, and the
+ * one that has been dropped. A return sitting at "credit promised" for a month is
+ * the state this whole tab exists to make visible, so it wears the warning.
+ */
+const RETURN_TONE: Record<PoReturnStatus, 'default' | 'primary' | 'success' | 'warning' | 'error'> = {
+  DRAFT: 'default',
+  SENT: 'primary',
+  CREDIT_EXPECTED: 'warning',
+  CREDITED: 'success',
+  CLOSED: 'default',
+  CANCELLED: 'error',
+}
+
+export function ReturnStatusBadge({ status }: { status: PoReturnStatus }) {
+  return (
+    <span
+      style={{
+        ...TONE_STYLE[RETURN_TONE[status]],
+        display: 'inline-block',
+        borderRadius: 999,
+        padding: '2px 8px',
+        fontSize: 'var(--text-xs)',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {PO_RETURN_STATUS_LABELS[status]}
     </span>
   )
 }

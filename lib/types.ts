@@ -247,6 +247,97 @@ export type PoReceipt = PoReceiptSummary & {
   lines: PoReceiptLine[]
 }
 
+// ---------------------------------------------------------------------------
+// Returns and debit notes
+// ---------------------------------------------------------------------------
+
+export const RETURN_STATUSES = ['DRAFT', 'SENT', 'CREDIT_EXPECTED', 'CREDITED', 'CLOSED', 'CANCELLED'] as const
+export type PoReturnStatus = (typeof RETURN_STATUSES)[number]
+
+export const PO_RETURN_STATUS_LABELS: Record<PoReturnStatus, string> = {
+  DRAFT: 'Draft',
+  SENT: 'Sent',
+  CREDIT_EXPECTED: 'Credit promised',
+  CREDITED: 'Credited',
+  CLOSED: 'Closed',
+  CANCELLED: 'Cancelled',
+}
+
+export type PoReturnLine = {
+  id: string
+  orderLineId: string
+  /** Which delivery these came in on, where anybody said. Null on a return
+   *  raised straight off the order rather than off a delivery note. */
+  receiptLineId: string | null
+  qty: string
+  unitCost: string
+  taxRatePercent: string
+  lineTotal: string
+  /** Off the order line, for display - never stored twice. */
+  description: string
+  supplierSku: string | null
+  productId: string | null
+  unit: string
+  /** True when the delivery these came in on was added to stock, which is the
+   *  only case in which sending them back has a count to take them off. */
+  stockedIn: boolean
+}
+
+export type PoReturnSummary = {
+  id: string
+  number: string
+  orderId: string
+  orderNumber: string
+  supplierId: string
+  supplierName: string
+  status: PoReturnStatus
+  reason: string | null
+  raisedDate: string | null
+  sentAt: string | null
+  currency: string
+  creditExpected: string
+  creditReceived: string
+  creditRef: string | null
+  stockApplied: boolean
+  lineCount: number
+  createdByUserId: string | null
+  createdByName: string | null
+  createdAt: string
+}
+
+export type PoReturn = PoReturnSummary & {
+  notes: string | null
+  taxAmount: string
+  stockAppliedAt: string | null
+  stockResult: PoStockResult
+  booksOutcome: Record<string, unknown>
+  updatedAt: string
+  lines: PoReturnLine[]
+}
+
+/** One of an order's lines as the "send something back" screen offers it: what
+ *  came in, what has already gone back, and which deliveries it arrived on. */
+export type PoReturnableLine = {
+  orderLineId: string
+  description: string
+  supplierSku: string | null
+  productId: string | null
+  unit: string
+  unitCost: string
+  taxRatePercent: string
+  qtyReceived: string
+  qtyReturned: string
+  /** The deliveries this line arrived on, newest first. */
+  receipts: {
+    receiptLineId: string
+    receiptId: string
+    receiptNumber: string
+    receivedDate: string
+    qtyAccepted: string
+    stockApplied: boolean
+  }[]
+}
+
 /** An order with something still to come, as the Receiving tab lists them. */
 export type PoAwaitingOrder = {
   id: string

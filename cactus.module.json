@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
@@ -153,7 +153,8 @@
       "component": "poDocStylePuckComponent",
       "rscComponent": "poDocStylePuckRscComponent",
       "layoutTypes": [
-        "purchaseOrderDocument"
+        "purchaseOrderDocument",
+        "purchaseReturnDocument"
       ]
     },
     {
@@ -171,7 +172,80 @@
       "component": "poDocDividerPuckComponent",
       "rscComponent": "poDocDividerPuckRscComponent",
       "layoutTypes": [
-        "purchaseOrderDocument"
+        "purchaseOrderDocument",
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetHeader",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetHeaderPuckComponent",
+      "rscComponent": "poRetHeaderPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetParties",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetPartiesPuckComponent",
+      "rscComponent": "poRetPartiesPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetTo",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetToPuckComponent",
+      "rscComponent": "poRetToPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetLines",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetLinesPuckComponent",
+      "rscComponent": "poRetLinesPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetTotals",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetTotalsPuckComponent",
+      "rscComponent": "poRetTotalsPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetReason",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetReasonPuckComponent",
+      "rscComponent": "poRetReasonPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetNotes",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetNotesPuckComponent",
+      "rscComponent": "poRetNotesPuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
+      ]
+    },
+    {
+      "type": "PoRetNotice",
+      "import": "./components/puck/po-return-parts",
+      "component": "poRetNoticePuckComponent",
+      "rscComponent": "poRetNoticePuckRscComponent",
+      "layoutTypes": [
+        "purchaseReturnDocument"
       ]
     }
   ],
@@ -183,6 +257,14 @@
         "label": "Purchase order document",
         "starterImport": "./lib/starterLayouts",
         "starterExport": "purchaseOrderDocumentStarters",
+        "pageSettingsImport": "./lib/doc-page-settings",
+        "pageSettingsExport": "poDocPageSettings"
+      },
+      {
+        "key": "purchaseReturnDocument",
+        "label": "Returns note",
+        "starterImport": "./lib/starterLayouts",
+        "starterExport": "purchaseReturnDocumentStarters",
         "pageSettingsImport": "./lib/doc-page-settings",
         "pageSettingsExport": "poDocPageSettings"
       }
