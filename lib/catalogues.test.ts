@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { parseCsv } from './csv'
 import {
+  applyRetailDiscount,
   catalogueNameKey,
   catalogueSkuKey,
   parseCatalogueCsv,
@@ -200,6 +201,42 @@ describe('parseCatalogueCsv', () => {
     expect(result.columns.supplierSku).toBe('Code')
     expect(result.columns.discountGroup).toBeNull()
     expect(result.items[0]!.discountGroup).toBeNull()
+  })
+})
+
+describe('applyRetailDiscount', () => {
+  it('takes the supplier discount off every price', () => {
+    const out = applyRetailDiscount([item({ unitCost: '100.0000' }), item({ supplierSkuKey: 'B', unitCost: '41.6700' })], '25')
+    expect(out[0]!.unitCost).toBe('75.0000')
+    expect(out[1]!.unitCost).toBe('31.2525')
+  })
+
+  it('works in whole ten-thousandths rather than in floating point', () => {
+    // 0.1 + 0.2 arithmetic on this one gives 31.252499999999998 and a price a
+    // hundredth of a penny light on every line of a twenty thousand row list.
+    expect(applyRetailDiscount([item({ unitCost: '41.6700' })], '25.00')[0]!.unitCost).toBe('31.2525')
+    // 12.5% of 19.99 is 2.49875, and it is the DISCOUNT that rounds - half up,
+    // exactly as a line discount does in lib/totals.ts - so the price left is
+    // 17.4912 rather than the 17.4913 rounding the answer would give.
+    expect(applyRetailDiscount([item({ unitCost: '19.9900' })], '12.5')[0]!.unitCost).toBe('17.4912')
+  })
+
+  it('hands the list straight back when there is no discount to take', () => {
+    const items = [item()]
+    expect(applyRetailDiscount(items, null)).toBe(items)
+    expect(applyRetailDiscount(items, '0')).toBe(items)
+    expect(applyRetailDiscount(items, undefined)).toBe(items)
+  })
+
+  it('leaves a row with no price without one, rather than inventing a zero', () => {
+    expect(applyRetailDiscount([item({ unitCost: null })], '25')[0]!.unitCost).toBeNull()
+  })
+
+  it('changes nothing else about the row', () => {
+    const [out] = applyRetailDiscount([item({ description: 'Task chair', discontinued: true })], '10')
+    expect(out!.description).toBe('Task chair')
+    expect(out!.discontinued).toBe(true)
+    expect(out!.supplierSkuKey).toBe('DS1234')
   })
 })
 

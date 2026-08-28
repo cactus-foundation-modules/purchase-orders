@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS "po_supplier_catalogues" (
     "shop_catalogue_id"   TEXT,
     "shop_catalogue_name" TEXT,
     "currency"            TEXT        NOT NULL DEFAULT 'GBP',
+    -- Whether the prices on this list are already trade net, or are retail with
+    -- the supplier's discount still to come off. Arrives in 005 for installs
+    -- that already have this file; 'NET' is how every list imported before that
+    -- was read, so the default changes nothing already on file.
+    "price_basis"         TEXT        NOT NULL DEFAULT 'NET',
     -- When the supplier says this list starts applying. Free to leave blank.
     "effective_from"      DATE,
     "last_imported_at"    TIMESTAMPTZ,
@@ -49,6 +54,7 @@ CREATE TABLE IF NOT EXISTS "po_supplier_catalogues" (
     "created_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_supplier_catalogues_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "po_supplier_catalogues_price_basis_check" CHECK ("price_basis" IN ('NET','RETAIL')),
     CONSTRAINT "po_supplier_catalogues_supplier_fk" FOREIGN KEY ("supplier_id")
         REFERENCES "po_suppliers" ("id") ON DELETE CASCADE
 );

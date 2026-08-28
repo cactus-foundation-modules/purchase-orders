@@ -94,6 +94,7 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     minimumOrderValue: decOrNull(r.minimum_order_value),
     carriagePaidOver: decOrNull(r.carriage_paid_over),
     carriageCharge: decOrNull(r.carriage_charge),
+    discountPercent: decOrNull(r.discount_percent),
     defaultCategoryId: (r.default_category_id as string | null) ?? null,
     defaultVatTreatment: (r.default_vat_treatment as string | null) ?? null,
     defaultVatRateCode: (r.default_vat_rate_code as string | null) ?? null,
@@ -202,6 +203,7 @@ export type SupplierInput = {
   minimumOrderValue: string | null
   carriagePaidOver: string | null
   carriageCharge: string | null
+  discountPercent: string | null
   defaultCategoryId: string | null
   defaultVatTreatment: string | null
   defaultVatRateCode: string | null
@@ -217,7 +219,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
       "name", "name_key", "shop_supplier_id", "shop_supplier_name", "account_number",
       "contact_name", "phone", "email", "email_cc", "address", "currency",
       "payment_terms", "payment_terms_days", "lead_time_days", "minimum_order_value",
-      "carriage_paid_over", "carriage_charge", "default_category_id",
+      "carriage_paid_over", "carriage_charge", "discount_percent", "default_category_id",
       "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
       "delivery_instructions", "status", "notes"
     ) VALUES (
@@ -226,7 +228,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
       ${JSON.stringify(input.address)}::jsonb, ${input.currency},
       ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.leadTimeDays},
       ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
-      ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
+      ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
       ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.status}, ${input.notes}
     )
     RETURNING "id"
@@ -254,6 +256,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
       "minimum_order_value" = ${input.minimumOrderValue}::numeric,
       "carriage_paid_over" = ${input.carriagePaidOver}::numeric,
       "carriage_charge" = ${input.carriageCharge}::numeric,
+      "discount_percent" = ${input.discountPercent}::numeric,
       "default_category_id" = ${input.defaultCategoryId},
       "default_vat_treatment" = ${input.defaultVatTreatment},
       "default_vat_rate_code" = ${input.defaultVatRateCode},

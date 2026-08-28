@@ -8,6 +8,14 @@ import type { SupplierInput } from './db'
 
 const Money = z.string().regex(/^-?\d{1,10}(\.\d{1,2})?$/, 'Amounts need to look like 12.34').nullable()
 
+/** A trade discount, as the column holds it: NUMERIC(5,2), nought to a hundred.
+ *  A string all the way in, same as the money fields and for the same reason. */
+const Percent = z
+  .string()
+  .regex(/^\d{1,3}(\.\d{1,2})?$/, 'A discount looks like 25 or 12.5')
+  .refine((value) => Number(value) <= 100, 'A discount cannot be more than 100%')
+  .nullable()
+
 const AddressBody = z.object({
   line1: z.string().max(200).default(''),
   line2: z.string().max(200).default(''),
@@ -34,6 +42,7 @@ export const SupplierBody = z.object({
   minimumOrderValue: Money.default(null),
   carriagePaidOver: Money.default(null),
   carriageCharge: Money.default(null),
+  discountPercent: Percent.default(null),
   defaultCategoryId: z.string().max(100).nullable().default(null),
   defaultVatTreatment: z.string().max(60).nullable().default(null),
   defaultVatRateCode: z.string().max(60).nullable().default(null),
@@ -69,6 +78,7 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     minimumOrderValue: orNull(body.minimumOrderValue),
     carriagePaidOver: orNull(body.carriagePaidOver),
     carriageCharge: orNull(body.carriageCharge),
+    discountPercent: orNull(body.discountPercent),
     defaultCategoryId: orNull(body.defaultCategoryId),
     defaultVatTreatment: orNull(body.defaultVatTreatment),
     defaultVatRateCode: orNull(body.defaultVatRateCode),

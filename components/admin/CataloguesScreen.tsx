@@ -5,6 +5,7 @@ import type {
   PoCatalogueImportPreview,
   PoCatalogueItem,
   PoCatalogueReconciliation,
+  PoPriceBasis,
   PoSupplier,
   PoSupplierCatalogue,
 } from '@/modules/purchase-orders/lib/types'
@@ -25,6 +26,7 @@ type Form = {
   sourceUrl: string
   shopCatalogueId: string
   currency: string
+  priceBasis: PoPriceBasis
   effectiveFrom: string
   notes: string
 }
@@ -35,8 +37,20 @@ const EMPTY_FORM: Form = {
   sourceUrl: '',
   shopCatalogueId: '',
   currency: 'GBP',
+  priceBasis: 'NET',
   effectiveFrom: '',
   notes: '',
+}
+
+/** What the basis field means for THIS supplier, rather than in the abstract.
+ *  A discount nobody has recorded is the case worth naming: the setting would
+ *  otherwise look like it was doing something and quietly not be. */
+function basisHint(supplier: PoSupplier | undefined): string {
+  const discount = supplier?.discountPercent
+  if (discount == null || Number(discount) <= 0) {
+    return 'Pick "retail" where the list quotes the price a customer would pay. Nothing comes off until you record a discount against the supplier - there is no figure to take off yet.'
+  }
+  return `Pick "retail" where the list quotes the price a customer would pay: ${Number(discount)}% comes off every price as it is imported. Pick "what you pay" for a trade list that is already net.`
 }
 
 const FINDING_LABELS: Record<PoCatalogueReconciliation['findings'][number]['kind'], string> = {
@@ -64,6 +78,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
   const [preview, setPreview] = useState<PoCatalogueImportPreview | null>(null)
   const [previewFor, setPreviewFor] = useState<string | null>(null)
   const [previewCsv, setPreviewCsv] = useState<string | null>(null)
+  const [previewFromLink, setPreviewFromLink] = useState(false)
   const [importing, setImporting] = useState(false)
   const [imported, setImported] = useState<string | null>(null)
 
@@ -108,6 +123,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
       sourceUrl: catalogue.sourceUrl ?? '',
       shopCatalogueId: catalogue.shopCatalogueId ?? '',
       currency: catalogue.currency,
+      priceBasis: catalogue.priceBasis,
       effectiveFrom: catalogue.effectiveFrom ?? '',
       notes: catalogue.notes ?? '',
     })
@@ -129,6 +145,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
         shopCatalogueId: form.shopCatalogueId || null,
         shopCatalogueName: picked?.name ?? null,
         currency: form.currency,
+        priceBasis: form.priceBasis,
         effectiveFrom: form.effectiveFrom || null,
         notes: form.notes.trim() || null,
       }
@@ -180,24 +197,40 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
 
   async function chooseFile(catalogueId: string, file: File | null) {
     if (!file) return
+    await askFirst(catalogueId, { csv: await file.text(), fromLink: false })
+  }
+
+  /**
+   * Fetch the list from the address on it rather than taking an upload.
+   *
+   * The server hands the text back with the comparison, and that same text is
+   * what gets applied - so the prices somebody agreed to are the prices they
+   * read about, even if the supplier edits the sheet in between.
+   */
+  async function importFromLink(catalogueId: string) {
+    await askFirst(catalogueId, { fromLink: true })
+  }
+
+  async function askFirst(catalogueId: string, body: { csv?: string; fromLink: boolean }) {
     setError(null)
     setImported(null)
+    setPreview(null)
     setImporting(true)
     try {
-      const csv = await file.text()
       const res = await fetch(`/api/m/purchase-orders/admin/catalogues/${catalogueId}/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv, apply: false }),
+        body: JSON.stringify({ ...body, apply: false }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        setError(data.error ?? 'Could not read that file.')
+        setError(data.error ?? 'Could not read that price list.')
         return
       }
       setPreview(data.preview ?? null)
       setPreviewFor(catalogueId)
-      setPreviewCsv(csv)
+      setPreviewCsv(body.csv ?? data.csv ?? null)
+      setPreviewFromLink(body.fromLink)
       if (data.refused) setError(data.refused)
     } finally {
       setImporting(false)
@@ -212,7 +245,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
       const res = await fetch(`/api/m/purchase-orders/admin/catalogues/${previewFor}/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv: previewCsv, apply: true }),
+        body: JSON.stringify({ csv: previewCsv, fromLink: previewFromLink, apply: true }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data.refused) {
@@ -223,6 +256,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
       setPreview(null)
       setPreviewCsv(null)
       setPreviewFor(null)
+      setPreviewFromLink(false)
       await refresh()
       if (openId) await openItems(openId, itemTerm)
     } finally {
@@ -308,6 +342,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
                   <td style={td}>{c.supplierName}</td>
                   <td style={td}>
                     {c.name}
+                    {c.priceBasis === 'RETAIL' && <div style={muted}>Retail prices, less your discount</div>}
                     {c.effectiveFrom && <div style={muted}>Applies from {c.effectiveFrom}</div>}
                     {c.notes && <div style={muted}>{c.notes}</div>}
                   </td>
@@ -341,8 +376,18 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
                     </button>
                     {canEdit && (
                       <>
+                        {c.sourceUrl && (
+                          <button
+                            onClick={() => void importFromLink(c.id)}
+                            style={{ ...linkButton, marginLeft: '0.75rem' }}
+                            disabled={importing}
+                            title={`Read the list straight from ${c.shopCatalogueName ?? 'the address on file'}`}
+                          >
+                            Import
+                          </button>
+                        )}
                         <label style={{ ...linkButton, marginLeft: '0.75rem' }}>
-                          Import
+                          {c.sourceUrl ? 'Upload instead' : 'Import'}
                           <input
                             type="file"
                             accept=".csv,text/csv,text/plain"
@@ -374,8 +419,9 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
 
       {loaded && catalogues.length === 0 && suppliers.length > 0 && (
         <p style={{ color: 'var(--color-text-secondary)' }}>
-          No price lists on file. Add one, then import the supplier&apos;s spreadsheet against it - a column of codes and
-          a column of prices is enough, and the headers can say whatever they already say.
+          No price lists on file. Add one, then import the supplier&apos;s spreadsheet against it - from the address it
+          lives at, or a file you have. A column of codes and a column of prices is enough, and the headers can say
+          whatever they already say.
         </p>
       )}
 
@@ -462,7 +508,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
             {hasCatalogue && (
               <Field
                 label="One of your shop's catalogues"
-                hint="Optional. Your shop already keeps a list of each supplier's catalogues; picking one here brings its address across rather than keeping the same link in two places."
+                hint="Optional. Your shop already keeps a list of each supplier's catalogues; picking one here brings its address across, so Import can read that list rather than asking you for a file."
               >
                 <select
                   style={input}
@@ -478,7 +524,10 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
                 </select>
               </Field>
             )}
-            <Field label="Where it lives" hint="A web address, for whoever goes looking next time. Nothing is fetched from it.">
+            <Field
+              label="Where it lives"
+              hint="A web address. Import will read the list straight from here, so it wants to point at the spreadsheet itself - a Google Sheet has to be shared so that anyone with the link can view it."
+            >
               <input
                 style={input}
                 value={form.sourceUrl}
@@ -493,6 +542,16 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
                 value={form.currency}
                 onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })}
               />
+            </Field>
+            <Field label="The prices on it are" hint={basisHint(suppliers.find((s) => s.id === form.supplierId))}>
+              <select
+                style={input}
+                value={form.priceBasis}
+                onChange={(e) => setForm({ ...form, priceBasis: e.target.value as PoPriceBasis })}
+              >
+                <option value="NET">What you pay</option>
+                <option value="RETAIL">Retail, less your discount</option>
+              </select>
             </Field>
             <Field label="Applies from">
               <input
@@ -629,7 +688,29 @@ function ImportPreview({
       </h2>
 
       <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
-        Importing replaces this list entirely. Anything on it that is not in the file goes.
+        Importing replaces this list entirely. Anything on it that is not in what has just been read goes.
+      </p>
+
+      <p style={{ ...muted, marginBottom: '0.75rem' }}>
+        {preview.source === 'LINK' ? (
+          <>
+            Read from{' '}
+            {preview.sourceUrl ? (
+              <a href={preview.sourceUrl} target="_blank" rel="noreferrer noopener">
+                the address on this list
+              </a>
+            ) : (
+              'the address on this list'
+            )}
+            .
+          </>
+        ) : (
+          'Read from the file you chose.'
+        )}{' '}
+        {preview.priceBasis === 'RETAIL' &&
+          (preview.discountApplied
+            ? `These are retail prices, so ${Number(preview.discountApplied)}% has come off every one of them. The figures below are what you pay.`
+            : 'This list is marked as retail, but there is no discount on file for this supplier - the prices below are exactly as they arrived.')}
       </p>
 
       {columns.length > 0 && (

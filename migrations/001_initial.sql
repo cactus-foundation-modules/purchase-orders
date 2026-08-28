@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "minimum_order_value"     NUMERIC(12,2),
     "carriage_paid_over"      NUMERIC(12,2),
     "carriage_charge"         NUMERIC(12,2),
+    -- Trade discount off list, as a percentage, and what a retail price list is
+    -- imported at. NULL is "none recorded", which is not the same as 0% - see
+    -- 005, where this column arrives for installs that already have 001.
+    "discount_percent"        NUMERIC(5,2),
     "default_category_id"     TEXT,
     "default_vat_treatment"   TEXT,
     "default_vat_rate_code"   TEXT,
@@ -77,7 +81,9 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "created_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_suppliers_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "po_suppliers_status_check" CHECK ("status" IN ('ENABLED','DISABLED','ON_HOLD'))
+    CONSTRAINT "po_suppliers_status_check" CHECK ("status" IN ('ENABLED','DISABLED','ON_HOLD')),
+    CONSTRAINT "po_suppliers_discount_percent_check"
+        CHECK ("discount_percent" IS NULL OR ("discount_percent" >= 0 AND "discount_percent" <= 100))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "po_suppliers_name_key_unique" ON "po_suppliers" ("name_key");
 CREATE INDEX IF NOT EXISTS "po_suppliers_status_idx" ON "po_suppliers" ("status");

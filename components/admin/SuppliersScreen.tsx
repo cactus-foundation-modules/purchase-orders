@@ -23,6 +23,7 @@ type Form = {
   minimumOrderValue: string
   carriagePaidOver: string
   carriageCharge: string
+  discountPercent: string
   taxRegistrationNumber: string
   deliveryInstructions: string
   status: SupplierStatus
@@ -47,6 +48,7 @@ const EMPTY_FORM: Form = {
   minimumOrderValue: '',
   carriagePaidOver: '',
   carriageCharge: '',
+  discountPercent: '',
   taxRegistrationNumber: '',
   deliveryInstructions: '',
   status: 'ENABLED',
@@ -126,6 +128,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       minimumOrderValue: supplier.minimumOrderValue ?? '',
       carriagePaidOver: supplier.carriagePaidOver ?? '',
       carriageCharge: supplier.carriageCharge ?? '',
+      discountPercent: supplier.discountPercent ?? '',
       taxRegistrationNumber: supplier.taxRegistrationNumber ?? '',
       deliveryInstructions: supplier.deliveryInstructions ?? '',
       status: supplier.status,
@@ -162,6 +165,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         minimumOrderValue: moneyOrNull(form.minimumOrderValue),
         carriagePaidOver: moneyOrNull(form.carriagePaidOver),
         carriageCharge: moneyOrNull(form.carriageCharge),
+        discountPercent: moneyOrNull(form.discountPercent),
         defaultCategoryId: null,
         defaultVatTreatment: null,
         defaultVatRateCode: null,
@@ -232,6 +236,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
                 <th style={th}>Account no.</th>
                 <th style={th}>Contact</th>
                 <th style={th}>Terms</th>
+                <th style={thRight}>Discount</th>
                 <th style={thRight}>Lead time</th>
                 <th style={thRight}>Orders</th>
                 <th style={th}>Status</th>
@@ -258,6 +263,9 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
                     {s.phone && <div style={muted}>{s.phone}</div>}
                   </td>
                   <td style={td}>{s.paymentTerms ?? '—'}</td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    {s.discountPercent == null ? '—' : `${Number(s.discountPercent)}%`}
+                  </td>
                   <td style={{ ...td, textAlign: 'right' }}>
                     {s.leadTimeDays == null ? '—' : `${s.leadTimeDays} days`}
                   </td>
@@ -358,6 +366,21 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
             </Field>
             <Field label="Carriage charge">
               <input style={input} value={form.carriageCharge} onChange={(e) => setForm({ ...form, carriageCharge: e.target.value })} placeholder="e.g. 12.50" />
+            </Field>
+            <Field
+              label="Discount (%)"
+              hint="What you have off their list. Used when you import a price list of theirs that quotes retail prices - leave it empty if they send you trade prices already."
+            >
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                style={input}
+                value={form.discountPercent}
+                onChange={(e) => setForm({ ...form, discountPercent: e.target.value })}
+                placeholder="e.g. 25"
+              />
             </Field>
             <Field label="VAT registration number">
               <input style={input} value={form.taxRegistrationNumber} onChange={(e) => setForm({ ...form, taxRegistrationNumber: e.target.value })} />

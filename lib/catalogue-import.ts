@@ -1,4 +1,5 @@
 import { parseCsv } from './csv'
+import { scaled } from './totals'
 import type { PoCatalogueItem } from './types'
 
 // Turning a supplier's spreadsheet into rows of a price list, and nothing else.
@@ -8,9 +9,10 @@ import type { PoCatalogueItem } from './types'
 // same text and get the same answer, which is the only way a preview is worth
 // looking at. Same split lib/reorder.ts and lib/reordering.ts already use.
 //
-// Nothing here fetches anything. A supplier's list arrives as a file somebody
-// chose to upload; a module that goes and reads a URL of its own accord is a
-// module that can be pointed at an address inside somebody's network.
+// Nothing here fetches anything. A list arrives as text - a file somebody chose
+// to upload, or one lib/list-fetch.ts went and read from the address on file
+// because somebody pressed Import. Which of the two it was makes no difference
+// to a single line below.
 
 /** The most rows one import will take.
  *
@@ -308,6 +310,35 @@ export function parseCatalogueCsv(text: string): CatalogueImportResult {
   }
 
   return { columns, items, problems, blankRows, duplicateRows }
+}
+
+/**
+ * A retail price list, turned into what you actually pay.
+ *
+ * Trade suppliers publish one list and sell off it at a different number: the
+ * printed figure is retail and your price is that less whatever percentage you
+ * have negotiated. Importing such a list untouched drafts every purchase order
+ * at the price the customer pays, which is a mistake nobody notices until the
+ * invoice arrives.
+ *
+ * Done in integer ten-thousandths, the same as lib/totals.ts does a line
+ * discount and for the same reason: 25% off 41.67 in floating point is not
+ * 31.2525. A row with no price stays without one - there is nothing to take a
+ * quarter off - and a percentage of nothing, or of zero, hands the list back
+ * exactly as it came so the caller never has to check first.
+ */
+export function applyRetailDiscount(
+  items: CatalogueImportItem[],
+  discountPercent: string | number | null | undefined,
+): CatalogueImportItem[] {
+  const percent = scaled(discountPercent ?? 0, 2)
+  if (percent <= 0) return items
+  return items.map((item) => {
+    if (item.unitCost == null) return item
+    const list = scaled(item.unitCost, 4)
+    const net = list - Math.round((list * percent) / 10_000)
+    return { ...item, unitCost: (net / 10_000).toFixed(4) }
+  })
 }
 
 function sameItem(a: CatalogueImportItem, b: CatalogueImportItem): boolean {

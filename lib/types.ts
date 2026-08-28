@@ -59,6 +59,10 @@ export type PoSupplier = {
   minimumOrderValue: string | null
   carriagePaidOver: string | null
   carriageCharge: string | null
+  /** Trade discount off list, as a percentage. Null is "none recorded", which
+   *  is not the same as a recorded 0% - and is what stops a retail price list
+   *  being imported as though it were already net. */
+  discountPercent: string | null
   defaultCategoryId: string | null
   defaultVatTreatment: string | null
   defaultVatRateCode: string | null
@@ -818,6 +822,10 @@ export type PoDashboardSummary = {
 // ---------------------------------------------------------------------------
 
 /** One price list belonging to one supplier, as the Catalogues tab lists it. */
+/** What the numbers on a price list mean before anybody works out a cost. */
+export const PO_PRICE_BASES = ['NET', 'RETAIL'] as const
+export type PoPriceBasis = (typeof PO_PRICE_BASES)[number]
+
 export type PoSupplierCatalogue = {
   id: string
   supplierId: string
@@ -832,6 +840,9 @@ export type PoSupplierCatalogue = {
   shopCatalogueId: string | null
   shopCatalogueName: string | null
   currency: string
+  /** Whether the prices on it are already trade net, or are retail with the
+   *  supplier's discount still to come off at import. */
+  priceBasis: PoPriceBasis
   effectiveFrom: string | null
   lastImportedAt: string | null
   itemCount: number
@@ -931,6 +942,15 @@ export type PoCatalogueImportPreview = {
   catalogueName: string
   /** Which spreadsheet column filled which field. */
   columns: Record<string, string | null>
+  /** Where the text came from: a file somebody chose, or the address on file. */
+  source: 'FILE' | 'LINK'
+  /** The address actually read, where it was a link. Not always the one on the
+   *  list: a Google Sheet page is rewritten to its CSV form before fetching. */
+  sourceUrl: string | null
+  priceBasis: PoPriceBasis
+  /** The percentage taken off, where this was a retail list and the supplier
+   *  has a discount recorded. Null says the prices are exactly as they arrived. */
+  discountApplied: string | null
   itemCount: number
   blankRows: number
   duplicateRows: number

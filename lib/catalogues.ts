@@ -4,7 +4,13 @@ import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
 import { catalogueNameKey, catalogueSkuKey, type CatalogueImportItem } from './catalogue-import'
 import type { ShopProductForSupplier } from './catalogue-matching'
-import type { CatalogueProduct, PoCatalogueCost, PoCatalogueItem, PoSupplierCatalogue } from './types'
+import type {
+  CatalogueProduct,
+  PoCatalogueCost,
+  PoCatalogueItem,
+  PoPriceBasis,
+  PoSupplierCatalogue,
+} from './types'
 
 // Every read and write behind supplier price lists, in raw SQL as the rest of
 // this module is.
@@ -46,6 +52,7 @@ function mapCatalogue(r: Record<string, unknown>): PoSupplierCatalogue {
     shopCatalogueId: text(r.shop_catalogue_id),
     shopCatalogueName: text(r.shop_catalogue_name),
     currency: (r.currency as string | null) ?? 'GBP',
+    priceBasis: (r.price_basis as PoPriceBasis | null) ?? 'NET',
     effectiveFrom: day(r.effective_from),
     lastImportedAt: stamp(r.last_imported_at),
     itemCount: Number(r.item_count ?? 0),
@@ -104,6 +111,7 @@ export type CatalogueInput = {
   shopCatalogueId: string | null
   shopCatalogueName: string | null
   currency: string
+  priceBasis: PoPriceBasis
   effectiveFrom: string | null
   notes: string | null
 }
@@ -112,10 +120,10 @@ export async function createCatalogue(input: CatalogueInput, userId?: string | n
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     INSERT INTO "po_supplier_catalogues"
       ("supplier_id", "name", "name_key", "source_url", "shop_catalogue_id", "shop_catalogue_name",
-       "currency", "effective_from", "notes", "created_by_user_id")
+       "currency", "price_basis", "effective_from", "notes", "created_by_user_id")
     VALUES
       (${input.supplierId}, ${input.name}, ${catalogueNameKey(input.name)}, ${input.sourceUrl},
-       ${input.shopCatalogueId}, ${input.shopCatalogueName}, ${input.currency},
+       ${input.shopCatalogueId}, ${input.shopCatalogueName}, ${input.currency}, ${input.priceBasis},
        ${input.effectiveFrom}::date, ${input.notes}, ${userId ?? null})
     RETURNING "id"
   `
@@ -132,6 +140,7 @@ export async function updateCatalogue(id: string, input: CatalogueInput): Promis
       "shop_catalogue_id"   = ${input.shopCatalogueId},
       "shop_catalogue_name" = ${input.shopCatalogueName},
       "currency"            = ${input.currency},
+      "price_basis"         = ${input.priceBasis},
       "effective_from"      = ${input.effectiveFrom}::date,
       "notes"               = ${input.notes},
       "updated_at"          = now()
