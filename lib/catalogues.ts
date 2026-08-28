@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
-import { catalogueNameKey, catalogueSkuKey, type CatalogueImportItem } from './catalogue-import'
+import { catalogueNameKey, catalogueSkuKey, type CatalogueImportItem, type ResolvedMapping } from './catalogue-import'
 import type { ShopProductForSupplier } from './catalogue-matching'
 import type {
   CatalogueProduct,
@@ -41,6 +41,31 @@ function num(value: unknown): string | null {
   return value === null || value === undefined ? null : String(value)
 }
 
+/** The stored column map, read back defensively.
+ *
+ *  It is JSON in a text column, written by this module and by nothing else, but
+ *  it is still text: a hand-edited row or a half-finished restore must leave the
+ *  list readable and simply un-mapped rather than throwing on the way to the
+ *  screen. Anything that is not the shape expected reads as "no mapping", which
+ *  puts the import back on working it out for itself. */
+function columnMap(value: unknown): Record<string, { index: number; header: string }> | null {
+  if (typeof value !== 'string' || value.trim() === '') return null
+  try {
+    const parsed: unknown = JSON.parse(value)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const out: Record<string, { index: number; header: string }> = {}
+    for (const [field, choice] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!choice || typeof choice !== 'object') continue
+      const { index, header } = choice as { index?: unknown; header?: unknown }
+      if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) continue
+      out[field] = { index, header: typeof header === 'string' ? header : '' }
+    }
+    return Object.keys(out).length > 0 ? out : null
+  } catch {
+    return null
+  }
+}
+
 function mapCatalogue(r: Record<string, unknown>): PoSupplierCatalogue {
   return {
     id: r.id as string,
@@ -57,6 +82,8 @@ function mapCatalogue(r: Record<string, unknown>): PoSupplierCatalogue {
     lastImportedAt: stamp(r.last_imported_at),
     itemCount: Number(r.item_count ?? 0),
     notes: text(r.notes),
+    headerRow: r.header_row == null ? null : Number(r.header_row),
+    columnMap: columnMap(r.column_map),
     createdAt: stamp(r.created_at) ?? '',
     updatedAt: stamp(r.updated_at) ?? '',
   }
@@ -214,7 +241,15 @@ export async function readCatalogueForDiff(
  * `last_imported_at` and `item_count` are stamped in the same transaction as the
  * rows, so the figure on the screen cannot disagree with what is in the table.
  */
-export async function replaceCatalogueItems(catalogueId: string, items: CatalogueImportItem[]): Promise<void> {
+export async function replaceCatalogueItems(
+  catalogueId: string,
+  items: CatalogueImportItem[],
+  /** What to remember about how the file was read. A mapping stores it, `null`
+   *  forgets one that was stored, and `undefined` - the default - leaves
+   *  whatever is on file alone, which is what an import nobody had to correct
+   *  should do. */
+  mapping?: ResolvedMapping | null,
+): Promise<void> {
   const statements: Prisma.PrismaPromise<unknown>[] = [
     prisma.$executeRaw`DELETE FROM "po_catalogue_items" WHERE "catalogue_id" = ${catalogueId}`,
   ]
@@ -236,9 +271,16 @@ export async function replaceCatalogueItems(catalogueId: string, items: Catalogu
     `)
   }
 
+  const remembered =
+    mapping === undefined
+      ? Prisma.empty
+      : Prisma.sql`, "header_row" = ${mapping ? mapping.headerRow : null}, "column_map" = ${
+          mapping ? JSON.stringify(mapping.columns) : null
+        }`
+
   statements.push(prisma.$executeRaw`
     UPDATE "po_supplier_catalogues"
-       SET "last_imported_at" = now(), "item_count" = ${items.length}, "updated_at" = now()
+       SET "last_imported_at" = now(), "item_count" = ${items.length}${remembered}, "updated_at" = now()
      WHERE "id" = ${catalogueId}
   `)
 

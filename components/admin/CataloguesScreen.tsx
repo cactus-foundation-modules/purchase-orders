@@ -20,6 +20,27 @@ import { card, Field, formatWhen, input, linkButton, Money, muted, table, td, td
 
 type ShopCatalogue = { id: string; supplierId: string; name: string; sheetUrl: string | null }
 
+/** Which row the headings are on and which column is which, as the screen sends
+ *  it: positions, because two columns can be headed the same thing and a
+ *  position never is. -1 says the file has no such column. Null for the whole
+ *  thing leaves the list to be read the way it always was. */
+type MappingChoice = { headerRow: number | null; columns: Record<string, number> }
+
+/** The fields a price list can carry, in the order somebody would fill them in,
+ *  and in words rather than in field names. The code is the only one an import
+ *  cannot do without - everything else is a column plenty of suppliers simply
+ *  do not send. */
+const FIELD_LABELS: { field: string; label: string; hint?: string }[] = [
+  { field: 'supplierSku', label: 'Their product code', hint: 'The one that goes on the order. Required.' },
+  { field: 'description', label: 'Description' },
+  { field: 'unitCost', label: 'Price' },
+  { field: 'packSize', label: 'Pack size' },
+  { field: 'minimumOrderQty', label: 'Smallest order' },
+  { field: 'leadTimeDays', label: 'Lead time in days' },
+  { field: 'discountGroup', label: 'Discount group' },
+  { field: 'discontinued', label: 'No longer sold' },
+]
+
 type Form = {
   supplierId: string
   name: string
@@ -77,8 +98,14 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
 
   const [preview, setPreview] = useState<PoCatalogueImportPreview | null>(null)
   const [previewFor, setPreviewFor] = useState<string | null>(null)
+  /** The file somebody chose, kept so the same text can be read again with
+   *  different columns and then imported. A list fetched from its address is
+   *  never held here - the server reads it again, and the fingerprint on the
+   *  preview is what proves it read the same thing. */
   const [previewCsv, setPreviewCsv] = useState<string | null>(null)
   const [previewFromLink, setPreviewFromLink] = useState(false)
+  /** The columns this preview was worked out with, so importing repeats it. */
+  const [previewMapping, setPreviewMapping] = useState<MappingChoice | null>(null)
   const [importing, setImporting] = useState(false)
   const [imported, setImported] = useState<string | null>(null)
 
@@ -197,7 +224,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
 
   async function chooseFile(catalogueId: string, file: File | null) {
     if (!file) return
-    await askFirst(catalogueId, { csv: await file.text(), fromLink: false })
+    await askFirst(catalogueId, { csv: await file.text(), fromLink: false }, null)
   }
 
   /**
@@ -208,10 +235,14 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
    * read about, even if the supplier edits the sheet in between.
    */
   async function importFromLink(catalogueId: string) {
-    await askFirst(catalogueId, { fromLink: true })
+    await askFirst(catalogueId, { fromLink: true }, null)
   }
 
-  async function askFirst(catalogueId: string, body: { csv?: string; fromLink: boolean }) {
+  async function askFirst(
+    catalogueId: string,
+    body: { csv?: string; fromLink: boolean },
+    mapping: MappingChoice | null,
+  ) {
     setError(null)
     setImported(null)
     setPreview(null)
@@ -220,7 +251,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
       const res = await fetch(`/api/m/purchase-orders/admin/catalogues/${catalogueId}/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, apply: false }),
+        body: JSON.stringify({ ...body, apply: false, mapping }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -229,27 +260,48 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
       }
       setPreview(data.preview ?? null)
       setPreviewFor(catalogueId)
-      setPreviewCsv(body.csv ?? data.csv ?? null)
+      setPreviewCsv(body.csv ?? null)
       setPreviewFromLink(body.fromLink)
+      setPreviewMapping(mapping)
       if (data.refused) setError(data.refused)
     } finally {
       setImporting(false)
     }
   }
 
+  /** Read the same list again with different columns. The file somebody chose is
+   *  read from what the browser still has; a list from an address is fetched
+   *  again, which is what happens on the import as well. */
+  async function readAgain(mapping: MappingChoice | null) {
+    if (!previewFor || importing) return
+    if (!previewFromLink && previewCsv == null) return
+    await askFirst(previewFor, previewFromLink ? { fromLink: true } : { csv: previewCsv!, fromLink: false }, mapping)
+  }
+
   async function applyImport() {
-    if (!previewFor || previewCsv == null || importing) return
+    if (!previewFor || importing) return
+    if (!previewFromLink && previewCsv == null) return
     setImporting(true)
     setError(null)
     try {
       const res = await fetch(`/api/m/purchase-orders/admin/catalogues/${previewFor}/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csv: previewCsv, fromLink: previewFromLink, apply: true }),
+        body: JSON.stringify({
+          csv: previewFromLink ? undefined : previewCsv,
+          fromLink: previewFromLink,
+          apply: true,
+          mapping: previewMapping,
+          // The version of the list this comparison was worked out from. A list
+          // read from its address is read again to import it, and a supplier who
+          // has edited it in between gets a fresh comparison rather than a swap.
+          expectFingerprint: preview?.fingerprint ?? null,
+        }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok || data.refused) {
         setError(data.error ?? data.refused ?? 'Could not import that file.')
+        if (data.preview) setPreview(data.preview)
         return
       }
       setImported(`${data.preview?.itemCount ?? 0} prices are now on file.`)
@@ -257,6 +309,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
       setPreviewCsv(null)
       setPreviewFor(null)
       setPreviewFromLink(false)
+      setPreviewMapping(null)
       await refresh()
       if (openId) await openItems(openId, itemTerm)
     } finally {
@@ -425,7 +478,15 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
         </p>
       )}
 
-      {preview && <ImportPreview preview={preview} busy={importing} onApply={applyImport} onCancel={() => setPreview(null)} />}
+      {preview && (
+        <ImportPreview
+          preview={preview}
+          busy={importing}
+          onApply={applyImport}
+          onReadAgain={readAgain}
+          onCancel={() => setPreview(null)}
+        />
+      )}
 
       {openId && (
         <div style={{ ...card, marginTop: '1rem' }}>
@@ -670,11 +731,13 @@ function ImportPreview({
   preview,
   busy,
   onApply,
+  onReadAgain,
   onCancel,
 }: {
   preview: PoCatalogueImportPreview
   busy: boolean
   onApply: () => void
+  onReadAgain: (mapping: MappingChoice | null) => void
   onCancel: () => void
 }) {
   const counts = preview.changeCounts
@@ -715,9 +778,21 @@ function ImportPreview({
 
       {columns.length > 0 && (
         <p style={{ ...muted, marginBottom: '0.75rem' }}>
-          Read as: {columns.map(([field, header]) => `${header} → ${field}`).join(', ')}.
+          {preview.headerRow > 1 && `Headings taken from row ${preview.headerRow}. `}
+          Read as:{' '}
+          {columns
+            .map(([field, header]) => `${header} → ${FIELD_LABELS.find((f) => f.field === field)?.label ?? field}`)
+            .join(', ')}
+          .
         </p>
       )}
+
+      <ColumnPicker
+        key={`${preview.fingerprint}-${preview.headerRow}`}
+        preview={preview}
+        busy={busy}
+        onReadAgain={onReadAgain}
+      />
 
       {total > 0 && (
         <ul style={{ margin: '0 0 0.75rem', paddingLeft: '1.25rem' }}>
@@ -742,9 +817,9 @@ function ImportPreview({
         </p>
       )}
 
-      {preview.problems.length > 0 && (
+      {preview.problemCount > 0 && (
         <div style={{ marginBottom: '0.75rem' }}>
-          <strong>{preview.problems.length} rows could not be read:</strong>
+          <strong>{preview.problemCount.toLocaleString('en-GB')} rows could not be read:</strong>
           <ul style={{ margin: '0.375rem 0 0', paddingLeft: '1.25rem' }}>
             {preview.problems.slice(0, 20).map((problem) => (
               <li key={`${problem.row}-${problem.message}`} style={muted}>
@@ -752,7 +827,12 @@ function ImportPreview({
               </li>
             ))}
           </ul>
-          {preview.problems.length > 20 && <p style={muted}>…and {preview.problems.length - 20} more.</p>}
+          {preview.problemCount > preview.problems.slice(0, 20).length && (
+            <p style={muted}>
+              …and {(preview.problemCount - preview.problems.slice(0, 20).length).toLocaleString('en-GB')} more. If that
+              is most of the file, the columns below are pointing at the wrong things.
+            </p>
+          )}
         </div>
       )}
 
@@ -781,5 +861,133 @@ function ImportPreview({
         </button>
       </div>
     </div>
+  )
+}
+
+/**
+ * Saying which row the headings are on, and which column is which.
+ *
+ * A supplier's spreadsheet is an export from something else, and exports are not
+ * tidy: a title, a blank line, a row of merged group headings, and then the real
+ * headings on row four with eighty-nine columns after them, three of which are
+ * any use. The import works that out for itself and is right most of the time.
+ * This is for the rest of the time, and for the case it cannot possibly get
+ * right - a sheet carrying both "SKU" and "Catalogue Code", where which one goes
+ * on the purchase order is a matter of fact about the supplier and not about the
+ * file.
+ *
+ * Remounted whenever a new preview arrives - see the `key` on it - so what is in
+ * the dropdowns is always what was actually read, rather than what somebody was
+ * in the middle of picking two previews ago.
+ */
+function ColumnPicker({
+  preview,
+  busy,
+  onReadAgain,
+}: {
+  preview: PoCatalogueImportPreview
+  busy: boolean
+  onReadAgain: (mapping: MappingChoice | null) => void
+}) {
+  const rows = preview.topRows ?? []
+  const [headerRow, setHeaderRow] = useState(preview.headerRow > 0 ? preview.headerRow : 1)
+  const [columns, setColumns] = useState<Record<string, number>>(() => {
+    const start: Record<string, number> = {}
+    for (const { field } of FIELD_LABELS) start[field] = preview.columnIndexes?.[field] ?? -1
+    return start
+  })
+
+  if (rows.length === 0) return null
+
+  const header = rows[headerRow - 1] ?? []
+  // The columns to offer, which is the widest row rather than the header row:
+  // a spreadsheet whose last few headings are blank still has data under them.
+  const width = rows.reduce((widest, row) => Math.max(widest, row.length), 0)
+  // The first row under the headings with anything in it, purely so each column
+  // can be shown with an example of what is in it.
+  const sample = rows.slice(headerRow).find((row) => row.some((cell) => cell !== '')) ?? []
+
+  const columnLabel = (at: number) => {
+    const name = (header[at] ?? '').trim()
+    const example = (sample[at] ?? '').trim()
+    const shown = name || `Column ${at + 1}`
+    return example ? `${shown} — ${example}` : shown
+  }
+
+  const rowLabel = (at: number) => {
+    const filled = (rows[at] ?? []).filter((cell) => cell !== '').slice(0, 4).join(', ')
+    return `Row ${at + 1}${filled ? `: ${filled}` : ' (blank)'}`
+  }
+
+  return (
+    <details
+      // Open where the reading has plainly gone wrong - nothing came out, or
+      // more rows failed than succeeded - because that is the moment somebody
+      // needs this rather than the moment they go looking for it.
+      open={preview.itemCount === 0 || preview.problemCount > preview.itemCount}
+      style={{ marginBottom: '0.75rem' }}
+    >
+      <summary style={{ cursor: 'pointer' }}>Not read the way you wanted? Say which column is which</summary>
+      <p style={{ ...muted, margin: '0.5rem 0 0.75rem' }}>
+        Pick the row the headings are on, then point each thing at the column it lives in. Plenty of suppliers send a
+        title and a row of group headings above the real ones, and plenty send two columns that could both be a code -
+        this is where you say which. What you pick is kept on this list, so next month it reads itself.
+      </p>
+
+      <div style={{ maxWidth: 520, marginBottom: '0.75rem' }}>
+        <Field label="The headings are on">
+          <select
+            style={input}
+            value={headerRow}
+            onChange={(e) => setHeaderRow(Number(e.target.value))}
+            disabled={busy}
+          >
+            {rows.map((_, at) => (
+              <option key={at} value={at + 1}>
+                {rowLabel(at)}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))' }}>
+        {FIELD_LABELS.map(({ field, label, hint }) => (
+          <Field key={field} label={label} hint={hint}>
+            <select
+              style={input}
+              value={columns[field] ?? -1}
+              onChange={(e) => setColumns({ ...columns, [field]: Number(e.target.value) })}
+              disabled={busy}
+            >
+              <option value={-1}>Not in this file</option>
+              {Array.from({ length: width }, (_, at) => (
+                <option key={at} value={at}>
+                  {columnLabel(at)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
+        <button
+          className="btn btn-secondary"
+          disabled={busy}
+          onClick={() => onReadAgain({ headerRow, columns })}
+        >
+          {busy ? 'Reading…' : 'Read it again like this'}
+        </button>
+        <button
+          className="btn btn-secondary"
+          disabled={busy}
+          onClick={() => onReadAgain({ headerRow: null, columns: {} })}
+          title="Forget what this list remembers and go by the headings again"
+        >
+          Work it out for me
+        </button>
+      </div>
+    </details>
   )
 }

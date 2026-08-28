@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { assertSafeListUrl, ListFetchError, looksLikeHtml, toDownloadUrl } from './list-url'
 
 // Downloading a supplier's price list from the address that is already on file.
@@ -109,4 +110,18 @@ function concat(chunks: Uint8Array[], total: number): Uint8Array {
     offset += chunk.byteLength
   }
   return out
+}
+
+/**
+ * A short, stable name for one particular version of a price list.
+ *
+ * A list is read twice: once to show somebody what importing it would do, and
+ * again when they say go ahead. Sending twelve megabytes of spreadsheet down to
+ * the browser and back up again to avoid that second read is not an option -
+ * the platform refuses a request body that size - so the second read happens,
+ * and this is what proves it read the same thing. A supplier who edits the sheet
+ * in between gets a fresh comparison rather than a silent swap.
+ */
+export function fingerprintList(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 32)
 }

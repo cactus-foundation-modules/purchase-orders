@@ -847,6 +847,14 @@ export type PoSupplierCatalogue = {
   lastImportedAt: string | null
   itemCount: number
   notes: string | null
+  /** Which row of the spreadsheet the headings are on, where somebody has said
+   *  so by hand. Null leaves it to be worked out, which is what happens on every
+   *  list nobody has had to correct. */
+  headerRow: number | null
+  /** Which column feeds which field, where somebody has said so by hand. Held
+   *  by position AND by heading, so a supplier inserting a column shifts the
+   *  positions without changing what gets read. */
+  columnMap: Record<string, { index: number; header: string }> | null
   createdAt: string
   updatedAt: string
 }
@@ -954,9 +962,28 @@ export type PoCatalogueImportPreview = {
   itemCount: number
   blankRows: number
   duplicateRows: number
+  /** The first few rows that could not be read. A file whose columns have been
+   *  pointed at the wrong things produces one of these per row, and forty
+   *  thousand of them is a response nobody can use and everybody has to wait
+   *  for - so the count is complete and the list is a sample. */
   problems: { row: number; message: string }[]
+  problemCount: number
   changes: PoCatalogueChange[]
   /** Everything the comparison found, summarised, because a range refresh can
    *  easily produce a thousand changes and nobody reads a thousand lines. */
   changeCounts: Record<PoCatalogueChange['kind'], number>
+  /** Which spreadsheet column, by position, filled which field. -1 for none. */
+  columnIndexes: Record<string, number>
+  /** The row the headings were read off, as the spreadsheet numbers it. Zero
+   *  where none could be found, which is the case that needs somebody to say. */
+  headerRow: number
+  /** The top of the file as it arrived, so the screen can show what is in each
+   *  column and offer a different one. Cells are cut short. */
+  topRows: string[][]
+  /** What was read, in the form the list can remember it. */
+  mapping: { headerRow: number; columns: Record<string, { index: number; header: string }> }
+  /** Which version of the list this comparison was worked out from. Sent back
+   *  when the import is applied, so a list fetched again cannot have changed
+   *  underneath somebody between reading and agreeing. */
+  fingerprint: string
 }

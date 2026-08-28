@@ -125,6 +125,18 @@ describe('parseListFlag', () => {
   })
 })
 
+/** A supplier's export, in miniature: a blank line, a title, a row of merged
+ *  group headings, and the columns on row four. Two codes that could both be
+ *  "the" code, and a price column called RRP. All of it copied from a real one. */
+const SHEET = [
+  ',,,',
+  'Seating Dataset,,,',
+  ',,Dimensions (mm),',
+  'SKU,Catalogue Code,Product Name,RRP',
+  'AC000001,CHIROARMS,Chiro arm set,84',
+  'AC000002,ISOARMS,ISO arm set,43',
+].join('\n')
+
 describe('parseCatalogueCsv', () => {
   it('reads a two-column list', () => {
     const result = parseCatalogueCsv('Code,Price\nDS-1234,40.00\nDS-5678,55.50\n')
@@ -192,6 +204,74 @@ describe('parseCatalogueCsv', () => {
     expect(different.items).toHaveLength(1)
     expect(different.items[0]!.unitCost).toBe('40.0000')
     expect(different.problems[0]!.message).toContain('twice saying two different things')
+  })
+
+  it('finds the headings on row four, under a title and a row of group headings', () => {
+    // What a supplier's export actually looks like: a blank line, a title, a row
+    // of merged group headings, and only then the columns. Reading row one and
+    // giving up is how a perfectly good price list imports as nothing at all.
+    const result = parseCatalogueCsv(SHEET)
+    expect(result.headerRow).toBe(4)
+    expect(result.items).toHaveLength(2)
+    expect(result.items[0]).toMatchObject({ description: 'Chiro arm set', unitCost: '84.0000' })
+  })
+
+  it('takes the row and the columns somebody picked by hand', () => {
+    // The case no amount of guessing settles: a sheet carrying both "SKU" and
+    // "Catalogue Code". Which one goes on the purchase order is a fact about the
+    // supplier, not about the file, so somebody has to be able to say.
+    expect(parseCatalogueCsv(SHEET).columns.supplierSku).toBe('Catalogue Code')
+
+    const result = parseCatalogueCsv(SHEET, {
+      headerRow: 4,
+      columns: { supplierSku: { index: 0 }, description: { index: 2 }, unitCost: { index: 3 } },
+    })
+    expect(result.columns.supplierSku).toBe('SKU')
+    expect(result.items[0]!.supplierSku).toBe('AC000001')
+    expect(result.mapping).toEqual({
+      headerRow: 4,
+      columns: {
+        supplierSku: { index: 0, header: 'SKU' },
+        description: { index: 2, header: 'Product Name' },
+        unitCost: { index: 3, header: 'RRP' },
+      },
+    })
+  })
+
+  it('treats a mapping as the whole truth, so a column can be said not to be there', () => {
+    // Otherwise "no, that is not the price" is unsayable, and every correction
+    // leaves whatever was guessed before still in place underneath it.
+    const result = parseCatalogueCsv('Code,Price\nDS-1,40.00\n', { headerRow: 1, columns: { supplierSku: { index: 0 } } })
+    expect(result.items[0]).toMatchObject({ supplierSku: 'DS-1', unitCost: null })
+  })
+
+  it('follows a heading that has moved down the sheet rather than the row number', () => {
+    // A supplier adding a line above their headings shifts every row number and
+    // renames nothing. Pinning the number alone would read the group headings.
+    const result = parseCatalogueCsv(`,,,\n${SHEET}`, {
+      headerRow: 4,
+      columns: { supplierSku: { index: 0, header: 'SKU' } },
+    })
+    expect(result.headerRow).toBe(5)
+    expect(result.items[0]!.supplierSku).toBe('AC000001')
+  })
+
+  it('follows the heading rather than the position when a column is inserted', () => {
+    const result = parseCatalogueCsv('Note,Code,Price\nx,DS-1,40.00\n', {
+      headerRow: 1,
+      columns: { supplierSku: { index: 0, header: 'Code' }, unitCost: { index: 1, header: 'Price' } },
+    })
+    expect(result.items[0]).toMatchObject({ supplierSku: 'DS-1', unitCost: '40.0000' })
+  })
+
+  it('hands back the top of the file so somebody can point at the right columns', () => {
+    const result = parseCatalogueCsv('Colour,Shade\nBlack,Dark\n')
+    expect(result.headerRow).toBe(0)
+    expect(result.items).toEqual([])
+    expect(result.topRows).toEqual([
+      ['Colour', 'Shade'],
+      ['Black', 'Dark'],
+    ])
   })
 
   it('does not let one column fill two fields', () => {

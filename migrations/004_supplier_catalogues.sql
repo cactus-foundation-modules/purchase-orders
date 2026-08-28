@@ -50,6 +50,14 @@ CREATE TABLE IF NOT EXISTS "po_supplier_catalogues" (
     -- drift the way a received-quantity counter would.
     "item_count"          INTEGER     NOT NULL DEFAULT 0,
     "notes"               TEXT,
+    -- Which row of the supplier's spreadsheet the headings are on, and which
+    -- column feeds which field, where somebody has corrected what the import
+    -- worked out for itself. Both arrive in 006 for installs that already have
+    -- this file; both NULL means "work it out", which is every list nobody has
+    -- had to correct. See 006 for why a pinned map carries headings as well as
+    -- positions.
+    "header_row"          INTEGER,
+    "column_map"          TEXT,
     "created_by_user_id"  TEXT,
     "created_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
