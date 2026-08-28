@@ -1171,6 +1171,13 @@ function OrderView({
                   <tr key={l.id}>
                     <td style={td}>
                       {l.description}
+                      {/* Their words head the line, because they are what goes
+                          on the sheet they read. Ours sits under it where the
+                          two differ, so whoever is checking this against the
+                          shop can still tell what it is. */}
+                      {l.productName && l.productName !== l.description && (
+                        <div style={muted}>{l.productName} in your catalogue</div>
+                      )}
                       {l.serviceName && (
                         <div style={muted}>
                           {l.serviceName}

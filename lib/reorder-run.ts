@@ -92,7 +92,10 @@ async function raiseOneOrder(
     productName: line.productName,
     supplierSku: line.supplierSku,
     ourSku: line.sku,
-    description: line.productName,
+    // Their name for it off their own list where they have one, ours otherwise.
+    // Same reasoning as an order raised from a customer's: the sheet is read by
+    // the supplier, and our listing title is our own invention.
+    description: line.catalogueDescription ?? line.productName,
     qty: String(line.suggestedQty),
     unit: 'each',
     unitCost: line.unitCost,

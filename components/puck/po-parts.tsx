@@ -1,4 +1,4 @@
-import { formatMoney, formatQty, serviceLineText } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, serviceExtendedCost, serviceLineName } from '@/modules/purchase-orders/lib/money'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
   yesNo, formatDate, paragraphs, useCtx,
@@ -672,13 +672,25 @@ export function PoDocLines(props: LinesProps) {
             const cancelled = Number(line.qtyCancelled)
             const discount = Number(line.discountPercent ?? 0)
             const detail: string[] = []
+            const qty = Number(line.qty) - cancelled
             // First in the list on purpose: it is the one thing on the line the
-            // supplier has to act on differently from every other order. It
-            // carries its own price where there is one - the carriage at the
-            // foot is one figure for the whole order, and on an order split
-            // across services that says nothing about which line it came off.
-            const service = serviceLineText(line.serviceName, line.serviceCost, Number(line.qty) - cancelled, order.currency)
+            // supplier has to act on differently from every other order.
+            //
+            // NAMED here and PRICED in the money columns, rather than described
+            // in a sentence with the figures buried in it: delivery is a thing
+            // being bought, so it is read the way everything else being bought
+            // is read - down the columns. The carriage at the foot is one figure
+            // for the whole order and says nothing about which line it came off.
+            const service = serviceLineName(line.serviceName, line.serviceCost)
             if (service) detail.push(service)
+            // Still not IN the line total, and still summed into the carriage at
+            // the foot. The columns say what it costs; they do not move where it
+            // is counted.
+            //
+            // Nothing left to send, nothing left to charge for it: a line
+            // cancelled down to none keeps its name and loses its figures, the
+            // same way carrying it into the carriage total does.
+            const serviceTotal = service && qty > 0 ? serviceExtendedCost(line.serviceCost, qty) : null
             if (showOurSku && line.ourSku) detail.push(`Our code ${line.ourSku}`)
             if (props.showLineDates !== 'no' && line.expectedDate) detail.push(`Expected ${formatDate(line.expectedDate)}`)
             if (props.showDiscount !== 'no' && discount > 0) detail.push(`Less ${formatQty(discount)}%`)
@@ -699,9 +711,18 @@ export function PoDocLines(props: LinesProps) {
                   )}
                 </td>
                 {codeColumn && <td className="po-doc-sku">{line.supplierSku ?? ''}</td>}
-                <td className="po-doc-num">{formatQty(Number(line.qty) - cancelled)} {line.unit}</td>
-                <td className="po-doc-num">{formatMoney(line.unitCost, order.currency)}</td>
-                <td className="po-doc-num">{formatMoney(line.lineTotal, order.currency)}</td>
+                <td className="po-doc-num">
+                  {formatQty(qty)} {line.unit}
+                  {serviceTotal && <span className="po-doc-num-sub">{formatQty(qty)} {line.unit}</span>}
+                </td>
+                <td className="po-doc-num">
+                  {formatMoney(line.unitCost, order.currency)}
+                  {serviceTotal && <span className="po-doc-num-sub">{formatMoney(line.serviceCost, order.currency)}</span>}
+                </td>
+                <td className="po-doc-num">
+                  {formatMoney(line.lineTotal, order.currency)}
+                  {serviceTotal && <span className="po-doc-num-sub">{formatMoney(serviceTotal, order.currency)}</span>}
+                </td>
               </tr>
             )
           })}

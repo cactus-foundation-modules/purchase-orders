@@ -123,7 +123,13 @@ async function raiseOneOrder(
     productName: line.productName,
     supplierSku: line.supplierSku,
     ourSku: line.ourSku,
-    description: line.productName,
+    // What the SUPPLIER calls it, where their own price list says. They are the
+    // ones reading this sheet and picking the thing off a shelf, and our name
+    // for it is our own invention - "Air Dual Motor Electric Height Adjustable
+    // Standing Desk - 160cm / 80cm / Maple" is a shop listing, not a line on
+    // their order form. Our name stays on the line in `productName`, which is
+    // what the receiving screen and the reports match against.
+    description: line.catalogueDescription ?? line.productName,
     qty: String(line.qty),
     unit: 'each',
     unitCost: line.unitCost,

@@ -506,6 +506,18 @@ describe('unitCostFor', () => {
     const priced = unitCostFor(product(), 's1', '38.00', { 's2::DS1234': cost({ unitCost: '42.0000' }) })
     expect(priced.unitCost).toBe('38.00')
   })
+
+  it('brings back their own words for the thing, price or no price', () => {
+    // The description comes off the LIST, not off the price on it: a code they
+    // have recorded without a figure is still a code they have a name for.
+    expect(unitCostFor(product(), 's1', '38.00', { 's1::DS1234': cost({ unitCost: '42.0000' }) }).catalogueDescription)
+      .toBe('Task chair, black')
+    expect(unitCostFor(product(), 's1', '38.00', { 's1::DS1234': cost({ unitCost: null }) }).catalogueDescription)
+      .toBe('Task chair, black')
+    expect(unitCostFor(product(), 's1', '38.00', { 's1::DS1234': cost({ description: '  ' }) }).catalogueDescription)
+      .toBeNull()
+    expect(unitCostFor(product(), 's1', '38.00', {}).catalogueDescription).toBeNull()
+  })
 })
 
 describe('planFromOrder with a price list', () => {
@@ -565,5 +577,21 @@ describe('planFromOrder with a price list', () => {
     const plan = planFromOrder(order, [supplier], new Map([['s1::DS1234', cost({ discontinued: true })]]))
     expect(plan.groups[0]!.lines[0]).toMatchObject({ discontinued: true })
     expect(plan.skipped).toEqual([])
+  })
+
+  it('carries the supplier’s own name for the thing, and keeps ours alongside it', () => {
+    // Our listing title is our own invention and means nothing on their order
+    // form. Theirs goes on the line; ours stays on it for the receiving screen
+    // and the reports to match against.
+    const plan = planFromOrder(order, [supplier], new Map([['s1::DS1234', cost()]]))
+    const line = plan.groups[0]!.lines[0]!
+    expect(line.catalogueDescription).toBe('Task chair, black')
+    expect(line.productName).toBe('Task chair')
+  })
+
+  it('has no name of theirs to use when their list does not carry the code', () => {
+    expect(planFromOrder(order, [supplier]).groups[0]!.lines[0]!.catalogueDescription).toBeNull()
+    const blank = planFromOrder(order, [supplier], new Map([['s1::DS1234', cost({ description: '' })]]))
+    expect(blank.groups[0]!.lines[0]!.catalogueDescription).toBeNull()
   })
 })

@@ -187,25 +187,37 @@ export function unitCostFor(
   supplierId: string,
   lastCost: string | null,
   catalogueCosts?: Record<string, PoCatalogueCost>,
-): { unitCost: string; costSource: PoCostSource; catalogueName: string | null; supplierSku: string | null } {
+): {
+  unitCost: string
+  costSource: PoCostSource
+  catalogueName: string | null
+  catalogueDescription: string | null
+  supplierSku: string | null
+} {
   const code = product.supplierSku?.trim() || product.sku?.trim() || ''
   const listed = code && catalogueCosts ? catalogueCosts[`${supplierId}::${catalogueSkuKey(code)}`] : undefined
+  // Their words for the thing come off the LIST, not off the price on it: a
+  // code recorded without a figure is a code with no price, but it is still the
+  // name they filed it under and still the name to order it by.
+  const catalogueDescription = listed?.description?.trim() || null
 
   if (listed?.unitCost != null) {
     return {
       unitCost: listed.unitCost,
       costSource: 'CATALOGUE',
       catalogueName: listed.catalogueName,
+      catalogueDescription,
       supplierSku: listed.supplierSku,
     }
   }
   if (lastCost != null) {
-    return { unitCost: lastCost, costSource: 'PRODUCT', catalogueName: null, supplierSku: product.supplierSku }
+    return { unitCost: lastCost, costSource: 'PRODUCT', catalogueName: null, catalogueDescription, supplierSku: product.supplierSku }
   }
   return {
     unitCost: product.costPrice ?? '0',
     costSource: product.costPrice == null ? 'NONE' : 'PRODUCT',
     catalogueName: null,
+    catalogueDescription,
     supplierSku: product.supplierSku,
   }
 }
@@ -294,6 +306,7 @@ export function planReorder(facts: ReorderFacts): PoReorderReview {
       unitCost,
       costSource: priced.costSource,
       catalogueName: priced.catalogueName,
+      catalogueDescription: priced.catalogueDescription,
       taxRatePercent,
       supplierSku: priced.supplierSku ?? last?.supplierSku ?? null,
       lineValue: fromPence(net),
@@ -332,6 +345,7 @@ function bare(
     unitCost: '0',
     costSource: 'NONE',
     catalogueName: null,
+    catalogueDescription: null,
     taxRatePercent: '0',
     supplierSku: null,
     lineValue: '0.00',

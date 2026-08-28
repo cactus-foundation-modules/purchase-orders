@@ -110,7 +110,15 @@ export const PO_DOC_CSS = `
 .po-doc-lines.po-doc-rows-none tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }
 .po-doc-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .po-doc-name { display: block; font-weight: 500; }
-.po-doc-sku { display: block; font-size: var(--po-doc-sku-size, 0.8125rem); color: var(--color-text-muted); }
+/* NO display here. This is a TABLE CELL - it was a span under the description
+   before it earned a column of its own - and display:block takes a cell out
+   of its row, which prints as a stray white box sitting under the codes rather
+   than as a column of them. */
+.po-doc-sku { font-size: var(--po-doc-sku-size, 0.8125rem); color: var(--color-text-muted); }
+/* The delivery figures, under the goods figures, lined up with the service name
+   in the description column - same top margin and same size as a detail row, so
+   the four of them read across as one line about delivery. */
+.po-doc-num-sub { display: block; margin-top: 0.25rem; font-size: var(--po-doc-detail-size, 0.8125rem); font-weight: 400; color: var(--color-text-muted); }
 .po-doc-detail { list-style: none; margin: 0.25rem 0 0; padding: 0; display: grid; gap: 0.125rem; font-size: var(--po-doc-detail-size, 0.8125rem); color: var(--color-text-muted); }
 .po-doc-detail span { font-weight: 500; }
 /* A cancelled quantity is struck through rather than removed: the line still has
@@ -183,7 +191,7 @@ export const PO_DOC_CSS = `
   .po-doc-terms, .po-doc-notes, .po-doc-notice, .po-doc-approval { color: #111 !important; }
   .po-doc-name, .po-doc-grand, .po-doc-strong, .po-doc-facts dd, .po-doc-lines td,
   .po-doc-totals dd, .po-doc-signed { color: #111 !important; }
-  .po-doc-facts dt, .po-doc-sku, .po-doc-detail, .po-doc-empty, .po-doc-note, .po-doc-reg,
+  .po-doc-facts dt, .po-doc-sku, .po-doc-detail, .po-doc-num-sub, .po-doc-empty, .po-doc-note, .po-doc-reg,
   .po-doc-cancelled, .po-doc-instructions, .po-doc-terms p, .po-doc-totals dt,
   .po-doc-lines th, .po-doc-signline { color: #444 !important; }
   .po-doc-h1, .po-doc-lead, .po-doc-totals.po-doc-total-accent .po-doc-grand { color: var(--po-doc-title-ink, #111) !important; }

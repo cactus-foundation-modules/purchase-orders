@@ -57,6 +57,38 @@ export function formatQty(value: string | number | null | undefined): string {
 }
 
 /**
+ * The delivery service on a line, named, with no money in it.
+ *
+ * What the printed document wants: the money goes in the money columns beside
+ * the goods, so putting it in the sentence as well would print it twice. A
+ * charge that arrived with no service name of its own is still called
+ * something - a bare figure under a description tells a supplier nothing.
+ */
+export function serviceLineName(serviceName: string | null, serviceCost: string | null): string | null {
+  const name = serviceName?.trim() || (serviceCost ? 'Delivery' : '')
+  return name || null
+}
+
+/**
+ * What the service costs across the whole line - the per-unit rate times the
+ * quantity - or null where there is no charge to print.
+ *
+ * Extended the same way `carriageFor` sums it: ten-thousandths, rounded to the
+ * penny once, so the figure on the line and the carriage at the foot are
+ * arrived at by the same arithmetic and cannot drift a penny apart.
+ */
+export function serviceExtendedCost(
+  serviceCost: string | null,
+  qty: string | number | null | undefined,
+): string | null {
+  const unit = Number(serviceCost)
+  if (!Number.isFinite(unit) || unit <= 0) return null
+  const count = Number(qty)
+  const n = Number.isFinite(count) && count > 0 ? count : 1
+  return fromPence(Math.round((scaled(serviceCost, 4) * n) / 100))
+}
+
+/**
  * The delivery service on a line, and what it costs, as one sentence.
  *
  * The cost is per unit and is NOT in the line total - it is summed into the
@@ -65,8 +97,9 @@ export function formatQty(value: string | number | null | undefined): string {
  * given: the unit rate is what a price list is checked against, the extended
  * one is the slice of the carriage this line accounts for.
  *
- * Shared by the printed document and the email so the two cannot word the same
- * line differently.
+ * The EMAIL's wording. The printed document has money columns to put those
+ * figures in and uses `serviceLineName` with `serviceExtendedCost` instead; a
+ * plain-text email has no columns, so it says it in words.
  */
 export function serviceLineText(
   serviceName: string | null,
@@ -74,16 +107,13 @@ export function serviceLineText(
   qty: string | number | null | undefined,
   code?: string | null,
 ): string | null {
-  const name = serviceName?.trim() || (serviceCost ? 'Delivery' : '')
+  const name = serviceLineName(serviceName, serviceCost)
   if (!name) return null
   const unit = Number(serviceCost)
   if (!Number.isFinite(unit) || unit <= 0) return name
   const count = Number(qty)
   const each = formatMoney(unit, code)
   if (!Number.isFinite(count) || count <= 1) return `${name} - ${each} in carriage`
-  // Extended the same way carriageFor sums it - ten-thousandths, rounded to the
-  // penny once - so the figure on the line and the carriage at the foot are
-  // arrived at by the same arithmetic and cannot drift a penny apart.
-  const extended = fromPence(Math.round((scaled(serviceCost, 4) * count) / 100))
+  const extended = serviceExtendedCost(serviceCost, count)
   return `${name} - ${each} each, ${formatMoney(extended, code)} in carriage`
 }

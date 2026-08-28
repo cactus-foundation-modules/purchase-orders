@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serviceLineText } from './money'
+import { serviceExtendedCost, serviceLineName, serviceLineText } from './money'
 
 // The delivery service is the one thing on a purchase order line the supplier
 // has to act on differently from every other order, and its price is the one
@@ -40,5 +40,37 @@ describe('the delivery service sentence', () => {
 
   it('follows the order into another currency', () => {
     expect(serviceLineText('Delivery', '10.0000', 1, 'PLN')).toBe('Delivery - zł 10.00 in carriage')
+  })
+})
+
+// The printed document has money columns to put those figures in, so it names
+// the service and prices it beside the goods instead of saying it in a sentence.
+// Same two figures, arrived at the same way.
+
+describe('the delivery service in the money columns', () => {
+  it('names the service with no money in it', () => {
+    expect(serviceLineName('Pre-Assembled, expected 3 September 2026', '39.0000'))
+      .toBe('Pre-Assembled, expected 3 September 2026')
+  })
+
+  it('calls a bare charge Delivery rather than printing a figure under nothing', () => {
+    expect(serviceLineName(null, '12.0000')).toBe('Delivery')
+    expect(serviceLineName(null, null)).toBeNull()
+    expect(serviceLineName('   ', null)).toBeNull()
+  })
+
+  it('extends the rate over the quantity, rounded to the penny once', () => {
+    expect(serviceExtendedCost('39.0000', 2)).toBe('78.00')
+    expect(serviceExtendedCost('3.7550', 3)).toBe('11.27')
+    expect(serviceExtendedCost('49.9500', 1)).toBe('49.95')
+  })
+
+  it('has no figure to print where nothing was charged', () => {
+    expect(serviceExtendedCost(null, 3)).toBeNull()
+    expect(serviceExtendedCost('0.0000', 3)).toBeNull()
+  })
+
+  it('treats a missing quantity as one rather than as nothing', () => {
+    expect(serviceExtendedCost('12.0000', null)).toBe('12.00')
   })
 })

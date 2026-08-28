@@ -269,7 +269,7 @@ export function serviceNameFor(lineMeta: Record<string, unknown> | null): string
 
   const targetDate = textOrNull(state?.targetDate)
   const when = targetDate ? formatServiceDate(targetDate) : null
-  const text = when ? `${tierText}, expected ${when}` : tierText
+  const text = when ? `${tierText}, expected by ${when}` : tierText
   // The column is TEXT, but the order form caps a typed service at 200 and a
   // sentence longer than that has stopped being an instruction anyway.
   return text.length > 200 ? `${text.slice(0, 197)}...` : text
@@ -369,6 +369,9 @@ export type FromOrderLine = {
   /** The price list that priced it, so the panel can say so. Null unless
    *  `costSource` is CATALOGUE. */
   catalogueName: string | null
+  /** What the SUPPLIER calls this thing on their own list. Null where their
+   *  list does not carry the code, or carries it with no description. */
+  catalogueDescription: string | null
   /** Set when the supplier's list carries this code and has marked it as no
    *  longer sold. The line is still drafted - it is a draft, and a person is
    *  going to read it - but it says so. */
@@ -488,6 +491,10 @@ export function planFromOrder(
       unitCost: listCost ?? item.costPrice ?? '0',
       costSource: listCost != null ? 'CATALOGUE' : item.costPrice != null ? 'PRODUCT' : 'NONE',
       catalogueName: listCost != null ? (listed?.catalogueName ?? null) : null,
+      // Off the list itself rather than off the price on it: a supplier whose
+      // list names the code but leaves the price blank still has a name for the
+      // thing, and it is still the name they will be reading it under.
+      catalogueDescription: listed?.description?.trim() || null,
       discontinued: listed?.discontinued ?? false,
       serviceName: serviceNameFor(item.lineMeta),
       serviceCost: serviceCostFor(item.lineMeta),

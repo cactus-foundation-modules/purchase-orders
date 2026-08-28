@@ -154,6 +154,36 @@ describe('the purchase order document blocks', () => {
     expect(html.trim()).toBe('')
   })
 
+  it('prints the delivery in the money columns, not as prose in the description', () => {
+    // The sample's first line is twelve at £3.75 a unit for delivery. What a
+    // supplier reads is a rate and an extended figure sitting under the goods
+    // ones, in the same columns; the description says what the service IS and
+    // leaves the arithmetic to the columns.
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={ctx} />))
+    expect(html).toContain('Pre-assembled delivery')
+    expect(html).not.toContain('in carriage')
+    expect(html).toContain('>\u00a33.75</span>')
+    expect(html).toContain('>\u00a345.00</span>')
+    // And the line total itself is untouched - carriage is not goods, and this
+    // moves where the figure is PRINTED, never where it is counted.
+    expect(html).toContain('\u00a31,980.00')
+  })
+
+  it('leaves a line with no delivery service showing nothing but its own figures', () => {
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={ctx} />))
+    // The second sample line has no service at all. One sub-figure per money
+    // column, from the first line only.
+    expect(html.match(/po-doc-num-sub/g)?.length).toBe(3)
+  })
+
+  it('keeps the supplier code cell a table cell', () => {
+    // It was a span under the description before it earned a column. A cell
+    // left as display:block falls out of its row and prints as a stray white
+    // box under the codes.
+    const rule = /\.po-doc-sku \{([^}]*)\}/.exec(PO_DOC_CSS)?.[1] ?? ''
+    expect(rule).not.toContain('display')
+  })
+
   it('never prints an internal note, because the document has no idea there is one', () => {
     // notes_internal is deliberately absent from the document context, so no
     // block can print it and no future block can start. "Check they have not

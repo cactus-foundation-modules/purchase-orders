@@ -165,7 +165,7 @@ describe('the lines that cannot be bought', () => {
 describe('the delivery service on a line', () => {
   it('is built from the resolver snapshot, not from the sentence on the line', () => {
     const name = serviceNameFor(shippedLineMeta)
-    expect(name).toBe('Pre-Assembled, expected 3 September 2026')
+    expect(name).toBe('Pre-Assembled, expected by 3 September 2026')
     // The two things that get rewritten when the payment lands.
     expect(name).not.toContain('SOMETHING ELSE ENTIRELY')
     expect(name).not.toContain('working days')
@@ -192,7 +192,7 @@ describe('the delivery service on a line', () => {
     // quote. The NAME is what the supplier acts on, so this is a degradation
     // and not a failure.
     const before = { data: shippedLineMeta.data, fields: shippedLineMeta.fields }
-    expect(serviceNameFor(before)).toBe('Pre-Assembled, expected 3 September 2026')
+    expect(serviceNameFor(before)).toBe('Pre-Assembled, expected by 3 September 2026')
     expect(serviceCostFor(before)).toBeNull()
     expect(serviceCostFor({ charges: [{ label: 'Gift wrap', amount: 4 }] })).toBeNull()
   })
@@ -205,7 +205,7 @@ describe('the delivery service on a line', () => {
 
   it('carries the service and its cost onto the line, and the sum onto the group', () => {
     const plan = planFromOrder(order({ items: [item({ quantity: 2, lineMeta: shippedLineMeta })] }), [supplier()])
-    expect(plan.groups[0]!.lines[0]!.serviceName).toBe('Pre-Assembled, expected 3 September 2026')
+    expect(plan.groups[0]!.lines[0]!.serviceName).toBe('Pre-Assembled, expected by 3 September 2026')
     expect(plan.groups[0]!.lines[0]!.serviceCost).toBe('39.0000')
     expect(plan.groups[0]!.carriageAmount).toBe('78.00')
   })

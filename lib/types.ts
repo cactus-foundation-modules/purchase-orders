@@ -103,7 +103,7 @@ export type PoOrderLine = {
   expectedDate: string | null
   qtyCancelled: string
   /** The delivery service this line has to be sent on, in the supplier's own
-   *  words - "Pre-assembled delivery, expected 12 May". It rides on the product
+   *  words - "Pre-assembled delivery, expected by 12 May". It rides on the product
    *  line rather than a line of its own, so nothing counts it as outstanding. */
   serviceName: string | null
   /** What that service costs, per unit, and deliberately NOT part of the line
@@ -616,6 +616,10 @@ export type PoReorderSuggestion = {
   costSource: PoCostSource
   /** The price list that priced it, where one did. */
   catalogueName: string | null
+  /** What the supplier calls this thing on their own list, where their list
+   *  names the code. It is what goes on the purchase order line, because they
+   *  are the ones reading it. */
+  catalogueDescription: string | null
   taxRatePercent: string
   supplierSku: string | null
   /** Net of tax, at the suggested quantity. */
