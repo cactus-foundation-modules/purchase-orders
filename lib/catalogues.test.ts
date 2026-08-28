@@ -527,6 +527,7 @@ describe('planFromOrder with a price list', () => {
     status: 'PAID',
     customerName: 'A Customer',
     customerPhone: null,
+    customerOrganisation: null,
     currency: 'GBP',
     shippingAddress: null,
     items: [

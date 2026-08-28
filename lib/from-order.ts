@@ -68,6 +68,10 @@ export type ShopOrderFacts = {
   status: string
   customerName: string
   customerPhone: string | null
+  /** The company the goods are going to, as the checkout collected it. Shop
+   *  keeps it on the order rather than in the address bag, and a delivery to a
+   *  business without it on the label is a parcel a post room refuses. */
+  customerOrganisation: string | null
   currency: string
   shippingAddress: Record<string, unknown> | null
   items: ShopOrderItemFacts[]
@@ -95,7 +99,8 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
 
   try {
     const orders = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT "id", "order_number", "status", "customer_name", "customer_phone", "currency", "shipping_address"
+      SELECT "id", "order_number", "status", "customer_name", "customer_phone", "customer_organisation",
+             "currency", "shipping_address"
         FROM "shp_orders"
        WHERE "id" = ${orderId}
        LIMIT 1
@@ -126,6 +131,7 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
       status: order.status as string,
       customerName: (order.customer_name as string | null) ?? '',
       customerPhone: textOrNull(order.customer_phone),
+      customerOrganisation: textOrNull(order.customer_organisation),
       currency: (order.currency as string | null) ?? 'GBP',
       shippingAddress: bag(order.shipping_address),
       items: items.map((r) => ({
@@ -308,6 +314,14 @@ export function serviceCostFor(lineMeta: Record<string, unknown> | null): string
  * mapping it by hand is the only way it does not silently vanish off the address
  * printed for the supplier.
  *
+ * The COMPANY heads the label wherever the customer gave one, with the person
+ * underneath as the contact - which is the way a delivery to a business has to
+ * be addressed, and the way a post room finds who it belongs to. Read off the
+ * address bag first and the order second: an older shop kept it on the address,
+ * a newer one keeps it on the order, and a purchase order raised off either has
+ * to carry it. With no company at all the person heads the label exactly as
+ * before.
+ *
  * Copied verbatim and never tidied. People type a street into the town box and a
  * flat number into the street box; a purchase order that "corrects" the address
  * the parcel is actually going to is a parcel that goes somewhere else.
@@ -316,11 +330,12 @@ export function shipToFromShopOrder(order: ShopOrderFacts): PoShipTo {
   const address = order.shippingAddress ?? {}
   const first = textOrNull(address.firstName) ?? ''
   const last = textOrNull(address.lastName) ?? ''
-  const name = `${first} ${last}`.trim() || order.customerName
+  const person = `${first} ${last}`.trim() || order.customerName
+  const company = textOrNull(address.company)?.trim() || order.customerOrganisation?.trim() || ''
 
   return {
-    name,
-    contact: name,
+    name: company || person,
+    contact: person,
     phone: textOrNull(address.phone) ?? order.customerPhone ?? '',
     address: {
       line1: textOrNull(address.line1) ?? '',

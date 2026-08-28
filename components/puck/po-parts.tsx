@@ -1,4 +1,4 @@
-import { formatMoney, formatQty } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, serviceLineText } from '@/modules/purchase-orders/lib/money'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
   yesNo, formatDate, paragraphs, useCtx,
@@ -186,7 +186,7 @@ export const poDocHeaderPuckComponent = {
     accountLabel: { type: 'text' as const, label: '"Account" row label' },
     showTerms: { type: 'select' as const, label: 'Payment terms row', options: yesNo },
     termsLabel: { type: 'text' as const, label: '"Payment terms" row label' },
-    showIntro: { type: 'select' as const, label: 'The opening line from settings', options: yesNo },
+    showIntro: { type: 'select' as const, label: 'Opening line ("Please supply the following...")', options: yesNo },
     numberPt: sizeField('Order number size'),
     factsPt: sizeField('Dates and numbers size'),
     introPt: sizeField('Opening line size'),
@@ -478,8 +478,24 @@ export const poDocToPuckRscComponent = { ...poDocToPuckComponent, render: PoDocT
 // to neither party's address: not the buyer's yard and not the supplier's, but a
 // customer's site, on a date, with instructions about the lorry.
 
+/** "GB" -> "United Kingdom", and anything the runtime cannot name back as it
+ *  came. A supplier reading a two-letter code off a delivery label should not
+ *  have to guess, and en-GB is pinned for the same reason every other figure on
+ *  this document is: the server renders it for the PDF and the browser renders
+ *  it on the editor canvas, and the two must agree. */
+function countryName(code: string | null | undefined): string {
+  const raw = (code ?? '').trim()
+  if (raw.length !== 2) return raw
+  try {
+    return new Intl.DisplayNames(['en-GB'], { type: 'region' }).of(raw.toUpperCase()) ?? raw
+  } catch {
+    return raw
+  }
+}
+
 type ShipToProps = DocProps & {
   heading?: string; look?: string; showInstructions?: string; showDate?: string; dateLabel?: string
+  showCountry?: string
   headingPt?: number | string; addressPt?: number | string; instructionsPt?: number | string
   radius?: string; padding?: string
 }
@@ -494,7 +510,11 @@ export function PoDocShipTo(props: ShipToProps) {
   const ctx = useCtx(props)
   const { shipTo } = ctx.order
   const font = fontStyle(props)
-  const lines = [shipTo.name, ...shipTo.addressLines].filter(Boolean)
+  // Off unless the layout asks. A UK business shipping within the UK does not
+  // want "GB" under every postcode, and it is the customer's own address so
+  // nobody can delete it by hand. An order genuinely going abroad turns it on.
+  const country = props.showCountry === 'yes' ? countryName(shipTo.country) : ''
+  const lines = [shipTo.name, ...shipTo.addressLines, country].filter(Boolean)
   const contact = [shipTo.contact, shipTo.phone].filter(Boolean).join(' · ')
   const instructions = props.showInstructions !== 'no' ? shipTo.instructions?.trim() ?? '' : ''
   // Nothing recorded at all - a collection, or an order raised before anybody
@@ -546,6 +566,7 @@ export const poDocShipToPuckComponent = {
     showDate: { type: 'select' as const, label: 'The date it is wanted by', options: yesNo },
     dateLabel: { type: 'text' as const, label: '"Wanted by" wording' },
     showInstructions: { type: 'select' as const, label: 'Delivery instructions', options: yesNo },
+    showCountry: { type: 'select' as const, label: 'Country under the postcode', options: yesNo },
     radius: radiusField('Corners'),
     padding: spaceField('Space inside the box'),
     headingPt: sizeField('Heading size'),
@@ -554,7 +575,10 @@ export const poDocShipToPuckComponent = {
   },
   defaultProps: {
     heading: 'Deliver to', fontFamily: '', look: 'panel',
-    showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes', radius: '', padding: '',
+    showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes',
+    // Off. Everything a UK business sends within the UK would otherwise carry
+    // "GB" under the postcode, and that is the majority of orders on most sites.
+    showCountry: 'no', radius: '', padding: '',
   },
   render: PoDocShipTo,
 }
@@ -649,8 +673,12 @@ export function PoDocLines(props: LinesProps) {
             const discount = Number(line.discountPercent ?? 0)
             const detail: string[] = []
             // First in the list on purpose: it is the one thing on the line the
-            // supplier has to act on differently from every other order.
-            if (line.serviceName) detail.push(line.serviceName)
+            // supplier has to act on differently from every other order. It
+            // carries its own price where there is one - the carriage at the
+            // foot is one figure for the whole order, and on an order split
+            // across services that says nothing about which line it came off.
+            const service = serviceLineText(line.serviceName, line.serviceCost, Number(line.qty) - cancelled, order.currency)
+            if (service) detail.push(service)
             if (showOurSku && line.ourSku) detail.push(`Our code ${line.ourSku}`)
             if (props.showLineDates !== 'no' && line.expectedDate) detail.push(`Expected ${formatDate(line.expectedDate)}`)
             if (props.showDiscount !== 'no' && discount > 0) detail.push(`Less ${formatQty(discount)}%`)

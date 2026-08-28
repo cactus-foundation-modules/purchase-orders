@@ -46,17 +46,26 @@ export type PoDocLine = {
   lineTotal: string
   expectedDate: string | null
   qtyCancelled: string
-  /** The delivery service this line has to be sent on. The cost is deliberately
-   *  not projected: what the supplier is owed for carriage is the order's own
-   *  carriageAmount, and a second per-line figure beside it only confuses. */
+  /** The delivery service this line has to be sent on. */
   serviceName: string | null
+  /** What that service costs, per unit. Printed beside the service name so an
+   *  order carrying several of them says which line each slice of the carriage
+   *  came off - a single carriage figure at the foot cannot. Still not part of
+   *  `lineTotal`: the money is in the order's `carriageAmount`, and counting it
+   *  twice is exactly what this module has always refused to do. */
+  serviceCost: string | null
 }
 
 export type PoDocShipTo = {
   name: string
   contact: string
   phone: string
+  /** The address without its country - see the note in lib/document.tsx. */
   addressLines: string[]
+  /** The country on its own, as the checkout recorded it ("GB"). Printed only
+   *  where the Deliver-to block is asked to, so a domestic order does not carry
+   *  a line of noise under every postcode. */
+  country: string
   instructions: string
 }
 
@@ -167,6 +176,7 @@ export const SAMPLE_PO_CONTEXT: PoDocContext = {
         expectedDate: '2026-04-24',
         qtyCancelled: '0.000',
         serviceName: 'Pre-assembled delivery',
+        serviceCost: '3.7500',
       },
       {
         id: 'sample-2',
@@ -183,6 +193,7 @@ export const SAMPLE_PO_CONTEXT: PoDocContext = {
         expectedDate: null,
         qtyCancelled: '0.000',
         serviceName: null,
+        serviceCost: null,
       },
     ],
     shipTo: {
@@ -190,6 +201,7 @@ export const SAMPLE_PO_CONTEXT: PoDocContext = {
       contact: 'Site office',
       phone: '0113 496 0000',
       addressLines: ['Unit 4, Example Business Park', 'Leeds', 'LS1 1AA'],
+      country: 'GB',
       instructions: 'Deliveries between 8am and 3pm. Tail lift needed.',
     },
     raisedByName: 'Sample Buyer',

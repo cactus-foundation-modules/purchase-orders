@@ -3,7 +3,7 @@ import { escapeHtml } from '@/lib/email/blocks'
 import { renderEmailTemplate } from '@/lib/email/render'
 import { isEmailConfigured } from '@/lib/config/env'
 import { getSiteConfig } from '@/lib/config/site'
-import { formatMoney, formatQty } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, serviceLineText } from '@/modules/purchase-orders/lib/money'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { poPdfFilename } from '@/modules/purchase-orders/lib/pdf'
 import { poDocumentPdf } from '@/modules/purchase-orders/lib/order-pdf'
@@ -46,10 +46,12 @@ function linesHtml(ctx: PoDocContext): string {
     .map((line) => {
       const qty = formatQty(Number(line.qty) - Number(line.qtyCancelled))
       const code = line.supplierSku ? ` (${escapeHtml(line.supplierSku)})` : ''
-      // The delivery service as a sub-line, exactly as the document prints it.
+      // The delivery service as a sub-line, exactly as the document prints it -
+      // same helper, so the email and the attachment cannot word it differently.
       // This is the copy most suppliers actually read.
-      const service = line.serviceName
-        ? `<br /><span style="color:#666">${escapeHtml(line.serviceName)}</span>`
+      const serviceText = serviceLineText(line.serviceName, line.serviceCost, Number(line.qty) - Number(line.qtyCancelled), ctx.order.currency)
+      const service = serviceText
+        ? `<br /><span style="color:#666">${escapeHtml(serviceText)}</span>`
         : ''
       return (
         '<tr>' +

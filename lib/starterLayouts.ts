@@ -48,7 +48,7 @@ const STANDARD_CONTENT = [
   }),
   block('PoDocShipTo', 'po-doc-shipto', {
     heading: 'Deliver to', fontFamily: '', look: 'panel',
-    showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes',
+    showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes', showCountry: 'no',
   }),
   block('PoDocLines', 'po-doc-lines', {
     fontFamily: '', headStyle: 'rule', rowRules: 'every', zebra: 'no', headCase: 'caps',
@@ -126,7 +126,7 @@ export function purchaseOrderDocumentStarters() {
           }),
           block('PoDocShipTo', 'po-doc-shipto', {
             heading: 'Deliver to', fontFamily: '', look: 'panel',
-            showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes',
+            showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes', showCountry: 'no',
           }),
           block('PoDocNotice', 'po-doc-notice', {
             lead: 'Quote {{ORDER_NUMBER}} on your invoice and delivery note.',
@@ -182,7 +182,7 @@ export function purchaseOrderDocumentStarters() {
           }),
           block('PoDocShipTo', 'po-doc-shipto', {
             heading: 'Deliver to', fontFamily: '', look: 'plain',
-            showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes',
+            showDate: 'yes', dateLabel: 'Wanted by', showInstructions: 'yes', showCountry: 'no',
           }),
           block('PoDocLines', 'po-doc-lines', {
             fontFamily: '', headStyle: 'rule', rowRules: 'every', zebra: 'no', headCase: 'caps',

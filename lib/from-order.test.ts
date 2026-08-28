@@ -63,6 +63,7 @@ function order(patch: Partial<ShopOrderFacts> = {}): ShopOrderFacts {
     status: 'PAID',
     customerName: 'Christopher Taylor-Guest',
     customerPhone: '07445 164570',
+    customerOrganisation: 'Deskwell Limited',
     currency: 'GBP',
     shippingAddress: {
       firstName: 'Chris',
@@ -224,13 +225,39 @@ describe('the drop-ship address', () => {
       postcode: 'E14 5GT',
       country: 'GB',
     })
-    expect(shipTo.name).toBe('Chris Taylor-Guest')
+    expect(shipTo.name).toBe('Deskwell Limited')
+    expect(shipTo.contact).toBe('Chris Taylor-Guest')
     expect(shipTo.phone).toBe('07445 164570')
+  })
+
+  it('heads the label with the company on the address where the shop kept it there', () => {
+    const shipTo = shipToFromShopOrder(
+      order({
+        customerOrganisation: null,
+        shippingAddress: { firstName: 'Chris', lastName: 'Taylor-Guest', company: 'Weff Ltd', line1: '1 The Yard' },
+      }),
+    )
+    expect(shipTo.name).toBe('Weff Ltd')
+    expect(shipTo.contact).toBe('Chris Taylor-Guest')
+  })
+
+  it('leaves the person heading the label when nobody gave a company', () => {
+    const shipTo = shipToFromShopOrder(
+      order({
+        customerOrganisation: null,
+        shippingAddress: { firstName: 'Chris', lastName: 'Taylor-Guest', line1: '1 The Yard' },
+      }),
+    )
+    expect(shipTo.name).toBe('Chris Taylor-Guest')
+    expect(shipTo.contact).toBe('Chris Taylor-Guest')
   })
 
   it('falls back to the order when the address names nobody', () => {
     const shipTo = shipToFromShopOrder(
-      order({ shippingAddress: { line1: '1 The Yard', city: 'Leeds', postcode: 'LS1 1AA', country: 'GB' } }),
+      order({
+        customerOrganisation: null,
+        shippingAddress: { line1: '1 The Yard', city: 'Leeds', postcode: 'LS1 1AA', country: 'GB' },
+      }),
     )
     expect(shipTo.name).toBe('Christopher Taylor-Guest')
     expect(shipTo.contact).toBe('Christopher Taylor-Guest')

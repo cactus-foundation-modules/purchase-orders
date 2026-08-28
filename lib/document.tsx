@@ -33,11 +33,11 @@ const LAYOUT_TYPE = 'purchaseOrderDocument'
 const MODULE_NAME = 'purchase-orders'
 
 /** An address record as a run of lines, with the blanks dropped. */
-function addressLines(address: PoAddress | null | undefined): string[] {
+function addressLines(address: PoAddress | null | undefined, withCountry = true): string[] {
   if (!address) return []
-  return [address.line1, address.line2, address.city, address.region, address.postcode, address.country]
-    .map((line) => (line ?? '').trim())
-    .filter(Boolean)
+  const parts = [address.line1, address.line2, address.city, address.region, address.postcode]
+  if (withCountry) parts.push(address.country)
+  return parts.map((line) => (line ?? '').trim()).filter(Boolean)
 }
 
 /** A textarea of address lines as an array, blank lines dropped - the shape the
@@ -184,12 +184,20 @@ export async function loadPoDocContext(
         expectedDate: line.expectedDate,
         qtyCancelled: line.qtyCancelled,
         serviceName: line.serviceName,
+        serviceCost: line.serviceCost,
       })),
       shipTo: {
         name: order.shipTo.name,
         contact: order.shipTo.contact,
         phone: order.shipTo.phone,
-        addressLines: addressLines(order.shipTo.address),
+        // Country deliberately left off these lines. A domestic order carrying
+        // "GB" under the postcode is a line of noise on every sheet a UK
+        // business prints, and it is the CUSTOMER's address, so nobody typed it
+        // and nobody can take it out by hand. It rides alongside instead, and
+        // the Deliver-to block prints it only where the layout asks - which is
+        // what an order actually going abroad wants.
+        addressLines: addressLines(order.shipTo.address, false),
+        country: (order.shipTo.address?.country ?? '').trim(),
         instructions: order.shipTo.instructions,
       },
       raisedByName: people.createdByUserId ? (names[people.createdByUserId] ?? '') : '',

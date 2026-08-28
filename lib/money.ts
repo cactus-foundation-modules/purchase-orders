@@ -15,6 +15,8 @@
 // for the editor canvas, and a server that thinks it is in Germany would render
 // "1.600,00" into HTML React then re-renders as "1,600.00".
 
+import { fromPence, scaled } from '@/modules/purchase-orders/lib/totals'
+
 const SYMBOLS: Record<string, string> = {
   GBP: '£',
   EUR: '€',
@@ -52,4 +54,36 @@ export function formatQty(value: string | number | null | undefined): string {
   const n = Number(value)
   if (!Number.isFinite(n)) return '0'
   return n.toLocaleString('en-GB', { maximumFractionDigits: 3 })
+}
+
+/**
+ * The delivery service on a line, and what it costs, as one sentence.
+ *
+ * The cost is per unit and is NOT in the line total - it is summed into the
+ * order's carriage - so the wording says so rather than leaving a supplier to
+ * add it on themselves. Where the line is for more than one, both figures are
+ * given: the unit rate is what a price list is checked against, the extended
+ * one is the slice of the carriage this line accounts for.
+ *
+ * Shared by the printed document and the email so the two cannot word the same
+ * line differently.
+ */
+export function serviceLineText(
+  serviceName: string | null,
+  serviceCost: string | null,
+  qty: string | number | null | undefined,
+  code?: string | null,
+): string | null {
+  const name = serviceName?.trim() || (serviceCost ? 'Delivery' : '')
+  if (!name) return null
+  const unit = Number(serviceCost)
+  if (!Number.isFinite(unit) || unit <= 0) return name
+  const count = Number(qty)
+  const each = formatMoney(unit, code)
+  if (!Number.isFinite(count) || count <= 1) return `${name} - ${each} in carriage`
+  // Extended the same way carriageFor sums it - ten-thousandths, rounded to the
+  // penny once - so the figure on the line and the carriage at the foot are
+  // arrived at by the same arithmetic and cannot drift a penny apart.
+  const extended = fromPence(Math.round((scaled(serviceCost, 4) * count) / 100))
+  return `${name} - ${each} each, ${formatMoney(extended, code)} in carriage`
 }
