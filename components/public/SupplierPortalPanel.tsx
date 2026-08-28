@@ -1,86 +1,57 @@
 'use client'
 
-import { useRef, useState, type CSSProperties } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
 import { PO_PORTAL_EVENT_LABELS, type PoPortalView } from '@/modules/purchase-orders/lib/portal-view'
+import { PortalDialog, PortalLine, PortalStyles } from '@/modules/purchase-orders/components/public/portal-ui'
 
 // The only part of this platform a supplier ever touches.
 //
-// It sits ABOVE the order document on the same page, and that is deliberate: a
-// supplier should not have to scroll past thirty lines of desks to find the
-// button that says they can supply them. Everything they can press is in this
-// panel, and the panel is the first thing on the page.
+// It sits ABOVE the order document on the same page, and everything they can
+// press is a BUTTON - one row of them, near enough one screen. The order's own
+// lines only appear once a button has been pressed, inside the dialog for that
+// one job.
+//
+// That is the whole shape of this rebuild. What was here before printed every
+// line of the order three times over - once to be re-dated, once to be marked
+// short, once to be despatched - so an eleven-line order ran to four screens of
+// tables before a supplier reached the message box, and the one button they
+// actually wanted was somewhere in the middle of it. A supplier arrives with one
+// thing to say. Ask which, then show them the lines for that.
+//
+// The names on the buttons are the ones a warehouse says out loud. "Is anything
+// short?" became "Report out of stock"; "Anything else" became "Message us";
+// "Have you sent any of it?" became "Record a despatch". Nothing about what any
+// of them does has changed.
 //
 // Most of what it does is still a PROPOSAL. Accepting the order stamps it,
 // attaching a document files it, and telling us what has left them files a
 // despatch - none of which changes a line, a price or a total. That is not a
 // limitation to be fixed later: a document somebody else can edit is not a
 // purchase order.
-//
-// Written plainly, with the site's own colour tokens and a fallback on each one,
-// because this renders inside whatever theme the site is wearing and a supplier
-// on a phone in a warehouse yard is the person it has to work for.
 
-const panel: CSSProperties = {
-  border: '1px solid var(--color-border, #ddd)',
-  borderRadius: 10,
-  background: 'var(--color-surface, #fff)',
-  color: 'var(--color-text, #111)',
-  padding: '1.25rem',
-  marginBottom: '2rem',
-}
+const ENDPOINT = '/api/m/purchase-orders/public/portal'
 
-const heading: CSSProperties = { margin: '0 0 0.25rem', fontSize: '1.125rem' }
-const sub: CSSProperties = { margin: '0 0 1rem', color: 'var(--color-text-secondary, #666)', fontSize: '0.875rem' }
-const block: CSSProperties = { borderTop: '1px solid var(--color-border, #ddd)', paddingTop: '1rem', marginTop: '1rem' }
-const label: CSSProperties = { display: 'block', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.25rem' }
-
-const field: CSSProperties = {
-  padding: '0.5rem 0.625rem',
-  border: '1px solid var(--color-border, #ddd)',
-  borderRadius: 6,
-  background: 'var(--color-bg, #fff)',
-  color: 'var(--color-text, #111)',
-  font: 'inherit',
-  width: '100%',
-  maxWidth: 420,
-}
-
-const button: CSSProperties = {
-  padding: '0.5rem 1rem',
-  borderRadius: 6,
-  border: '1px solid var(--color-primary, #2f6f4f)',
-  background: 'var(--color-primary, #2f6f4f)',
-  color: 'var(--color-on-primary, #fff)',
-  font: 'inherit',
-  cursor: 'pointer',
-}
-
-const quietButton: CSSProperties = {
-  ...button,
-  background: 'transparent',
-  color: 'var(--color-text, #111)',
-  borderColor: 'var(--color-border, #ddd)',
-}
-
-/** A download, drawn as a button but built as a link - a browser needs an anchor
- *  to save a file it has not been handed by script, and the viewer's own sandbox
- *  is a great deal happier about one. */
-const linkButton: CSSProperties = {
-  ...quietButton,
-  display: 'inline-block',
-  textDecoration: 'none',
-}
-
-const cell: CSSProperties = { padding: '0.375rem 0.5rem 0.375rem 0', borderTop: '1px solid var(--color-border, #ddd)' }
-const cellRight: CSSProperties = { ...cell, textAlign: 'right', padding: '0.375rem 0.5rem' }
-const headCell: CSSProperties = { textAlign: 'left', padding: '0.375rem 0.5rem 0.375rem 0', fontWeight: 600 }
-const headCellRight: CSSProperties = { ...headCell, textAlign: 'right', padding: '0.375rem 0.5rem' }
+/** Which dialog is up, if any. One at a time, always. */
+type Job = 'confirm' | 'proforma' | 'delay' | 'stock' | 'despatch' | 'message' | 'slips' | 'history'
 
 function when(value: string | null): string {
   if (!value) return ''
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })
+}
+
+/** A plain YYYY-MM-DD as a person reads it, built from the parts rather than
+ *  parsed: new Date('2026-09-16') is midnight UTC, which west of Greenwich is
+ *  the fifteenth. */
+function day(value: string | null): string {
+  if (!value) return ''
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!parts) return value
+  const date = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]))
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
 }
 
 /** Today, in the browser's own clock, as the plain day the server expects. Not
@@ -92,8 +63,6 @@ function today(): string {
   return local.toISOString().slice(0, 10)
 }
 
-const ENDPOINT = '/api/m/purchase-orders/public/portal'
-
 type Props = {
   view: PoPortalView
   /** The supplier's own key, straight back off the address bar. It is what the
@@ -103,14 +72,15 @@ type Props = {
 
 export function SupplierPortalPanel({ view: initial, token }: Props) {
   const [view, setView] = useState(initial)
+  const [job, setJob] = useState<Job | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
   const [dates, setDates] = useState<Record<string, string>>({})
   const [dateNote, setDateNote] = useState('')
-  const [shortNote, setShortNote] = useState('')
   const [shortages, setShortages] = useState<Record<string, string>>({})
+  const [shortNote, setShortNote] = useState('')
   const [message, setMessage] = useState('')
 
   const [proformaRef, setProformaRef] = useState('')
@@ -130,12 +100,20 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
   const packingSlipUrl = (number: string) =>
     `${ENDPOINT}/packing-slip?k=${encodeURIComponent(token)}&d=${encodeURIComponent(number)}`
 
+  /** Opening a dialog clears whatever the last one said. A green "thank you"
+   *  still sitting behind a fresh form reads as if the fresh one has already
+   *  gone through. */
+  function open(next: Job) {
+    setError(null)
+    setDone(null)
+    setJob(next)
+  }
+
   /** True when it landed, so a caller can clear its own boxes and only then. */
   async function send(body: Record<string, unknown>, said: string): Promise<boolean> {
     if (busy) return false
     setBusy(true)
     setError(null)
-    setDone(null)
     try {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
@@ -149,6 +127,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
       }
       if (data.view) setView(data.view as PoPortalView)
       setDone(said)
+      setJob(null)
       return true
     } catch {
       setError('That did not go through. Try again in a moment.')
@@ -180,7 +159,6 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
 
     setBusy(true)
     setError(null)
-    setDone(null)
     try {
       const form = new FormData()
       form.set('token', token)
@@ -196,6 +174,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
       }
       if (data.view) setView(data.view as PoPortalView)
       setDone(said)
+      setJob(null)
       if (input) input.value = ''
       return true
     } catch {
@@ -219,539 +198,679 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
     .map(([lineId, qty]) => ({ lineId, qty: qty.trim() }))
     .filter((row) => row.qty !== '' && Number(row.qty) > 0)
 
+  const waitingOnProforma = view.proforma.required && !view.proforma.paid
+  const canConfirm = view.open && !view.acknowledged && view.canAcknowledge
+  const canSendProforma = view.open && waitingOnProforma && view.canUpload
+  const canRecordDespatch = view.open && view.canDespatch && stillToSend.length > 0
+
   return (
-    <div style={panel}>
-      <h2 style={heading}>Order {view.orderNumber}</h2>
-      <p style={sub}>
-        Everything you need to tell us about this order is on this page, and the order itself is printed below.
-        Nothing you do here changes the order, so you never have to worry about pressing the wrong thing.
+    <div className="pop">
+      <PortalStyles />
+
+      <h2 className="pop-title">Purchase order {view.orderNumber}</h2>
+      <ul className="pop-status">
+        <li>
+          <span className={`pop-dot ${view.acknowledged ? 'pop-dot--good' : 'pop-dot--wait'}`} />
+          {view.statusLabel}
+        </li>
+        {view.acknowledged && (
+          <li>
+            <span className="pop-dot pop-dot--good" />
+            You accepted it{view.acknowledgedAt ? ` on ${when(view.acknowledgedAt)}` : ''}
+          </li>
+        )}
+        {view.proforma.required && (
+          <li>
+            <span className={`pop-dot ${view.proforma.paid ? 'pop-dot--good' : 'pop-dot--wait'}`} />
+            {view.proforma.paid
+              ? `Proforma paid${view.proforma.paidAt ? ` on ${when(view.proforma.paidAt)}` : ''}`
+              : view.proforma.received
+                ? 'Proforma with us to pay'
+                : 'Proforma needed'}
+          </li>
+        )}
+        {view.requiredByDate && (
+          <li>
+            <span className="pop-dot pop-dot--wait" />
+            Needed by {day(view.requiredByDate)}
+          </li>
+        )}
+        {view.shipments.length > 0 && (
+          <li>
+            <span className="pop-dot pop-dot--good" />
+            {view.shipments.length} {view.shipments.length === 1 ? 'despatch' : 'despatches'} told us about
+          </li>
+        )}
+      </ul>
+
+      <p className="pop-intro">
+        Pick what you want to tell us and we will ask for the lines it applies to. Nothing here changes the order, so
+        you never have to worry about pressing the wrong thing. The order itself is printed below.
       </p>
 
-      {/* The one thing on this panel that is not about telling us something: a
-          copy of the order to keep. It sits first because it is what a supplier
-          reaches for before anything else. */}
-      <p style={{ margin: '0 0 1rem' }}>
-        <a style={linkButton} href={orderPdfUrl}>
-          Download this order as a PDF
-        </a>
-      </p>
-
-      {error && (
-        <p style={{ color: 'var(--color-error, #b3261e)', margin: '0 0 1rem' }} role="alert">
+      {error && !job && (
+        <p className="pop-note pop-note--bad" role="alert">
           {error}
         </p>
       )}
       {done && (
-        <p style={{ color: 'var(--color-success, #2f6f4f)', margin: '0 0 1rem' }} role="status">
+        <p className="pop-note pop-note--good" role="status">
           {done}
         </p>
       )}
 
-      {!view.open ? (
-        <p style={{ margin: 0 }}>
+      {!view.open && (
+        <p className="pop-note pop-note--quiet">
           This order is marked as {view.statusLabel.toLowerCase()}, so there is nothing left to tell us about it here.
           If that is not right, reply to the email this link came in.
         </p>
-      ) : (
-        <>
-          {/* ---------------------------------------------------------------
-              The proforma, on an order to a supplier we pay up front.
-              Absent entirely on every other order, which is most of them.
-              --------------------------------------------------------------- */}
-          {view.proforma.required && (
-            <div style={block}>
-              <strong>Your proforma invoice</strong>
-              {view.proforma.paid ? (
-                <p style={{ ...sub, margin: '0.25rem 0 0' }}>
-                  Paid{view.proforma.paidAt ? ` on ${when(view.proforma.paidAt)}` : ''}
-                  {view.proforma.ref ? `, against your ${view.proforma.ref}` : ''}. You can confirm the order below.
-                </p>
-              ) : (
-                <>
-                  <p style={{ ...sub, margin: '0.25rem 0 0.5rem' }}>
-                    {view.proforma.received
-                      ? 'We have your proforma and it is with us to pay. You can send a replacement here if you need to.'
-                      : 'We pay this order up front. Send us your proforma and we will pay it, and then you can confirm the order below.'}
-                  </p>
-                  {view.canUpload ? (
-                    <>
-                      <label style={label} htmlFor="po-portal-proforma">
-                        Your proforma (PDF, JPEG, PNG or WebP)
-                      </label>
-                      <input
-                        id="po-portal-proforma"
-                        ref={proformaFile}
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png,.webp"
-                        style={{ ...field, padding: '0.375rem' }}
-                      />
-                      <label style={{ ...label, marginTop: '0.75rem' }} htmlFor="po-portal-proforma-ref">
-                        Your invoice number (optional)
-                      </label>
-                      <input
-                        id="po-portal-proforma-ref"
-                        style={field}
-                        value={proformaRef}
-                        onChange={(e) => setProformaRef(e.target.value)}
-                        maxLength={120}
-                      />
-                      <label style={{ ...label, marginTop: '0.75rem' }} htmlFor="po-portal-proforma-amount">
-                        The amount, if it is not the order total (optional)
-                      </label>
-                      <input
-                        id="po-portal-proforma-amount"
-                        style={{ ...field, maxWidth: 200 }}
-                        inputMode="decimal"
-                        value={proformaAmount}
-                        onChange={(e) => setProformaAmount(e.target.value)}
-                        maxLength={13}
-                      />
-                      <p style={{ margin: '0.75rem 0 0' }}>
-                        <button
-                          style={button}
-                          disabled={busy}
-                          onClick={() =>
-                            void upload(
-                              proformaFile.current,
-                              'proforma',
-                              { ref: proformaRef.trim(), amount: proformaAmount.trim() },
-                              'Thank you - your proforma is with us.',
-                            )
-                          }
-                        >
-                          Send us your proforma
-                        </button>
-                      </p>
-                    </>
-                  ) : (
-                    <p style={{ margin: 0 }}>Email your proforma to us, quoting {view.orderNumber}.</p>
-                  )}
-                </>
-              )}
-            </div>
-          )}
+      )}
+      {view.open && waitingOnProforma && !view.canUpload && (
+        <p className="pop-note pop-note--quiet">
+          Email us your proforma, quoting {view.orderNumber}. We will pay it, and then you can confirm the order here.
+        </p>
+      )}
+      {view.open && !view.acknowledged && waitingOnProforma && view.acknowledgeBlockedReason && (
+        <p className="pop-note pop-note--quiet">{view.acknowledgeBlockedReason}</p>
+      )}
 
-          {/* ---------------------------------------------------------------
-              Confirming the order, with their own acknowledgement attached.
-              --------------------------------------------------------------- */}
-          <div style={block}>
-            <strong>Can you supply it?</strong>
-            {view.acknowledged ? (
-              <p style={{ ...sub, margin: '0.25rem 0 0' }}>
-                Thank you - you accepted this order{view.acknowledgedAt ? ` on ${when(view.acknowledgedAt)}` : ''}.
-                {view.acknowledgementFiled ? ' We have your acknowledgement on file.' : ''}
-              </p>
-            ) : !view.canAcknowledge ? (
-              <p style={{ ...sub, margin: '0.25rem 0 0' }}>{view.acknowledgeBlockedReason}</p>
-            ) : (
-              <>
-                {view.canUpload && (
-                  <>
-                    <p style={{ ...sub, margin: '0.25rem 0 0.5rem' }}>
-                      Attach your order acknowledgement if you have one. It is not compulsory - you can simply confirm.
-                    </p>
-                    <label style={label} htmlFor="po-portal-ack">
-                      Your acknowledgement (PDF, JPEG, PNG or WebP)
-                    </label>
-                    <input
-                      id="po-portal-ack"
-                      ref={ackFile}
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.webp"
-                      style={{ ...field, padding: '0.375rem' }}
-                    />
-                    <label style={{ ...label, marginTop: '0.75rem' }} htmlFor="po-portal-ack-ref">
-                      Your own reference for it (optional)
-                    </label>
-                    <input
-                      id="po-portal-ack-ref"
-                      style={field}
-                      value={ackRef}
-                      onChange={(e) => setAckRef(e.target.value)}
-                      maxLength={120}
-                    />
-                  </>
-                )}
-                <p style={{ margin: '0.75rem 0 0', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {view.canUpload && (
-                    <button
-                      style={button}
-                      disabled={busy}
-                      onClick={() =>
-                        void upload(
-                          ackFile.current,
-                          'acknowledgement',
-                          { ref: ackRef.trim() },
-                          'Thank you - the order is confirmed and we have your acknowledgement.',
-                        )
-                      }
-                    >
-                      Confirm and send your acknowledgement
-                    </button>
-                  )}
-                  <button
-                    style={view.canUpload ? quietButton : button}
-                    disabled={busy}
-                    onClick={() =>
-                      void send(
-                        { action: 'acknowledge', ref: ackRef.trim() || undefined },
-                        'Thank you - we have told them you can supply it.',
-                      )
-                    }
-                  >
-                    {view.canUpload ? 'Confirm without a document' : 'Yes, we can supply this'}
-                  </button>
-                </p>
-              </>
-            )}
-          </div>
+      <ul className="pop-actions">
+        {canSendProforma && (
+          <Action
+            primary={!view.proforma.received}
+            name="Send your proforma"
+            hint={
+              view.proforma.received
+                ? 'We have one already - send a replacement if you need to'
+                : 'We pay this order up front, so we need your invoice first'
+            }
+            onClick={() => open('proforma')}
+          />
+        )}
+        {canConfirm && (
+          <Action
+            primary
+            name="Confirm the order"
+            hint="Tell us you can supply it, and attach your acknowledgement if you have one"
+            onClick={() => open('confirm')}
+          />
+        )}
+        {view.open && (
+          <Action
+            name="Report a delay"
+            hint="Give us a new date for any line you cannot deliver on time"
+            onClick={() => open('delay')}
+          />
+        )}
+        {view.open && (
+          <Action
+            name="Report out of stock"
+            hint="Tell us how much of a line you cannot send at all"
+            onClick={() => open('stock')}
+          />
+        )}
+        {canRecordDespatch && (
+          <Action
+            name="Record a despatch"
+            hint="Say what has left you and we will give you a packing slip for the box"
+            onClick={() => open('despatch')}
+          />
+        )}
+        {view.open && (
+          <Action name="Message us" hint="Anything else about this order" onClick={() => open('message')} />
+        )}
+      </ul>
 
-          {/* ---------------------------------------------------------------
-              Dates, PER LINE. A supplier shipping an order in three drops has
-              three answers, and one box for the lot was never the truth.
-              --------------------------------------------------------------- */}
-          <div style={block}>
-            <strong>Will any of it be later than we asked?</strong>
-            <p style={{ ...sub, margin: '0.25rem 0 0.5rem' }}>
-              Put a date against any line you cannot do on time and leave the rest blank. Somebody here will confirm
-              them.
+      <div className="pop-quiet">
+        <a className="pop-btn pop-btn--quiet pop-btn--small" href={orderPdfUrl}>
+          Download the order (PDF)
+        </a>
+        {view.shipments.length > 0 && (
+          <button type="button" className="pop-btn pop-btn--quiet pop-btn--small" onClick={() => open('slips')}>
+            Packing slips ({view.shipments.length})
+          </button>
+        )}
+        {view.events.length > 0 && (
+          <button type="button" className="pop-btn pop-btn--quiet pop-btn--small" onClick={() => open('history')}>
+            What you have told us ({view.events.length})
+          </button>
+        )}
+      </div>
+
+      {/* -------------------------------------------------------------------
+          Confirming the order, with their own acknowledgement attached.
+          One button rather than two: if they have picked a file it goes up
+          with the confirmation, and if they have not it does not.
+          ------------------------------------------------------------------- */}
+      {job === 'confirm' && (
+        <PortalDialog
+          title="Confirm the order"
+          intro="Tell us you can supply this order. It does not change anything on it."
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy}
+              onClick={() => {
+                if (view.canUpload && ackFile.current?.files?.[0]) {
+                  void upload(
+                    ackFile.current,
+                    'acknowledgement',
+                    { ref: ackRef.trim() },
+                    'Thank you - the order is confirmed and we have your acknowledgement.',
+                  )
+                  return
+                }
+                void send(
+                  { action: 'acknowledge', ref: ackRef.trim() || undefined },
+                  'Thank you - we have told them you can supply it.',
+                )
+              }}
+            >
+              Yes, we can supply this
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          {view.canUpload ? (
+            <>
+              <div className="pop-field">
+                <label className="pop-label" htmlFor="pop-ack">
+                  Your order acknowledgement, if you have one (PDF, JPEG, PNG or WebP)
+                </label>
+                <input
+                  id="pop-ack"
+                  ref={ackFile}
+                  type="file"
+                  className="pop-file"
+                  accept=".pdf,.jpg,.jpeg,.png,.webp"
+                />
+              </div>
+              <div className="pop-field">
+                <label className="pop-label" htmlFor="pop-ack-ref">
+                  Your own reference for it (optional)
+                </label>
+                <input
+                  id="pop-ack-ref"
+                  className="pop-input"
+                  value={ackRef}
+                  onChange={(e) => setAckRef(e.target.value)}
+                  maxLength={120}
+                />
+              </div>
+            </>
+          ) : (
+            <p className="pop-empty">
+              Press the button below and we will record that you have accepted {view.orderNumber}.
             </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-              <thead>
-                <tr>
-                  <th style={headCell}>Line</th>
-                  <th style={headCellRight}>We have</th>
-                  <th style={headCellRight}>You can do</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.lines.map((line) => (
-                  <tr key={line.id}>
-                    <td style={cell}>
-                      {line.description}
-                      {line.supplierSku ? ` (${line.supplierSku})` : ''}
-                      {/* The service this one has to go on. It is the only thing
-                          on the line they have to treat differently. */}
-                      {line.serviceName && (
-                        <div style={{ color: 'var(--color-text-secondary, #666)', fontSize: '0.8125rem' }}>
-                          {line.serviceName}
-                        </div>
-                      )}
-                    </td>
-                    <td style={cellRight}>{line.expectedDate ?? view.expectedDate ?? '-'}</td>
-                    <td style={{ ...cellRight, paddingRight: 0 }}>
-                      <input
-                        type="date"
-                        style={{ ...field, width: 160 }}
-                        value={dates[line.id] ?? ''}
-                        onChange={(e) => setDates((d) => ({ ...d, [line.id]: e.target.value }))}
-                        aria-label={`The date you can deliver ${line.description}`}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <label style={{ ...label, marginTop: '0.75rem' }} htmlFor="po-portal-date-note">
+          )}
+        </PortalDialog>
+      )}
+
+      {/* -------------------------------------------------------------------
+          The proforma, on an order to a supplier we pay up front. Absent
+          entirely on every other order, which is most of them.
+          ------------------------------------------------------------------- */}
+      {job === 'proforma' && (
+        <PortalDialog
+          title="Send your proforma"
+          intro="We pay this order up front. Send us your invoice and we will pay it, and then you can confirm the order."
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy}
+              onClick={() =>
+                void upload(
+                  proformaFile.current,
+                  'proforma',
+                  { ref: proformaRef.trim(), amount: proformaAmount.trim() },
+                  'Thank you - your proforma is with us.',
+                )
+              }
+            >
+              Send it
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          <div className="pop-field">
+            <label className="pop-label" htmlFor="pop-proforma">
+              Your proforma (PDF, JPEG, PNG or WebP)
+            </label>
+            <input
+              id="pop-proforma"
+              ref={proformaFile}
+              type="file"
+              className="pop-file"
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+            />
+          </div>
+          <div className="pop-row">
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-proforma-ref">
+                Your invoice number (optional)
+              </label>
+              <input
+                id="pop-proforma-ref"
+                className="pop-input"
+                value={proformaRef}
+                onChange={(e) => setProformaRef(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-proforma-amount">
+                The amount, if it is not the order total (optional)
+              </label>
+              <input
+                id="pop-proforma-amount"
+                className="pop-input"
+                inputMode="decimal"
+                value={proformaAmount}
+                onChange={(e) => setProformaAmount(e.target.value)}
+                maxLength={13}
+              />
+            </div>
+          </div>
+        </PortalDialog>
+      )}
+
+      {/* -------------------------------------------------------------------
+          Dates, PER LINE. A supplier shipping an order in three drops has
+          three answers, and one box for the lot was never the truth.
+          ------------------------------------------------------------------- */}
+      {job === 'delay' && (
+        <PortalDialog
+          title="Report a delay"
+          intro="Put a date against any line you cannot do on time and leave the rest blank. Somebody here will confirm them."
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy || dateLines.length === 0}
+              onClick={() =>
+                void send(
+                  { action: 'propose-date', lines: dateLines, note: dateNote || undefined },
+                  'Thank you - we have passed those dates on.',
+                )
+              }
+            >
+              Send {dateLines.length || ''} {dateLines.length === 1 ? 'date' : 'dates'}
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          <ul className="pop-lines">
+            {view.lines.map((line) => {
+              const asked = line.expectedDate ?? view.expectedDate
+              return (
+                <PortalLine
+                  key={line.id}
+                  name={line.description}
+                  meta={
+                    <>
+                      {[line.supplierSku, `${line.qty} ${line.unit}`, line.serviceName].filter(Boolean).join(' · ')}
+                      {asked ? ` · we asked for ${day(asked)}` : ''}
+                    </>
+                  }
+                  control={
+                    <input
+                      type="date"
+                      className="pop-input pop-input--date"
+                      value={dates[line.id] ?? ''}
+                      onChange={(e) => setDates((d) => ({ ...d, [line.id]: e.target.value }))}
+                      aria-label={`The date you can deliver ${line.description}`}
+                    />
+                  }
+                />
+              )
+            })}
+          </ul>
+          <div className="pop-field" style={{ marginTop: '1.25rem' }}>
+            <label className="pop-label" htmlFor="pop-date-note">
               Anything we should know (optional)
             </label>
             <input
-              id="po-portal-date-note"
-              style={field}
+              id="pop-date-note"
+              className="pop-input"
               value={dateNote}
               onChange={(e) => setDateNote(e.target.value)}
               maxLength={500}
             />
-            <p style={{ margin: '0.75rem 0 0' }}>
-              <button
-                style={button}
-                disabled={busy || dateLines.length === 0}
-                onClick={() =>
-                  void send(
-                    { action: 'propose-date', lines: dateLines, note: dateNote || undefined },
-                    'Thank you - we have passed those dates on.',
-                  )
-                }
-              >
-                Send us those dates
-              </button>
-            </p>
           </div>
+        </PortalDialog>
+      )}
 
-          {/* ---------------------------------------------------------------
-              What has actually left them, drop by drop, with the packing slip
-              for each one.
-              --------------------------------------------------------------- */}
-          {view.canDespatch && (
-            <div style={block}>
-              <strong>Have you sent any of it?</strong>
-              <p style={{ ...sub, margin: '0.25rem 0 0.5rem' }}>
-                Tell us what has gone and we will give you a packing slip to put in the box. Send it in as many
-                deliveries as suits you - each one gets its own slip.
-              </p>
-
-              {stillToSend.length === 0 ? (
-                <p style={{ margin: 0 }}>You have told us about everything on this order. Thank you.</p>
-              ) : (
-                <>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-                    <thead>
-                      <tr>
-                        <th style={headCell}>Line</th>
-                        <th style={headCellRight}>Still to send</th>
-                        <th style={headCellRight}>Sending now</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stillToSend.map((line) => (
-                        <tr key={line.id}>
-                          <td style={cell}>
-                            {line.description}
-                            {line.supplierSku ? ` (${line.supplierSku})` : ''}
-                            {Number(line.qtyDespatched) > 0 && (
-                              <div style={{ color: 'var(--color-text-secondary, #666)', fontSize: '0.8125rem' }}>
-                                {line.qtyDespatched} of {line.qty} already sent
-                              </div>
-                            )}
-                          </td>
-                          <td style={cellRight}>
-                            {line.qtyToSend} {line.unit}
-                          </td>
-                          <td style={{ ...cellRight, paddingRight: 0 }}>
-                            <input
-                              style={{ ...field, width: 90, textAlign: 'right' }}
-                              inputMode="decimal"
-                              value={despatchQty[line.id] ?? ''}
-                              onChange={(e) => setDespatchQty((q) => ({ ...q, [line.id]: e.target.value }))}
-                              aria-label={`How many of ${line.description} you are sending`}
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-
-                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
-                    <div>
-                      <label style={label} htmlFor="po-portal-despatch-date">
-                        The date it left you
-                      </label>
-                      <input
-                        id="po-portal-despatch-date"
-                        type="date"
-                        style={{ ...field, width: 170 }}
-                        value={despatchDate}
-                        onChange={(e) => setDespatchDate(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={label} htmlFor="po-portal-carrier">
-                        Who is carrying it (optional)
-                      </label>
-                      <input
-                        id="po-portal-carrier"
-                        style={{ ...field, width: 200 }}
-                        value={carrier}
-                        onChange={(e) => setCarrier(e.target.value)}
-                        maxLength={120}
-                      />
-                    </div>
-                    <div>
-                      <label style={label} htmlFor="po-portal-tracking">
-                        Tracking number (optional)
-                      </label>
-                      <input
-                        id="po-portal-tracking"
-                        style={{ ...field, width: 220 }}
-                        value={trackingRef}
-                        onChange={(e) => setTrackingRef(e.target.value)}
-                        maxLength={200}
-                      />
-                    </div>
-                  </div>
-
-                  <label style={{ ...label, marginTop: '0.75rem' }} htmlFor="po-portal-despatch-note">
-                    Anything we should know about this delivery (optional)
-                  </label>
+      {/* -------------------------------------------------------------------
+          Out of stock - what they cannot send at all, as opposed to late.
+          ------------------------------------------------------------------- */}
+      {job === 'stock' && (
+        <PortalDialog
+          title="Report out of stock"
+          intro="Put in how many of a line you cannot send at all. Leave the rest blank."
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy || shortLines.length === 0}
+              onClick={() =>
+                void send(
+                  { action: 'shortage', lines: shortLines, note: shortNote || undefined },
+                  'Thank you - we have told them what is out of stock.',
+                )
+              }
+            >
+              Send {shortLines.length || ''} {shortLines.length === 1 ? 'line' : 'lines'}
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          <ul className="pop-lines">
+            {view.lines.map((line) => (
+              <PortalLine
+                key={line.id}
+                name={line.description}
+                meta={[line.supplierSku, `${line.qty} ${line.unit} ordered`].filter(Boolean).join(' · ')}
+                control={
                   <input
-                    id="po-portal-despatch-note"
-                    style={field}
-                    value={despatchNote}
-                    onChange={(e) => setDespatchNote(e.target.value)}
-                    maxLength={500}
+                    className="pop-input pop-input--qty"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={shortages[line.id] ?? ''}
+                    onChange={(e) => setShortages((s) => ({ ...s, [line.id]: e.target.value }))}
+                    aria-label={`How many of ${line.description} you cannot send`}
                   />
-
-                  <p style={{ margin: '0.75rem 0 0' }}>
-                    <button
-                      style={button}
-                      disabled={busy || despatchLines.length === 0 || !despatchDate}
-                      onClick={() => {
-                        void send(
-                          {
-                            action: 'despatch',
-                            date: despatchDate,
-                            lines: despatchLines,
-                            carrier: carrier.trim() || undefined,
-                            trackingRef: trackingRef.trim() || undefined,
-                            note: despatchNote.trim() || undefined,
-                          },
-                          'Thank you - your packing slip is ready to download below.',
-                        ).then((ok) => {
-                          if (!ok) return
-                          setDespatchQty({})
-                          setTrackingRef('')
-                          setDespatchNote('')
-                        })
-                      }}
-                    >
-                      Tell us what you have sent
-                    </button>
-                  </p>
-                </>
-              )}
-
-              {view.shipments.length > 0 && (
-                <div style={{ marginTop: '1rem' }}>
-                  <strong style={{ fontSize: '0.9375rem' }}>Your deliveries, and their packing slips</strong>
-                  <ul style={{ listStyle: 'none', margin: '0.5rem 0 0', padding: 0 }}>
-                    {view.shipments.map((shipment) => (
-                      <li
-                        key={shipment.id}
-                        style={{ padding: '0.625rem 0', borderTop: '1px solid var(--color-border, #ddd)' }}
-                      >
-                        <div style={{ fontSize: '0.875rem' }}>
-                          <strong>{shipment.number}</strong> - sent {shipment.despatchedDate}
-                          {shipment.carrier ? ` by ${shipment.carrier}` : ''}
-                          {shipment.trackingRef ? `, tracking ${shipment.trackingRef}` : ''}
-                        </div>
-                        <div style={{ color: 'var(--color-text-secondary, #666)', fontSize: '0.8125rem' }}>
-                          {shipment.lines.map((line) => `${line.qty} ${line.unit} ${line.description}`).join('; ')}
-                        </div>
-                        <p style={{ margin: '0.5rem 0 0' }}>
-                          <a style={linkButton} href={packingSlipUrl(shipment.number)}>
-                            Download the packing slip
-                          </a>
-                        </p>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ---------------------------------------------------------------
-              Shortages.
-              --------------------------------------------------------------- */}
-          <div style={block}>
-            <strong>Is anything short?</strong>
-            <p style={{ ...sub, margin: '0.25rem 0 0.5rem' }}>
-              Put in how many you cannot send at all. Leave the rest blank.
-            </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
-              <thead>
-                <tr>
-                  <th style={headCell}>Line</th>
-                  <th style={headCellRight}>Ordered</th>
-                  <th style={headCellRight}>Short by</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.lines.map((line) => (
-                  <tr key={line.id}>
-                    <td style={cell}>
-                      {line.description}
-                      {line.supplierSku ? ` (${line.supplierSku})` : ''}
-                    </td>
-                    <td style={cellRight}>
-                      {line.qty} {line.unit}
-                    </td>
-                    <td style={{ ...cellRight, paddingRight: 0 }}>
-                      <input
-                        style={{ ...field, width: 90, textAlign: 'right' }}
-                        inputMode="decimal"
-                        value={shortages[line.id] ?? ''}
-                        onChange={(e) => setShortages((s) => ({ ...s, [line.id]: e.target.value }))}
-                        aria-label={`How many of ${line.description} are short`}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <label style={{ ...label, marginTop: '0.75rem' }} htmlFor="po-portal-short-note">
+                }
+              />
+            ))}
+          </ul>
+          <div className="pop-field" style={{ marginTop: '1.25rem' }}>
+            <label className="pop-label" htmlFor="pop-short-note">
               What has happened (optional)
             </label>
             <input
-              id="po-portal-short-note"
-              style={field}
+              id="pop-short-note"
+              className="pop-input"
               value={shortNote}
               onChange={(e) => setShortNote(e.target.value)}
               maxLength={500}
             />
-            <p style={{ margin: '0.75rem 0 0' }}>
-              <button
-                style={button}
-                disabled={busy || shortLines.length === 0}
-                onClick={() =>
-                  void send(
-                    { action: 'shortage', lines: shortLines, note: shortNote || undefined },
-                    'Thank you - we have told them what is short.',
-                  )
-                }
-              >
-                Tell us what is short
-              </button>
-            </p>
+          </div>
+        </PortalDialog>
+      )}
+
+      {/* -------------------------------------------------------------------
+          What has actually left them, drop by drop. The packing slip for each
+          one is behind the Packing slips button on the panel.
+          ------------------------------------------------------------------- */}
+      {job === 'despatch' && (
+        <PortalDialog
+          title="Record a despatch"
+          intro="Tell us what has gone and we will give you a packing slip to put in the box. Send it in as many deliveries as suits you - each one gets its own slip."
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy || despatchLines.length === 0 || !despatchDate}
+              onClick={() => {
+                void send(
+                  {
+                    action: 'despatch',
+                    date: despatchDate,
+                    lines: despatchLines,
+                    carrier: carrier.trim() || undefined,
+                    trackingRef: trackingRef.trim() || undefined,
+                    note: despatchNote.trim() || undefined,
+                  },
+                  'Thank you - your packing slip is ready under Packing slips.',
+                ).then((ok) => {
+                  if (!ok) return
+                  setDespatchQty({})
+                  setTrackingRef('')
+                  setDespatchNote('')
+                })
+              }}
+            >
+              Record it
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          <div className="pop-row">
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-despatch-date">
+                The date it left you
+              </label>
+              <input
+                id="pop-despatch-date"
+                type="date"
+                className="pop-input"
+                value={despatchDate}
+                onChange={(e) => setDespatchDate(e.target.value)}
+              />
+            </div>
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-carrier">
+                Who is carrying it (optional)
+              </label>
+              <input
+                id="pop-carrier"
+                className="pop-input"
+                value={carrier}
+                onChange={(e) => setCarrier(e.target.value)}
+                maxLength={120}
+              />
+            </div>
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-tracking">
+                Tracking number (optional)
+              </label>
+              <input
+                id="pop-tracking"
+                className="pop-input"
+                value={trackingRef}
+                onChange={(e) => setTrackingRef(e.target.value)}
+                maxLength={200}
+              />
+            </div>
           </div>
 
-          <div style={block}>
-            <strong>Anything else</strong>
-            <label style={{ ...label, marginTop: '0.5rem' }} htmlFor="po-portal-message">
+          {/* Whole orders go in one lorry more often than they go in three, and
+              typing the same number down eleven rows is how a supplier decides
+              to email us instead. */}
+          <div className="pop-tools">
+            <button
+              type="button"
+              className="pop-btn pop-btn--quiet pop-btn--small"
+              onClick={() =>
+                setDespatchQty(Object.fromEntries(stillToSend.map((line) => [line.id, line.qtyToSend])))
+              }
+            >
+              We are sending all of it
+            </button>
+            {despatchLines.length > 0 && (
+              <button
+                type="button"
+                className="pop-btn pop-btn--quiet pop-btn--small"
+                onClick={() => setDespatchQty({})}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <ul className="pop-lines">
+            {stillToSend.map((line) => (
+              <PortalLine
+                key={line.id}
+                name={line.description}
+                meta={
+                  <>
+                    {[line.supplierSku, `${line.qtyToSend} ${line.unit} still to send`].filter(Boolean).join(' · ')}
+                    {Number(line.qtyDespatched) > 0 ? ` · ${line.qtyDespatched} of ${line.qty} already sent` : ''}
+                  </>
+                }
+                control={
+                  <input
+                    className="pop-input pop-input--qty"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={despatchQty[line.id] ?? ''}
+                    onChange={(e) => setDespatchQty((q) => ({ ...q, [line.id]: e.target.value }))}
+                    aria-label={`How many of ${line.description} you are sending`}
+                  />
+                }
+              />
+            ))}
+          </ul>
+
+          <div className="pop-field" style={{ marginTop: '1.25rem' }}>
+            <label className="pop-label" htmlFor="pop-despatch-note">
+              Anything we should know about this delivery (optional)
+            </label>
+            <input
+              id="pop-despatch-note"
+              className="pop-input"
+              value={despatchNote}
+              onChange={(e) => setDespatchNote(e.target.value)}
+              maxLength={500}
+            />
+          </div>
+        </PortalDialog>
+      )}
+
+      {job === 'message' && (
+        <PortalDialog
+          title="Message us"
+          intro={`Anything else about ${view.orderNumber}. It goes straight to whoever raised it.`}
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy || !message.trim()}
+              onClick={() => {
+                void send({ action: 'message', text: message.trim() }, 'Thank you - your message is with them.').then(
+                  (ok) => {
+                    if (ok) setMessage('')
+                  },
+                )
+              }}
+            >
+              Send it
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          <div className="pop-field">
+            <label className="pop-label" htmlFor="pop-message">
               Your message
             </label>
             <textarea
-              id="po-portal-message"
-              rows={3}
-              style={{ ...field, maxWidth: '100%' }}
+              id="pop-message"
+              className="pop-textarea"
+              rows={5}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               maxLength={2000}
             />
-            <p style={{ margin: '0.75rem 0 0' }}>
-              <button
-                style={quietButton}
-                disabled={busy || !message.trim()}
-                onClick={() => {
-                  void send({ action: 'message', text: message.trim() }, 'Thank you - your message is with them.').then(
-                    (ok) => {
-                      if (ok) setMessage('')
-                    },
-                  )
-                }}
-              >
-                Send it
-              </button>
-            </p>
           </div>
-        </>
+        </PortalDialog>
       )}
 
-      {view.events.length > 0 && (
-        <div style={block}>
-          <strong>What you have told us</strong>
-          <ul style={{ listStyle: 'none', margin: '0.5rem 0 0', padding: 0 }}>
-            {view.events.map((event) => (
-              <li key={event.id} style={{ padding: '0.375rem 0', borderTop: '1px solid var(--color-border, #ddd)' }}>
-                <span style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary, #666)' }}>
-                  {when(event.createdAt)} - {PO_PORTAL_EVENT_LABELS[event.kind]}
-                </span>
-                <div>{event.summary}</div>
-              </li>
+      {job === 'slips' && (
+        <PortalDialog
+          title="Packing slips"
+          intro="One for every delivery you have told us about. Print it and put it in the box."
+          onClose={() => setJob(null)}
+          closeLabel="Close packing slips"
+        >
+          <ul className="pop-lines">
+            {view.shipments.map((shipment) => (
+              <PortalLine
+                key={shipment.id}
+                name={
+                  <>
+                    {shipment.number} - sent {day(shipment.despatchedDate)}
+                    {shipment.carrier ? ` by ${shipment.carrier}` : ''}
+                    {shipment.trackingRef ? `, tracking ${shipment.trackingRef}` : ''}
+                  </>
+                }
+                meta={shipment.lines.map((line) => `${line.qty} ${line.unit} ${line.description}`).join('; ')}
+                control={
+                  <a className="pop-btn pop-btn--quiet pop-btn--small" href={packingSlipUrl(shipment.number)}>
+                    Download
+                  </a>
+                }
+              />
             ))}
           </ul>
-        </div>
+        </PortalDialog>
+      )}
+
+      {job === 'history' && (
+        <PortalDialog
+          title="What you have told us"
+          intro={`Everything sent through this link about ${view.orderNumber}, newest first.`}
+          onClose={() => setJob(null)}
+          closeLabel="Close history"
+        >
+          <ul className="pop-lines">
+            {view.events.map((event) => (
+              <PortalLine
+                key={event.id}
+                name={PO_PORTAL_EVENT_LABELS[event.kind]}
+                meta={
+                  <>
+                    {when(event.createdAt)}
+                    <div style={{ marginTop: '.25rem' }}>{event.summary}</div>
+                  </>
+                }
+              />
+            ))}
+          </ul>
+        </PortalDialog>
       )}
     </div>
+  )
+}
+
+/** One button on the panel: what it does, and one line saying why you would
+ *  press it. Big enough to hit with a glove on. */
+function Action({
+  name,
+  hint,
+  primary,
+  onClick,
+}: {
+  name: string
+  hint: string
+  primary?: boolean
+  onClick: () => void
+}) {
+  return (
+    <li>
+      <button type="button" className={primary ? 'pop-action pop-action--primary' : 'pop-action'} onClick={onClick}>
+        <span className="pop-action-name">{name}</span>
+        <span className="pop-action-hint">{hint}</span>
+      </button>
+    </li>
+  )
+}
+
+/** A refusal, shown at the top of the dialog it happened in - not on the panel
+ *  behind it, where it would be covered by the very form that caused it. */
+function DialogError({ error }: { error: string | null }): ReactNode {
+  if (!error) return null
+  return (
+    <p className="pop-note pop-note--bad" role="alert">
+      {error}
+    </p>
   )
 }
