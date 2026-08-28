@@ -66,17 +66,34 @@ export async function OrderPurchasePanel({
                 <span>{po.supplierName}</span>
                 <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8125rem' }}>
                   {PO_STATUS_LABELS[po.status]} · {formatMoney(po.total, po.currency)}
+                  {po.raisedAutomatically && ' · drafted automatically when this order was paid'}
                 </span>
               </div>
             ))}
           </div>
         )}
 
-        {live.length > 0 ? (
-          <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
-            Already ordered. Cancel {live.length === 1 ? 'that purchase order' : 'those purchase orders'} first if you
-            want to raise {orderNumber} again.
+        {/* The case automation creates and the button did not: a live purchase
+            order against an order that has since been cancelled or refunded.
+            Nobody chose to raise this one, so nobody is watching it - and the
+            goods may already be on their way, which is why this says so rather
+            than doing anything about it. */}
+        {!stillOpen && live.length > 0 && (
+          <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-warning)' }}>
+            This order is {orderStatus.toLowerCase()}, but{' '}
+            {live.length === 1 ? 'a purchase order for it is' : `${live.length} purchase orders for it are`} still live.
+            Check with the supplier before cancelling {live.length === 1 ? 'it' : 'them'} - the goods may already be on
+            their way.
           </p>
+        )}
+
+        {live.length > 0 ? (
+          stillOpen && (
+            <p style={{ margin: 0, fontSize: '0.8125rem', color: 'var(--color-text-secondary)' }}>
+              Already ordered. Cancel {live.length === 1 ? 'that purchase order' : 'those purchase orders'} first if you
+              want to raise {orderNumber} again.
+            </p>
+          )
         ) : (
           plan && plan.groups.length > 0 && (
             <div style={{ display: 'grid', gap: '0.5rem' }}>

@@ -250,6 +250,7 @@ describe('the idempotency guard', () => {
       currency: 'GBP',
       total: '245.09',
       createdAt: '2026-08-27T00:00:00.000Z',
+      raisedAutomatically: false,
       ...patch,
     }
   }

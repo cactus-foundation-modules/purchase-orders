@@ -116,4 +116,25 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     requiredTags: ['orderNumber'],
     transactional: true,
   },
+  {
+    // The second one that comes to YOU. Sent only when an automatic draft could
+    // not buy everything on a paid order - never to say it went fine, because a
+    // machine that writes every morning to say so is a machine nobody reads, and
+    // the drafts are on the Orders tab either way.
+    key: 'purchase-orders.auto-draft',
+    label: 'An automatic draft could not buy everything',
+    subject: 'Purchasing needs a look at {{orderNumber}}',
+    bodyHtml:
+      '<p>{{orderNumber}} has been paid for and its purchase orders were drafted automatically.</p>' +
+      '<p><strong>{{whatHappened}}</strong></p>' +
+      '<table>{{lines}}</table>' +
+      '<p>Nothing has been sent to any supplier. Open the customer order to see where it stands, ' +
+      'or Purchasing to send the drafts that did come out.</p>',
+    mergeTags: ['orderNumber', 'whatHappened', 'lines', 'siteName'],
+    requiredTags: ['orderNumber'],
+    // The table is built in code with every value escaped as it goes - a product
+    // name is whatever a supplier's spreadsheet called it.
+    rawTags: ['lines'],
+    transactional: true,
+  },
 ]

@@ -307,6 +307,39 @@ export async function sendPortalReplyToBuyer(
   }
 }
 
+/** The report as this file needs it: the sentence and the table already built.
+ *  Assembled by lib/auto-draft-report.ts rather than here, so that file can
+ *  import this one for the sender without the two importing each other. */
+export type AutoDraftReportEmail = { orderNumber: string; whatHappened: string; lines: string }
+
+/**
+ * Tells the buyer that an automatic draft could not buy everything.
+ *
+ * Sent only where something is wrong - `autoDraftReport` decides that, and
+ * returns null on the ordinary case - because a machine that writes every
+ * morning to say it is fine is a machine nobody reads.
+ *
+ * Best-effort and never throws. It runs at the tail of a payment webhook and
+ * inside the nightly sweep, and neither of those is a thing to fail over an
+ * email. What was and was not drafted is on the customer order's Purchasing
+ * panel whether this sends or not.
+ */
+export async function sendAutoDraftReport(to: string, report: AutoDraftReportEmail): Promise<void> {
+  if (!isEmailConfigured() || !to.includes('@')) return
+  try {
+    const rendered = await renderEmailTemplate('purchase-orders.auto-draft', {
+      orderNumber: report.orderNumber,
+      whatHappened: report.whatHappened,
+      lines: report.lines,
+      siteName: await siteName(),
+    })
+    if (!rendered) return
+    await sendEmail({ to, subject: rendered.subject, html: rendered.html, text: rendered.text })
+  } catch (error) {
+    console.error('[purchase-orders] could not send the automatic draft report for', report.orderNumber, error)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Returns
 // ---------------------------------------------------------------------------

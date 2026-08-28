@@ -178,6 +178,12 @@ export type PoRaisedFromShopOrder = {
   currency: string
   total: string
   createdAt: string
+  /** Raised by the money landing rather than by somebody pressing Raise.
+   *  Read off a null `created_by_user_id`, which within `source_kind =
+   *  'FROM_ORDER'` can only mean the hook or the sweep - the button always has
+   *  a session behind it. Worth saying on the screen: a draft that appeared by
+   *  itself is one nobody has read yet. */
+  raisedAutomatically: boolean
 }
 
 /**
@@ -187,7 +193,7 @@ export type PoRaisedFromShopOrder = {
 export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFromShopOrder[]> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT o."id", o."number", o."status", o."supplier_id", o."currency", o."total", o."created_at",
-           s."name" AS "supplier_name"
+           o."created_by_user_id", s."name" AS "supplier_name"
       FROM "po_orders" o
       LEFT JOIN "po_suppliers" s ON s."id" = o."supplier_id"
      WHERE o."source_kind" = 'FROM_ORDER'
@@ -203,6 +209,7 @@ export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFrom
     currency: r.currency as string,
     total: numOrNull(r.total) ?? '0',
     createdAt: (r.created_at as Date).toISOString(),
+    raisedAutomatically: r.created_by_user_id == null,
   }))
 }
 

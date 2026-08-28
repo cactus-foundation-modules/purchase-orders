@@ -35,6 +35,11 @@ export type FromOrderRaised = {
   lineCount: number
 }
 
+/** Who caused this. Recorded because "somebody chose to buy this" and "the
+ *  money landing bought this" look identical on the Orders tab and are not the
+ *  same thing at all when one of them turns out to have been a mistake. */
+export type FromOrderRaisedBy = 'USER' | 'AUTO'
+
 export type FromOrderRunResult = {
   ordersCreated: FromOrderRaised[]
   /** Lines that could not be bought, each with a sentence saying why. */
@@ -46,7 +51,10 @@ export type FromOrderRunResult = {
 export type FromOrderRunOptions = {
   /** The customer order's `shp_orders.id`. */
   orderId: string
-  userId: string
+  /** Null where nothing was pressed by anybody - the paid-order hook and the
+   *  catch-up sweep both run with no session, exactly as the reorder job does.
+   *  It is what the audit entry reads as, and it must read as the truth. */
+  userId: string | null
 }
 
 export async function raisePurchaseOrdersFromShopOrder(
@@ -98,6 +106,7 @@ export async function raisePurchaseOrdersFromShopOrder(
     ordersCreated.push(await raiseOneOrder(order, group, plan.shipTo, config.baseCurrency, config, options.userId))
   }
 
+
   return { ordersCreated, skipped: plan.skipped, refused: null }
 }
 
@@ -107,7 +116,7 @@ async function raiseOneOrder(
   shipTo: PoShipTo,
   baseCurrency: string,
   config: { approvalRequired: boolean; approvalThreshold: number },
-  userId: string,
+  userId: string | null,
 ): Promise<FromOrderRaised> {
   const lines: OrderLineInput[] = group.lines.map((line) => ({
     productId: line.productId,
@@ -153,7 +162,9 @@ async function raiseOneOrder(
     paymentTerms: null,
     deliveryTerms: null,
     notesSupplier: null,
-    notesInternal: `Drafted from customer order ${order.orderNumber}, to be delivered straight to the customer. Nothing has been sent to the supplier.`,
+    notesInternal: userId
+      ? `Drafted from customer order ${order.orderNumber}, to be delivered straight to the customer. Nothing has been sent to the supplier.`
+      : `Drafted automatically when customer order ${order.orderNumber} was paid for, to be delivered straight to the customer. Nobody has read it and nothing has been sent to the supplier.`,
     lines,
   }
 
@@ -174,7 +185,16 @@ async function raiseOneOrder(
     'order',
     id,
     'order.created',
-    { number, total: totals.total, source: 'FROM_ORDER', shopOrder: order.orderNumber, lines: lines.length },
+    {
+      number,
+      total: totals.total,
+      source: 'FROM_ORDER',
+      // Derived rather than passed: a run with no session is a run nobody
+      // started, and the two can then never disagree.
+      raisedBy: (userId ? 'USER' : 'AUTO') satisfies FromOrderRaisedBy,
+      shopOrder: order.orderNumber,
+      lines: lines.length,
+    },
     userId,
   )
 

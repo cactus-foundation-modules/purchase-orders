@@ -109,6 +109,19 @@ export const PoConfigSchema = z.object({
   // gone or been discontinued underneath us.
   supplierCatalogues: z.boolean().default(false),
 
+  // Whether a paid customer order drafts its purchase orders by itself.
+  //
+  // OFF by default, for the third time on this schema and for the same reason
+  // each time. Everything it does can already be done by pressing Raise on the
+  // order, and an update that quietly starts drafting purchase orders on a live
+  // site is not an update anybody would thank us for.
+  //
+  // It DRAFTS AND STOPS. Nothing is approved, nothing is sent, no supplier hears
+  // anything, exactly as the nightly reorder run behaves. What is being
+  // automated is the typing, not the buying - and that line should not be moved
+  // later without somebody saying so out loud.
+  autoDraftFromPaidOrders: z.boolean().default(false),
+
   defaultShipToKind: z.enum(['WAREHOUSE', 'CUSTOMER', 'OTHER']).default('WAREHOUSE'),
   warehouse: ShipToSchema.default({}),
 

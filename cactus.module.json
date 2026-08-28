@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
@@ -58,6 +58,12 @@
       "permission": "purchase-orders.create",
       "import": "./components/admin/OrderPurchasePanel",
       "component": "OrderPurchasePanel"
+    },
+    {
+      "point": "shop.order-paid",
+      "id": "purchase-orders-draft-on-paid",
+      "import": "./lib/order-paid-provider",
+      "component": "purchaseOrdersOrderPaidObserver"
     }
   ],
   "settingsTabs": [

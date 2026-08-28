@@ -350,6 +350,29 @@ export function PurchaseOrdersSettingsTab() {
       </div>
 
       <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Buying for customer orders</h3>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={config.autoDraftFromPaidOrders}
+            disabled={!capabilities?.hasCatalogue}
+            onChange={(e) => set('autoDraftFromPaidOrders', e.target.checked)}
+          />
+          Draft the purchase orders as soon as a customer pays
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          {capabilities?.hasCatalogue
+            ? 'Off, you press Raise on the customer order when you are ready. On, the drafts are typed for you the moment the money lands - one per supplier, going straight to the customer\u2019s address. Nothing is approved and nothing is sent: a supplier still hears from you only when you send it. If something on the order could not be matched to a supplier you are emailed about that one, and only about that one.'
+            : 'There is no shop on this site, so there are no customer orders to buy for. Install the Shop module and this switches on.'}
+        </p>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          Switching this on does not go back through your history. Orders paid in the last week that never had anything
+          raised against them are picked up overnight; anything older than that is left alone, which is rather the
+          point.
+        </p>
+      </div>
+
+      <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Suppliers&rsquo; price lists</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
