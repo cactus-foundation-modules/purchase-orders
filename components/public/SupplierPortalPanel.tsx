@@ -2,7 +2,10 @@
 
 import { useRef, useState, type ReactNode } from 'react'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
-import { PO_PORTAL_EVENT_LABELS, type PoPortalView } from '@/modules/purchase-orders/lib/portal-view'
+import { withUnit } from '@/modules/purchase-orders/lib/money'
+import {
+  PO_PORTAL_EVENT_LABELS, qtyProblem, qtySaying, type PoPortalLine, type PoPortalView,
+} from '@/modules/purchase-orders/lib/portal-view'
 import { PortalDialog, PortalLine, PortalStyles } from '@/modules/purchase-orders/components/public/portal-ui'
 import { webAddress } from '@/modules/purchase-orders/lib/web-address'
 
@@ -195,21 +198,45 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
     .map(([lineId, date]) => ({ lineId, date: date.trim() }))
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date))
 
+  const pickedLines = view.lines.filter((line) => messageLines[line.id])
+
+  // Both quantity forms are held to the same figure: what is still owed on the
+  // line. A line that has all been sent is neither one to be short of nor one to
+  // send again, so it drops out of both.
+  const stillToSend = view.lines.filter((line) => Number(line.qtyToSend) > 0)
+  const byLineId = new Map(view.lines.map((line) => [line.id, line]))
+
+  /** What a typed quantity is wrong about, line by line, in the panel's own
+   *  words - which are the endpoint's words, from the same function. Sending is
+   *  off while any of them has something to say, so a supplier finds out at the
+   *  box rather than at the button. */
+  function troubles(typed: Record<string, string>, doing: 'short' | 'sending'): string[] {
+    return Object.entries(typed)
+      .map(([lineId, qty]) => {
+        const line = byLineId.get(lineId)
+        if (!line) return null
+        return qtyProblem(qty, line.qtyToSend, { description: line.description, unit: line.unit }, doing)
+      })
+      .filter((problem): problem is string => problem !== null)
+  }
+
   const shortLines = Object.entries(shortages)
     .map(([lineId, qty]) => ({ lineId, qty: qty.trim() }))
     .filter((row) => row.qty !== '' && Number(row.qty) > 0)
+  const shortTroubles = troubles(shortages, 'short')
 
-  const pickedLines = view.lines.filter((line) => messageLines[line.id])
-
-  const stillToSend = view.lines.filter((line) => Number(line.qtyToSend) > 0)
   const despatchLines = Object.entries(despatchQty)
     .map(([lineId, qty]) => ({ lineId, qty: qty.trim() }))
     .filter((row) => row.qty !== '' && Number(row.qty) > 0)
+  const despatchTroubles = troubles(despatchQty, 'sending')
 
   const waitingOnProforma = view.proforma.required && !view.proforma.paid
   const canConfirm = view.open && !view.acknowledged && view.canAcknowledge
   const canSendProforma = view.open && waitingOnProforma && view.canUpload
   const canRecordDespatch = view.open && view.canDespatch && stillToSend.length > 0
+  // Nothing outstanding is nothing to be short of, so the button goes with it
+  // rather than opening a dialog with an empty list in it.
+  const canReportShortage = view.open && stillToSend.length > 0
 
   return (
     // data-cactus-unstyled is what stops the site's own button chrome landing on
@@ -326,7 +353,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             onClick={() => open('delay')}
           />
         )}
-        {view.open && (
+        {canReportShortage && (
           <Action
             name="Report out of stock"
             hint="Tell us how much of a line you cannot send at all"
@@ -555,7 +582,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                   name={line.description}
                   meta={
                     <>
-                      {[line.supplierSku, `${line.qty} ${line.unit}`, line.serviceName].filter(Boolean).join(' · ')}
+                      {[line.supplierSku, withUnit(line.qty, line.unit), line.serviceName].filter(Boolean).join(' · ')}
                       {asked ? ` · we asked for ${day(asked)}` : ''}
                     </>
                   }
@@ -601,12 +628,16 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             <button
               type="button"
               className="pop-btn"
-              disabled={busy || shortLines.length === 0}
+              disabled={busy || shortLines.length === 0 || shortTroubles.length > 0}
               onClick={() =>
                 void send(
                   { action: 'shortage', lines: shortLines, note: shortNote || undefined },
                   'Thank you - we have told them what is out of stock.',
-                )
+                ).then((ok) => {
+                  if (!ok) return
+                  setShortages({})
+                  setShortNote('')
+                })
               }
             >
               Send {shortLines.length || ''} {shortLines.length === 1 ? 'line' : 'lines'}
@@ -619,7 +650,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
               is going out and very much not to what is missing, and a box that
               opens holding the whole line is a box somebody sends by mistake. */}
           <ul className="pop-lines">
-            {view.lines.map((line) => {
+            {stillToSend.map((line) => {
               const short = shortages[line.id] !== undefined
               return (
                 <PortalLine
@@ -640,16 +671,14 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     />
                   }
                   name={line.description}
-                  meta={[line.supplierSku, `${line.qty} ${line.unit} ordered`].filter(Boolean).join(' · ')}
+                  meta={lineMeta(line)}
                   control={
                     short ? (
-                      <input
-                        className="pop-input pop-input--qty"
-                        inputMode="decimal"
-                        placeholder="0"
+                      <QtyBox
+                        line={line}
                         value={shortages[line.id] ?? ''}
-                        onChange={(e) => setShortages((current) => ({ ...current, [line.id]: e.target.value }))}
-                        aria-label={`How many of ${line.description} you cannot send`}
+                        doing="short"
+                        onChange={(next) => setShortages((current) => ({ ...current, [line.id]: next }))}
                       />
                     ) : undefined
                   }
@@ -685,7 +714,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             <button
               type="button"
               className="pop-btn"
-              disabled={busy || despatchLines.length === 0 || !despatchDate}
+              disabled={busy || despatchLines.length === 0 || !despatchDate || despatchTroubles.length > 0}
               onClick={() => {
                 void send(
                   {
@@ -817,21 +846,14 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     />
                   }
                   name={line.description}
-                  meta={
-                    <>
-                      {[line.supplierSku, `${line.qtyToSend} ${line.unit} still to send`].filter(Boolean).join(' · ')}
-                      {Number(line.qtyDespatched) > 0 ? ` · ${line.qtyDespatched} of ${line.qty} already sent` : ''}
-                    </>
-                  }
+                  meta={lineMeta(line)}
                   control={
                     sending ? (
-                      <input
-                        className="pop-input pop-input--qty"
-                        inputMode="decimal"
-                        placeholder="0"
+                      <QtyBox
+                        line={line}
                         value={despatchQty[line.id] ?? ''}
-                        onChange={(e) => setDespatchQty((q) => ({ ...q, [line.id]: e.target.value }))}
-                        aria-label={`How many of ${line.description} you are sending`}
+                        doing="sending"
+                        onChange={(next) => setDespatchQty((q) => ({ ...q, [line.id]: next }))}
                       />
                     ) : undefined
                   }
@@ -930,7 +952,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                         />
                       }
                       name={line.description}
-                      meta={[line.supplierSku, `${line.qty} ${line.unit}`].filter(Boolean).join(' · ')}
+                      meta={[line.supplierSku, withUnit(line.qty, line.unit)].filter(Boolean).join(' · ')}
                     />
                   ))}
                 </ul>
@@ -972,7 +994,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     {shipment.trackingRef ? `, tracking ${shipment.trackingRef}` : ''}
                   </>
                 }
-                meta={shipment.lines.map((line) => `${line.qty} ${line.unit} ${line.description}`).join('; ')}
+                meta={shipment.lines.map((line) => `${withUnit(line.qty, line.unit)} ${line.description}`).join('; ')}
                 control={
                   <a className="pop-btn pop-btn--quiet pop-btn--small" href={packingSlipUrl(shipment.number)}>
                     Download
@@ -1042,5 +1064,60 @@ function DialogError({ error }: { error: string | null }): ReactNode {
     <p className="pop-note pop-note--bad" role="alert">
       {error}
     </p>
+  )
+}
+
+/** One line's own numbers, said the same way in both quantity forms: what is
+ *  left, and what has already gone where any of it has. "4 each ordered" on a
+ *  line half of which is already on a lorry was the wrong number to type
+ *  against. */
+function lineMeta(line: PoPortalLine): ReactNode {
+  const sent = Number(line.qtyDespatched) > 0 ? `${line.qtyDespatched} of ${line.qty} already sent` : ''
+  return [line.supplierSku, `${withUnit(line.qtyToSend, line.unit)} still to come`, sent].filter(Boolean).join(' · ')
+}
+
+/**
+ * The one box a supplier types a quantity into, in either form, with a line
+ * underneath saying what they have just said.
+ *
+ * The line is the point of it. A bare box holding "1" beside a description does
+ * not say whether that is one short or one going out, and the two forms look
+ * near enough identical - so it reads back "1 of 4 out of stock" or "2 of 4
+ * being sent" as they type, and turns into the refusal itself the moment the
+ * number is more than the line has left. Nothing is silently trimmed: what they
+ * typed stays in the box and the send button goes dead, which is the only
+ * version of this where they find out.
+ */
+function QtyBox({ line, value, doing, onChange }: {
+  line: PoPortalLine
+  value: string
+  doing: 'short' | 'sending'
+  onChange: (next: string) => void
+}) {
+  const problem = qtyProblem(value, line.qtyToSend, { description: line.description, unit: line.unit }, doing)
+  const saying = problem ? null : qtySaying(value, line.qtyToSend, line.unit, doing)
+  return (
+    <div className="pop-qty">
+      <input
+        className={problem ? 'pop-input pop-input--qty pop-input--wrong' : 'pop-input pop-input--qty'}
+        inputMode="decimal"
+        placeholder="0"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-invalid={problem ? true : undefined}
+        aria-label={
+          doing === 'short'
+            ? `How many of ${line.description} you cannot send`
+            : `How many of ${line.description} you are sending`
+        }
+      />
+      {problem ? (
+        <span className="pop-qty-say pop-qty-say--wrong" role="alert">
+          {problem}
+        </span>
+      ) : (
+        saying && <span className="pop-qty-say">{saying}</span>
+      )}
+    </div>
   )
 }

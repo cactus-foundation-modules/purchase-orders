@@ -1,4 +1,4 @@
-import { formatQty } from '@/modules/purchase-orders/lib/money'
+import { formatQty, formatQtyUnit } from '@/modules/purchase-orders/lib/money'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
   yesNo, formatDate, paragraphs,
@@ -451,7 +451,7 @@ export function PoPsLines(props: PsLinesProps) {
                 <td><span className="po-doc-name">{line.description}</span></td>
                 {showOurSku && <td className="po-doc-sku">{line.ourSku ?? ''}</td>}
                 {showSupplierSku && <td className="po-doc-sku">{line.supplierSku ?? ''}</td>}
-                <td className="po-doc-num">{formatQty(line.qty)} {line.unit}</td>
+                <td className="po-doc-num">{formatQtyUnit(line.qty, line.unit)}</td>
                 {showOrdered && <td className="po-doc-num">{formatQty(line.qtyOrdered)}</td>}
               </tr>
             )

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
 import type { PoOrder, PoOrderLine, PoReceiptSummary, PoStockLineResult } from '@/modules/purchase-orders/lib/types'
+import { withUnit } from '@/modules/purchase-orders/lib/money'
 import { outstanding, overReceiptFlags } from '@/modules/purchase-orders/lib/receiving'
 import { card, Field, formatDay, formatWhen, input, localToday, muted, table, td, tdRight, th, thRight } from './ui'
 
@@ -283,7 +284,7 @@ export function BookInScreen({
                     </td>
                     <td style={td}>{line.supplierSku ?? '—'}</td>
                     <td style={tdRight}>
-                      {trimQty(Number(line.qty))} {line.unit}
+                      {withUnit(trimQty(Number(line.qty)), line.unit)}
                     </td>
                     <td style={tdRight}>{trimQty(Number(line.qtyReceived))}</td>
                     <td style={tdRight}>{trimQty(left)}</td>

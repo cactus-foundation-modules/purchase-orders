@@ -223,8 +223,10 @@ export function matchBill(
           // positive means the supplier wants more than the order said.
           amount: money(Math.round(((scaled(unit, 4) - scaled(ordered, 4)) * scaled(qty, 3)) / 100_000)),
           message:
-            `${line.description || orderLine.description}: the order says ${ordered} each, ` +
-            `the invoice says ${unit} each.`,
+            // "a unit" rather than "each": this is a PRICE per one of them, and
+            // the order screen says it the same way beside the service cost box.
+            `${line.description || orderLine.description}: the order says ${ordered} a unit, ` +
+            `the invoice says ${unit}.`,
         })
       }
     }

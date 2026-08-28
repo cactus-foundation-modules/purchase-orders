@@ -81,10 +81,16 @@ export async function POST(request: NextRequest, { params }: Params) {
   const wanted = shipmentLinesFrom(parsed.data)
   if (wanted.length === 0) return errorResponse('Put a quantity against at least one line.')
 
-  // Clamped against what is genuinely left, using the same function the
-  // supplier's own page is clamped against. A packing slip listing goods that
-  // are not on the order is worse than no packing slip, and two people filing
-  // the same pallet from two directions is exactly how that happens.
+  // Clamped against what is genuinely left, off the same despatchableLines() the
+  // supplier's own page is held to. A packing slip listing goods that are not on
+  // the order is worse than no packing slip, and two people filing the same
+  // pallet from two directions is exactly how that happens.
+  //
+  // Clamped rather than refused, unlike the portal: this is somebody in the
+  // building looking at the outstanding figures on the same screen, and the
+  // trimming is handed straight back to them below. The supplier's page has no
+  // such screen behind it, so there a number that is too big is refused outright
+  // rather than quietly cut down to size.
   const outstanding = new Map((await despatchableLines(id)).map((line) => [line.orderLineId, line]))
   const lines: { orderLineId: string; description: string; qty: string }[] = []
   let trimmed = 0

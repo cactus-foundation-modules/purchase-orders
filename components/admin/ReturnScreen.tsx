@@ -11,6 +11,7 @@ import {
   creditOutstanding, isReturnEditable, isReturnStockable, returnableQty, returnTotals,
   type PoReturnTransition,
 } from '@/modules/purchase-orders/lib/returning'
+import { withUnit } from '@/modules/purchase-orders/lib/money'
 import { readBooksOutcome } from '@/modules/purchase-orders/lib/books-outcome'
 import {
   card, Field, formatDay, formatWhen, input, linkButton, localToday, Money, muted,
@@ -391,7 +392,7 @@ export function ReturnScreen({ returnId, orderId, canReceive, canBills }: Props)
                     <td style={td}>{line.description}</td>
                     <td style={td}>{line.supplierSku ?? '—'}</td>
                     <td style={tdRight}>
-                      {trimQty(line.qtyReceived)} {line.unit}
+                      {withUnit(trimQty(line.qtyReceived), line.unit)}
                     </td>
                     <td style={tdRight}>{trimQty(line.qtyReturned)}</td>
                     <td style={tdRight}>

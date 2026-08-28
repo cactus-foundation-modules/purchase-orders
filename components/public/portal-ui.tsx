@@ -91,6 +91,14 @@ export const PORTAL_CSS = `
 .pop-lines--picker .pop-line:last-child{border-bottom:0}
 .pop-tick input{flex:none;width:1.125rem;height:1.125rem;margin:.0625rem 0 0;accent-color:var(--color-primary,#2f6f4f)}
 .pop-input--qty{width:6rem;text-align:right}
+/* A box that has been told it is wrong, and the line under it that says so.
+   The quantity column is right-aligned, so the sentence hangs off the same
+   edge - and it wraps rather than widening the column, which on a phone is the
+   difference between a readable row and a horizontal scrollbar. */
+.pop-input--wrong{border-color:var(--color-error,#b3261e)}
+.pop-qty{display:flex;flex-direction:column;align-items:flex-end;gap:.25rem;max-width:14rem}
+.pop-qty-say{font-size:.75rem;line-height:1.3;text-align:right;color:var(--color-text-secondary,#666)}
+.pop-qty-say--wrong{color:var(--color-error,#b3261e)}
 .pop-input--date{width:10.5rem}
 .pop-tools{display:flex;flex-wrap:wrap;gap:.5rem;margin:.875rem 0 1.25rem}
 .pop-empty{margin:0;color:var(--color-text-secondary,#666)}
@@ -116,6 +124,10 @@ export const PORTAL_CSS = `
 @media (max-width:520px){
   .pop-line{grid-template-columns:minmax(0,1fr)}
   .pop-input--date{width:100%}
+  /* Stacked, the quantity box and its sentence read left to right like the rest
+     of the row rather than hugging an edge that is no longer there. */
+  .pop-qty{align-items:flex-start;max-width:none}
+  .pop-qty-say{text-align:left}
 }
 /* Nobody needs a printed page with a "yes, we can supply this" button on it. */
 @media print{.pop{display:none}}

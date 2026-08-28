@@ -57,6 +57,43 @@ export function formatQty(value: string | number | null | undefined): string {
 }
 
 /**
+ * A unit as it should PRINT, which for most lines is nothing at all.
+ *
+ * "each" is the column default and what every line raised without anybody
+ * touching the unit box carries, so printing it put the word after every
+ * quantity on every document, email and screen in the module - "4 each", "1
+ * each", "12 each" - which is noise dressed up as information. A quantity with
+ * no unit beside it is a count, and a count is what it nearly always is. Metres,
+ * boxes, pallets and the rest still print, because those genuinely change what
+ * the number means.
+ *
+ * Display only. The stored value is untouched: 'each' stays in the column, in
+ * the CSV export and in the unit box on the order screen, where somebody typing
+ * over it needs to see what is there.
+ */
+export function unitLabel(unit: string | null | undefined): string {
+  const trimmed = (unit ?? '').trim()
+  return trimmed.toLowerCase() === 'each' ? '' : trimmed
+}
+
+/** A quantity that has ALREADY been rendered, with its unit put after it - for
+ *  the screens that trim their own numbers. Same suppression, no reformatting:
+ *  a caller that has decided how its number reads keeps that decision. */
+export function withUnit(shown: string | number, unit: string | null | undefined): string {
+  const label = unitLabel(unit)
+  return label ? `${shown} ${label}` : String(shown)
+}
+
+/** A quantity and its unit the way they read together: "4", "2.5 m", "3 boxes". */
+export function formatQtyUnit(
+  value: string | number | null | undefined,
+  unit: string | null | undefined,
+): string {
+  const label = unitLabel(unit)
+  return label ? `${formatQty(value)} ${label}` : formatQty(value)
+}
+
+/**
  * The delivery service on a line, named, with no money in it.
  *
  * What the printed document wants: the money goes in the money columns beside
@@ -115,5 +152,5 @@ export function serviceLineText(
   const each = formatMoney(unit, code)
   if (!Number.isFinite(count) || count <= 1) return `${name} - ${each} in carriage`
   const extended = serviceExtendedCost(serviceCost, count)
-  return `${name} - ${each} each, ${formatMoney(extended, code)} in carriage`
+  return `${name} - ${each} a unit, ${formatMoney(extended, code)} in carriage`
 }

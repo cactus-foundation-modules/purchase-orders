@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  isPortalOpen, parsePortalDate, portalEventSummary, portalView,
+  isPortalOpen, parsePortalDate, portalEventSummary, portalView, qtyProblem, qtySaying, qtyThousandths,
 } from '@/modules/purchase-orders/lib/portal-view'
 import type { PoOrder, PoOrderLine, PoStatus } from '@/modules/purchase-orders/lib/types'
 
@@ -313,5 +313,77 @@ describe('dates off the wire', () => {
     for (const bad of ['4 May', '2026-5-4', '2026-05-04T00:00:00Z', 42, null, undefined, {}]) {
       expect(parsePortalDate(bad)).toBeNull()
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The quantity rule both forms are held to
+// ---------------------------------------------------------------------------
+
+describe('qtyProblem', () => {
+  const what = { description: 'Oak desk', unit: 'each' }
+
+  it('lets through anything up to what is left, in either form', () => {
+    for (const doing of ['short', 'sending'] as const) {
+      expect(qtyProblem('1', '4', what, doing)).toBeNull()
+      expect(qtyProblem('4', '4', what, doing)).toBeNull()
+      expect(qtyProblem('2.5', '4', what, doing)).toBeNull()
+      // An empty box is not yet an answer, so it is not yet a complaint either.
+      expect(qtyProblem('', '4', what, doing)).toBeNull()
+      expect(qtyProblem('   ', '4', what, doing)).toBeNull()
+    }
+  })
+
+  it('refuses more than the line has left, and says how much that is', () => {
+    expect(qtyProblem('10', '4', what, 'short')).toBe(
+      'Only 4 of Oak desk is left on this order, so you cannot be short of more than that.',
+    )
+    expect(qtyProblem('10', '4', what, 'sending')).toBe(
+      'Only 4 of Oak desk is left to send, so you cannot send more than that.',
+    )
+    // The margin that floating point gets wrong: 4.001 is genuinely more than 4.
+    expect(qtyProblem('4.001', '4', what, 'sending')).not.toBeNull()
+    // ...and the one it gets wrong the other way: 4.000 is not.
+    expect(qtyProblem('4.000', '4', what, 'sending')).toBeNull()
+  })
+
+  it('refuses a line with nothing left on it at all', () => {
+    expect(qtyProblem('1', '0', what, 'short')).toBe(
+      'There is none of Oak desk left on this order to be short of.',
+    )
+    expect(qtyProblem('1', '0', what, 'sending')).toBe('There is none of Oak desk left to send.')
+  })
+
+  it('refuses nothing and nonsense', () => {
+    for (const bad of ['0', '-2', 'lots']) {
+      expect(qtyProblem(bad, '4', what, 'short')).toBe('Put a number in that is more than nothing.')
+    }
+  })
+})
+
+describe('qtySaying', () => {
+  it('reads back what they have just told us', () => {
+    expect(qtySaying('1', '4', 'each', 'short')).toBe('1 of 4 out of stock')
+    expect(qtySaying('2', '4', 'each', 'sending')).toBe('2 of 4 being sent')
+    // A real unit still prints; the column default 'each' is the only one that
+    // disappears, because it is what a line nobody touched carries.
+    expect(qtySaying('2.5', '4', 'm', 'short')).toBe('2.5 of 4 m out of stock')
+    expect(qtySaying('1', '4', 'boxes', 'sending')).toBe('1 of 4 boxes being sent')
+  })
+
+  it('says nothing at all about an empty or unreadable box', () => {
+    for (const bad of ['', '   ', '0', 'lots']) {
+      expect(qtySaying(bad, '4', 'each', 'short')).toBeNull()
+    }
+  })
+})
+
+describe('qtyThousandths', () => {
+  it('counts in thousandths so quantities compare as numbers rather than floats', () => {
+    expect(qtyThousandths('4')).toBe(4000)
+    expect(qtyThousandths('4.000')).toBe(4000)
+    expect(qtyThousandths('4.001')).toBe(4001)
+    expect(qtyThousandths('0.1') + qtyThousandths('0.2')).toBe(qtyThousandths('0.3'))
+    expect(Number.isNaN(qtyThousandths('lots'))).toBe(true)
   })
 })

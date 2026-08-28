@@ -1,4 +1,4 @@
-import { formatMoney, formatQty } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, formatQtyUnit } from '@/modules/purchase-orders/lib/money'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
   yesNo, formatDate, paragraphs,
@@ -435,7 +435,7 @@ export function PoRetLines(props: RetLinesProps) {
                   )}
                 </td>
                 {codeColumn && <td className="po-doc-sku">{line.supplierSku ?? ''}</td>}
-                <td className="po-doc-num">{formatQty(line.qty)} {line.unit}</td>
+                <td className="po-doc-num">{formatQtyUnit(line.qty, line.unit)}</td>
                 <td className="po-doc-num">{formatMoney(line.unitCost, ret.currency)}</td>
                 <td className="po-doc-num">{formatMoney(line.lineTotal, ret.currency)}</td>
               </tr>

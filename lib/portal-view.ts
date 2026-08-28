@@ -1,3 +1,4 @@
+import { withUnit } from './money'
 import type { PoOrder, PoStatus } from './types'
 import { PO_STATUS_LABELS } from './types'
 
@@ -359,4 +360,77 @@ export function portalView(
     shipments: extras.shipments ?? [],
     events,
   }
+}
+
+/**
+ * A quantity as typed, in thousandths - which is the precision
+ * po_order_lines.qty is stored at.
+ *
+ * Whole numbers, so two quantities compare as the different numbers they are
+ * rather than as two floats that nearly agree: 4.001 against 4 is a real
+ * difference and 4 against 4.0 is not, and `>` on the raw Numbers gets the
+ * second of those wrong often enough to matter.
+ *
+ * NaN for anything unreadable, which every caller treats as "no".
+ */
+export function qtyThousandths(value: string | number | null | undefined): number {
+  const n = Number(value ?? 0)
+  return Number.isFinite(n) ? Math.round(n * 1000) : Number.NaN
+}
+
+/** A quantity with its unit, the way it reads in a sentence: "4", "2.5 m". The
+ *  unit goes through unitLabel(), so the column default prints as nothing at
+ *  all - "you cannot be short of more than 4" is the sentence, not "4 each". */
+export function qtyWithUnit(qty: string | number | null | undefined, unit: string | null | undefined): string {
+  const n = Number(qty ?? 0)
+  return withUnit(Number.isFinite(n) ? String(n) : '0', unit)
+}
+
+/**
+ * Why a quantity a supplier has typed against a line is not one we can take, or
+ * null when it is fine.
+ *
+ * One function for both forms, because "you cannot say more than is left" is the
+ * same rule whether they are telling us a line is short or telling us it has
+ * gone - and it is a rule the panel and the endpoint have to agree on to the
+ * letter. The panel shows it under the box as they type; the endpoint says the
+ * same thing back to anything that posts round the panel.
+ */
+export function qtyProblem(
+  typed: string,
+  left: string | number,
+  what: { description: string; unit: string | null },
+  doing: 'short' | 'sending',
+): string | null {
+  const trimmed = typed.trim()
+  if (trimmed === '') return null
+  const want = qtyThousandths(trimmed)
+  if (!Number.isFinite(want) || want <= 0) return 'Put a number in that is more than nothing.'
+  const cap = qtyThousandths(left)
+  if (!Number.isFinite(cap) || cap <= 0) {
+    return doing === 'short'
+      ? `There is none of ${what.description} left on this order to be short of.`
+      : `There is none of ${what.description} left to send.`
+  }
+  if (want <= cap) return null
+  const remaining = qtyWithUnit(left, what.unit)
+  return doing === 'short'
+    ? `Only ${remaining} of ${what.description} is left on this order, so you cannot be short of more than that.`
+    : `Only ${remaining} of ${what.description} is left to send, so you cannot send more than that.`
+}
+
+/** What the supplier is telling us, said back to them as they type it: "1 of 4
+ *  out of stock", "2 of 4 being sent". The whole point of the line is that a
+ *  number in a box on its own does not say which of the two it is. */
+export function qtySaying(
+  typed: string,
+  left: string | number,
+  unit: string | null,
+  doing: 'short' | 'sending',
+): string | null {
+  const want = Number(typed.trim())
+  if (!typed.trim() || !Number.isFinite(want) || want <= 0) return null
+  const cap = Number(left)
+  const of = Number.isFinite(cap) && cap > 0 ? ` of ${qtyWithUnit(cap, unit)}` : ''
+  return doing === 'short' ? `${want}${of} out of stock` : `${want}${of} being sent`
 }

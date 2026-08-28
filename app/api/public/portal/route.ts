@@ -13,7 +13,7 @@ import {
 } from '@/modules/purchase-orders/lib/portal'
 import { hashPortalIp } from '@/modules/purchase-orders/lib/portal-token'
 import { allowPortalWriteIp, allowPortalWriteToken, portalClientIp } from '@/modules/purchase-orders/lib/portal-rate-limit'
-import { isPortalOpen, portalEventSummary } from '@/modules/purchase-orders/lib/portal-view'
+import { isPortalOpen, portalEventSummary, qtyProblem, qtyThousandths } from '@/modules/purchase-orders/lib/portal-view'
 import type { PoPortalEventKind } from '@/modules/purchase-orders/lib/portal-view'
 
 // POST - the things a supplier may say back through their own link.
@@ -100,15 +100,33 @@ export async function POST(request: NextRequest) {
       break
     }
     case 'shortage': {
+      // What is genuinely still owed on each line, worked out here rather than
+      // trusted off the form - the same figure the despatch form is held to, and
+      // for the same reason. A supplier cannot be short of four when they only
+      // ever had two on order, and a shortage bigger than the line is a number
+      // somebody here would then have to unpick by phone.
+      //
+      // Refused rather than quietly cut down to size. A form that takes "10",
+      // files "4" and says thank you has told the supplier something that is not
+      // true, and they will not find out until the delivery is wrong.
       const byId = new Map(order.lines.map((line) => [line.id, line]))
-      const lines = body.lines
-        .map((row) => {
-          const line = byId.get(row.lineId)
-          return line
-            ? { lineId: line.id, description: line.description, supplierSku: line.supplierSku, qty: row.qty }
-            : null
+      const outstanding = new Map(
+        (await despatchableLines(order.id)).map((line) => [line.orderLineId, line]),
+      )
+      const lines: { lineId: string; description: string; supplierSku: string | null; qty: string }[] = []
+      for (const row of body.lines) {
+        const line = byId.get(row.lineId)
+        if (!line) continue
+        const left = outstanding.get(row.lineId)?.qtyOutstanding ?? '0'
+        const problem = qtyProblem(row.qty, left, { description: line.description, unit: line.unit }, 'short')
+        if (problem) return errorResponse(problem, 409)
+        lines.push({
+          lineId: line.id,
+          description: line.description,
+          supplierSku: line.supplierSku,
+          qty: String(Number(row.qty)),
         })
-        .filter((row): row is { lineId: string; description: string; supplierSku: string | null; qty: string } => row !== null)
+      }
       if (lines.length === 0) return errorResponse('Those lines are not on this order.')
       kind = 'SHORTAGE'
       payload = { lines, note }
@@ -129,13 +147,22 @@ export async function POST(request: NextRequest) {
       for (const row of body.lines) {
         const line = outstanding.get(row.lineId)
         if (!line) continue
-        const qty = Math.min(Number(row.qty), Number(line.qtyOutstanding))
-        if (!(qty > 0)) continue
+        // Refused rather than cut down to the outstanding figure. Silently
+        // filing four when they told us ten reads as agreement, and the first
+        // anybody hears of it is a packing slip that does not match the lorry.
+        const problem = qtyProblem(
+          row.qty,
+          line.qtyOutstanding,
+          { description: line.description, unit: line.unit },
+          'sending',
+        )
+        if (problem) return errorResponse(problem, 409)
+        if (!(qtyThousandths(row.qty) > 0)) continue
         lines.push({
           lineId: row.lineId,
           description: line.description,
           supplierSku: line.supplierSku,
-          qty: qty.toFixed(3),
+          qty: Number(row.qty).toFixed(3),
         })
       }
       if (lines.length === 0) {

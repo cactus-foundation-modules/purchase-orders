@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",

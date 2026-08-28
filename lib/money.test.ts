@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { serviceExtendedCost, serviceLineName, serviceLineText } from './money'
+import { formatQtyUnit, serviceExtendedCost, serviceLineName, serviceLineText, unitLabel, withUnit } from './money'
 
 // The delivery service is the one thing on a purchase order line the supplier
 // has to act on differently from every other order, and its price is the one
@@ -15,12 +15,12 @@ describe('the delivery service sentence', () => {
 
   it('gives the unit rate and the extended figure where there is more than one', () => {
     expect(serviceLineText('Pre-Assembled', '39.0000', 2, 'GBP'))
-      .toBe('Pre-Assembled - £39.00 each, £78.00 in carriage')
+      .toBe('Pre-Assembled - £39.00 a unit, £78.00 in carriage')
   })
 
   it('rounds the extended figure to the penny, from a rate carried to four places', () => {
     expect(serviceLineText('Installation', '3.7550', 3, 'GBP'))
-      .toBe('Installation - £3.76 each, £11.27 in carriage')
+      .toBe('Installation - £3.76 a unit, £11.27 in carriage')
   })
 
   it('prints the service alone when it cost nothing - a free delivery is still a promise', () => {
@@ -72,5 +72,38 @@ describe('the delivery service in the money columns', () => {
 
   it('treats a missing quantity as one rather than as nothing', () => {
     expect(serviceExtendedCost('12.0000', null)).toBe('12.00')
+  })
+})
+
+describe('unitLabel', () => {
+  it('swallows the column default and nothing else', () => {
+    // 'each' is what every line raised without touching the unit box carries, so
+    // printing it put the word after every quantity in the module.
+    for (const same of ['each', 'Each', 'EACH', '  each  ']) expect(unitLabel(same)).toBe('')
+    expect(unitLabel(null)).toBe('')
+    expect(unitLabel('')).toBe('')
+    // Anything somebody actually typed still prints - it changes what the
+    // number means.
+    expect(unitLabel('m')).toBe('m')
+    expect(unitLabel('boxes')).toBe('boxes')
+    expect(unitLabel('ea')).toBe('ea')
+    expect(unitLabel(' pallets ')).toBe('pallets')
+  })
+})
+
+describe('formatQtyUnit and withUnit', () => {
+  it('prints a bare count for the default unit', () => {
+    expect(formatQtyUnit('4.000', 'each')).toBe('4')
+    expect(formatQtyUnit('4.000', null)).toBe('4')
+    expect(withUnit('4', 'each')).toBe('4')
+  })
+
+  it('keeps a real unit beside the figure', () => {
+    expect(formatQtyUnit('2.500', 'm')).toBe('2.5 m')
+    expect(withUnit('2.5', 'm')).toBe('2.5 m')
+  })
+
+  it('leaves an already-rendered figure exactly as the caller wrote it', () => {
+    expect(withUnit('0.50', 'boxes')).toBe('0.50 boxes')
   })
 })

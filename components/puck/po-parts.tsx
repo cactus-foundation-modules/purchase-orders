@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import { formatMoney, formatQty, serviceExtendedCost, serviceLineName } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, formatQtyUnit, serviceExtendedCost, serviceLineName } from '@/modules/purchase-orders/lib/money'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
   yesNo, formatDate, paragraphs, useCtx,
@@ -715,11 +715,11 @@ export function PoDocLines(props: LinesProps) {
                         deleted: the supplier is holding an earlier revision, and
                         what they need to see is which line changed. */}
                     {cancelled > 0 && (
-                      <span className="po-doc-cancelled">{formatQty(cancelled)} {line.unit} cancelled</span>
+                      <span className="po-doc-cancelled">{formatQtyUnit(cancelled, line.unit)} cancelled</span>
                     )}
                   </td>
                   {codeColumn && <td className="po-doc-sku">{line.supplierSku ?? ''}</td>}
-                  <td className="po-doc-num">{formatQty(qty)} {line.unit}</td>
+                  <td className="po-doc-num">{formatQtyUnit(qty, line.unit)}</td>
                   <td className="po-doc-num">{formatMoney(line.unitCost, order.currency)}</td>
                   <td className="po-doc-num">{formatMoney(line.lineTotal, order.currency)}</td>
                 </tr>
@@ -728,7 +728,7 @@ export function PoDocLines(props: LinesProps) {
                     <td className="po-doc-service">{service}</td>
                     {codeColumn && <td className="po-doc-sku" />}
                     <td className="po-doc-num">
-                      {serviceTotal && <span className="po-doc-num-sub">{formatQty(qty)} {line.unit}</span>}
+                      {serviceTotal && <span className="po-doc-num-sub">{formatQtyUnit(qty, line.unit)}</span>}
                     </td>
                     <td className="po-doc-num">
                       {serviceTotal && <span className="po-doc-num-sub">{formatMoney(line.serviceCost, order.currency)}</span>}

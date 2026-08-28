@@ -3,7 +3,7 @@ import { escapeHtml } from '@/lib/email/blocks'
 import { renderEmailTemplate } from '@/lib/email/render'
 import { isEmailConfigured } from '@/lib/config/env'
 import { getSiteConfig } from '@/lib/config/site'
-import { formatMoney, formatQty, serviceLineText } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, formatQtyUnit, serviceLineText, withUnit } from '@/modules/purchase-orders/lib/money'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { poPdfFilename } from '@/modules/purchase-orders/lib/pdf'
 import { poDocumentPdf } from '@/modules/purchase-orders/lib/order-pdf'
@@ -56,7 +56,7 @@ function linesHtml(ctx: PoDocContext): string {
       return (
         '<tr>' +
         `<td>${escapeHtml(line.description)}${code}${service}</td>` +
-        `<td align="center">${escapeHtml(qty)} ${escapeHtml(line.unit)}</td>` +
+        `<td align="center">${escapeHtml(withUnit(qty, line.unit))}</td>` +
         `<td align="right">${escapeHtml(formatMoney(line.lineTotal, ctx.order.currency))}</td>` +
         '</tr>'
       )
@@ -216,7 +216,7 @@ export async function sendOrderChase(
       (line) =>
         '<tr>' +
         `<td>${escapeHtml(line.description)}${line.supplierSku ? ` (${escapeHtml(line.supplierSku)})` : ''}</td>` +
-        `<td align="center">${escapeHtml(formatQty(line.qtyOutstanding))} ${escapeHtml(line.unit)}</td>` +
+        `<td align="center">${escapeHtml(formatQtyUnit(line.qtyOutstanding, line.unit))}</td>` +
         '</tr>',
     )
     .join('')
@@ -377,7 +377,7 @@ function returnLinesHtml(ctx: PoRetDocContext): string {
       return (
         '<tr>' +
         `<td>${escapeHtml(line.description)}${code}</td>` +
-        `<td align="center">${escapeHtml(formatQty(line.qty))} ${escapeHtml(line.unit)}</td>` +
+        `<td align="center">${escapeHtml(formatQtyUnit(line.qty, line.unit))}</td>` +
         `<td align="right">${escapeHtml(formatMoney(line.lineTotal, ctx.ret.currency))}</td>` +
         '</tr>'
       )

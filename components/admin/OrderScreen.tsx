@@ -9,6 +9,7 @@ import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { PO_PORTAL_EVENT_LABELS } from '@/modules/purchase-orders/lib/portal-view'
 import type { PoPortalAdminEvent, PoPortalTokenSummary } from '@/modules/purchase-orders/lib/portal-view'
+import { withUnit } from '@/modules/purchase-orders/lib/money'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receiving'
 import type {
@@ -1324,7 +1325,7 @@ function OrderView({
                     </td>
                     <td style={td}>{l.supplierSku ?? '—'}</td>
                     <td style={tdRight}>
-                      {l.qty} {l.unit}
+                      {withUnit(l.qty, l.unit)}
                     </td>
                     <td style={tdRight}>{l.qtyReceived}</td>
                     <td style={tdRight}>{left > 0 ? left : '—'}</td>
@@ -1926,7 +1927,7 @@ function DespatchesCard({ shipments, despatchable, order, onRecord, onDelete }: 
                       {line.supplierSku && <div style={muted}>{line.supplierSku}</div>}
                     </td>
                     <td style={tdRight}>
-                      {Number(line.qtyOutstanding)} {line.unit}
+                      {withUnit(Number(line.qtyOutstanding), line.unit)}
                     </td>
                     <td style={tdRight}>
                       <input
@@ -2004,7 +2005,7 @@ function DespatchesCard({ shipments, despatchable, order, onRecord, onDelete }: 
                   <td style={td}>
                     {shipment.lines.map((line) => (
                       <div key={line.id}>
-                        {Number(line.qty)} {line.unit} {line.description}
+                        {withUnit(Number(line.qty), line.unit)} {line.description}
                       </div>
                     ))}
                     {shipment.notes && <div style={muted}>{shipment.notes}</div>}
