@@ -1,4 +1,4 @@
-import { parseCsv } from './csv'
+import { forEachCsvRow } from './csv'
 import { scaled } from './totals'
 import type { PoCatalogueItem } from './types'
 
@@ -365,16 +365,28 @@ function cut(value: string): string {
  * offer something else.
  */
 export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | null): CatalogueImportResult {
-  const rows = parseCsv(text)
   const columns = EMPTY_COLUMNS()
   const problems: CatalogueImportProblem[] = []
   const items: CatalogueImportItem[] = []
   let blankRows = 0
   let duplicateRows = 0
 
-  const topRows = rows.slice(0, HEADER_SEARCH_ROWS).map((row) => row.slice(0, PREVIEW_COLUMNS).map(cut))
+  // The top of the file, on its own, is what the headings are worked out from -
+  // so the file is read twice rather than held once. A supplier's dataset export
+  // carries a paragraph of marketing HTML in every row, and keeping all of it as
+  // an array of arrays to find a heading four rows down is how thirty megabytes
+  // of spreadsheet becomes a gigabyte of memory and the import dies rather than
+  // finishing. This pass stops at the fifteenth row.
+  const headLimit = Math.max(HEADER_SEARCH_ROWS, mapping?.headerRow ?? 0)
+  const head: string[][] = []
+  forEachCsvRow(text, (row) => {
+    head.push(row)
+    return head.length < headLimit
+  })
 
-  const headerAt = resolveHeaderRow(rows, mapping)
+  const topRows = head.slice(0, HEADER_SEARCH_ROWS).map((row) => row.slice(0, PREVIEW_COLUMNS).map(cut))
+
+  const headerAt = resolveHeaderRow(head, mapping)
   if (headerAt === -1) {
     return {
       columns,
@@ -387,7 +399,7 @@ export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | nul
         {
           row: 1,
           message:
-            rows.length === 0
+            head.length === 0
               ? 'There is nothing in that file.'
               : 'Nothing in the first fifteen rows reads as a heading with the supplier’s product code under it. Say which row the headings are on and which column is which, and it will read the rest.',
         },
@@ -397,7 +409,7 @@ export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | nul
     }
   }
 
-  const header = rows[headerAt]!
+  const header = head[headerAt]!
   const indexes = resolveColumns(header, mapping)
   for (const field of CATALOGUE_FIELDS) {
     const at = indexes[field]
@@ -442,13 +454,17 @@ export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | nul
 
   const seen = new Map<string, CatalogueImportItem>()
 
-  for (let i = headerAt + 1; i < rows.length; i += 1) {
-    const rowNumber = i + 1
-    const row = rows[i]!
+  // The second read, and the one that does the work. Only the handful of cells a
+  // price list actually wants is kept out of each row; everything else - the
+  // photography, the body copy, the eighty columns of specification - is read
+  // and dropped rather than accumulated.
+  forEachCsvRow(text, (row, index) => {
+    if (index <= headerAt) return
+    const rowNumber = index + 1
 
     if (row.every((value) => value.trim() === '')) {
       blankRows += 1
-      continue
+      return
     }
 
     if (items.length >= MAX_CATALOGUE_ROWS) {
@@ -456,25 +472,25 @@ export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | nul
         row: rowNumber,
         message: `A price list stops at ${MAX_CATALOGUE_ROWS.toLocaleString('en-GB')} rows. Everything from here down was left out.`,
       })
-      break
+      return false
     }
 
     const supplierSku = cell(row, 'supplierSku').trim()
     if (supplierSku === '') {
       problems.push({ row: rowNumber, message: 'No supplier code on this row, so there is nothing to price.' })
-      continue
+      return
     }
 
     const key = catalogueSkuKey(supplierSku)
     if (key === '') {
       problems.push({ row: rowNumber, message: `"${supplierSku}" has no letters or digits in it, so it cannot be a code.` })
-      continue
+      return
     }
 
     const unitCost = parseListMoney(cell(row, 'unitCost'))
     if (unitCost === undefined) {
       problems.push({ row: rowNumber, message: `${supplierSku}: "${cell(row, 'unitCost').trim()}" is not a price.` })
-      continue
+      return
     }
 
     const packSize = parseListQty(cell(row, 'packSize'))
@@ -505,12 +521,12 @@ export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | nul
           message: `${supplierSku} is in this list twice saying two different things. The first one was kept.`,
         })
       }
-      continue
+      return
     }
 
     seen.set(key, item)
     items.push(item)
-  }
+  })
 
   return { columns, columnIndexes: indexes, headerRow: headerAt + 1, topRows, mapping: resolved, items, problems, blankRows, duplicateRows }
 }

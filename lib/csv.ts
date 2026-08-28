@@ -40,12 +40,18 @@ export function csvFilename(kind: string, today: string): string {
 }
 
 /**
- * A CSV back into rows of cells.
+ * A CSV back into rows of cells, one row at a time.
  *
  * Written out rather than pulled in from a library for the reason at the top of
  * this file, and deliberately small: quoted fields, doubled quotes inside them,
  * commas and newlines inside quotes, and CRLF or LF line endings. That is the
  * whole of what a supplier's exported price list ever contains.
+ *
+ * Rows are handed over as they are read rather than collected into an array,
+ * because a supplier's dataset export carries a paragraph of marketing HTML in
+ * every row and holding all of it at once is how a thirty megabyte file becomes
+ * a gigabyte of memory. `onRow` returning false stops the read - a file whose
+ * headings are on row four is done with after row four.
  *
  * Two things it does NOT do, both on purpose. It does not guess a delimiter -
  * a semicolon-separated export is a different file and saying so beats
@@ -57,11 +63,11 @@ export function csvFilename(kind: string, today: string): string {
  * A trailing newline produces no extra row. A blank line in the middle produces
  * one empty cell, which the import counts as a blank row and skips.
  */
-export function parseCsv(text: string): string[][] {
-  const rows: string[][] = []
+export function forEachCsvRow(text: string, onRow: (row: string[], index: number) => boolean | void): void {
   let row: string[] = []
   let field = ''
   let quoted = false
+  let index = 0
   // Strip a UTF-8 byte order mark: Excel writes one, and it otherwise becomes
   // part of the first header and nothing matches it.
   const input = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
@@ -91,7 +97,8 @@ export function parseCsv(text: string): string[][] {
     } else if (char === '\n' || char === '\r') {
       if (char === '\r' && input[i + 1] === '\n') i += 1
       row.push(field)
-      rows.push(row)
+      if (onRow(row, index) === false) return
+      index += 1
       row = []
       field = ''
     } else {
@@ -102,8 +109,16 @@ export function parseCsv(text: string): string[][] {
   // Whatever is left after the last line ending, unless the file ended on one.
   if (field !== '' || row.length > 0) {
     row.push(field)
-    rows.push(row)
+    onRow(row, index)
   }
+}
 
+/** Every row at once. The convenient form, for the places where the file is
+ *  known to be small - a big one is read with `forEachCsvRow` instead. */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  forEachCsvRow(text, (row) => {
+    rows.push(row)
+  })
   return rows
 }

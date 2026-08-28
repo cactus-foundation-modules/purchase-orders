@@ -13,12 +13,21 @@ import { assertSafeListUrl, ListFetchError, looksLikeHtml, toDownloadUrl } from 
 // its own accord is a module that can be pointed at an address inside the
 // network it is running in, which is what assertSafeListUrl is for.
 
-/** Refuse a file bigger than this. A price list is text, and this is already
- *  well past the fifty thousand rows an import will take. */
-const MAX_BYTES = 20 * 1024 * 1024
+/** Refuse a file bigger than this.
+ *
+ *  Sixty megabytes, because a supplier's list is not always a list: the same
+ *  spreadsheet that prices a range routinely carries the photography captions,
+ *  the body copy and eighty columns of specification alongside, and thirty
+ *  megabytes of that is an ordinary export rather than a mistake. The import
+ *  reads it a row at a time and keeps only the columns it needs, so the size
+ *  that matters is what will come down the wire inside the route's own minute,
+ *  not what will fit in memory. Past this it is not a price list. */
+const MAX_BYTES = 60 * 1024 * 1024
 
-/** Give up on a supplier that has gone quiet, inside the route's own ceiling. */
-const TIMEOUT_MS = 30_000
+/** Give up on a supplier that has gone quiet, inside the route's own ceiling.
+ *  Covers the whole download rather than just the answer: a big list is a slow
+ *  one, and the minute the route gets has an import to do at the end of it. */
+const TIMEOUT_MS = 40_000
 
 /**
  * Fetch a price list as text.
@@ -50,7 +59,7 @@ export async function fetchPriceList(rawUrl: string): Promise<{ text: string; ur
   } catch (error) {
     clearTimeout(timer)
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new ListFetchError('Whoever hosts that list did not answer within thirty seconds.')
+      throw new ListFetchError('Whoever hosts that list did not answer within forty seconds.')
     }
     throw new ListFetchError(`Could not reach that address (${error instanceof Error ? error.message : 'unknown error'}).`)
   }
@@ -77,16 +86,31 @@ export async function fetchPriceList(rawUrl: string): Promise<{ text: string; ur
     const reader = body.getReader()
     const chunks: Uint8Array[] = []
     let bytes = 0
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      if (!value) continue
-      chunks.push(value)
-      bytes += value.byteLength
-      if (bytes > MAX_BYTES) {
-        await reader.cancel().catch(() => {})
-        throw new ListFetchError('That file is far bigger than any price list (over 20MB).')
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (!value) continue
+        chunks.push(value)
+        bytes += value.byteLength
+        if (bytes > MAX_BYTES) {
+          await reader.cancel().catch(() => {})
+          throw new ListFetchError('That file is far bigger than any price list (over 60MB).')
+        }
       }
+    } catch (error) {
+      if (error instanceof ListFetchError) throw error
+      // The clock can run out halfway down a large file as easily as it can
+      // waiting for the first byte, and it arrives here as an abort rather than
+      // at the fetch above. There is the same thing to say about it either way.
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new ListFetchError(
+          'That list was still coming down after forty seconds. If it is a whole product dataset rather than a price list, a sheet carrying just the codes and the prices will import in moments.',
+        )
+      }
+      throw new ListFetchError(
+        `That address stopped sending partway through (${error instanceof Error ? error.message : 'unknown error'}).`,
+      )
     }
 
     const text = new TextDecoder('utf-8').decode(concat(chunks, bytes))

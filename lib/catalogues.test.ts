@@ -238,6 +238,33 @@ describe('parseCatalogueCsv', () => {
     })
   })
 
+  it('takes a header row somebody picked from further down than it looks for one', () => {
+    // The file is only searched fifteen rows deep, but a row picked by hand is
+    // followed wherever it is - and the rows under it still have to import.
+    const preamble = Array.from({ length: 19 }, (_, i) => `Notes line ${i + 1},,`).join('\n')
+    const result = parseCatalogueCsv(`${preamble}\nCode,Name,Price\nDS-1,Chair,40.00\n`, { headerRow: 20 })
+    expect(result.headerRow).toBe(20)
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toMatchObject({ supplierSku: 'DS-1', unitCost: '40.0000' })
+  })
+
+  it('reads a list whose rows carry far more than a price list wants', () => {
+    // A supplier's dataset export prices the range and carries the body copy,
+    // the photography captions and eighty columns of specification alongside.
+    // Only the columns that make a price list are kept out of it.
+    const bulk = 'x'.repeat(2_000)
+    const rows = Array.from(
+      { length: 200 },
+      (_, i) => `DS-${i + 1},Chair ${i + 1},"${bulk}",${(i + 1).toFixed(2)}`,
+    ).join('\n')
+    const result = parseCatalogueCsv(`Code,Name,Body HTML,Price\n${rows}\n`)
+    expect(result.headerRow).toBe(1)
+    expect(result.items).toHaveLength(200)
+    expect(result.items[199]).toMatchObject({ supplierSku: 'DS-200', description: 'Chair 200', unitCost: '200.0000' })
+    // The paragraph column is read and dropped, not carried into the import.
+    expect(JSON.stringify(result.items)).not.toContain(bulk)
+  })
+
   it('treats a mapping as the whole truth, so a column can be said not to be there', () => {
     // Otherwise "no, that is not the price" is unsayable, and every correction
     // leaves whatever was guessed before still in place underneath it.
