@@ -96,6 +96,10 @@ export type PoPortalView = {
   orderNumber: string
   revision: number
   statusLabel: string
+  /** A standing message from us to THIS supplier, set on their supplier record
+   *  and shown at the top of their page. Null when nobody has written one, which
+   *  is most suppliers. */
+  note: string | null
   /** Whether the order is still one the supplier can say anything about. A
    *  cancelled or finished order is readable and nothing more. */
   open: boolean
@@ -228,8 +232,20 @@ export function portalEventSummary(kind: PoPortalEventKind, payload: Record<stri
       const opening = parts.length ? `Short on ${parts.join('; ')}.` : 'Said something is short.'
       return note ? `${opening} ${note}` : opening
     }
-    case 'MESSAGE':
-      return typeof payload.text === 'string' ? payload.text.trim() : ''
+    case 'MESSAGE': {
+      const text = typeof payload.text === 'string' ? payload.text.trim() : ''
+      // Which lines they meant, when they picked some. Named before the message
+      // rather than after it, because "about the oak desks:" is what tells
+      // somebody here whether this one is theirs to answer.
+      const lines = Array.isArray(payload.lines) ? payload.lines : []
+      const about = lines
+        .map((line) => {
+          const row = (line ?? {}) as Record<string, unknown>
+          return typeof row.description === 'string' ? row.description : ''
+        })
+        .filter(Boolean)
+      return about.length ? `About ${about.join('; ')}: ${text}` : text
+    }
     case 'PROFORMA': {
       const ref = typeof payload.ref === 'string' ? payload.ref.trim() : ''
       const amount = typeof payload.amount === 'string' ? payload.amount.trim() : ''
@@ -263,6 +279,8 @@ export function portalEventSummary(kind: PoPortalEventKind, payload: Record<stri
 /** Everything the view needs that does not live on the order row: what they have
  *  despatched, and which of the two portal switches this site has on. */
 export type PortalViewExtras = {
+  /** The supplier's own standing message, read live off their record. */
+  note?: string | null
   shipments?: PoPortalShipment[]
   /** orderLineId -> how much of it has been despatched. */
   despatchedByLine?: Record<string, string>
@@ -308,6 +326,7 @@ export function portalView(
     orderNumber: order.number,
     revision: order.revision,
     statusLabel: PO_STATUS_LABELS[order.status] ?? order.status,
+    note: extras.note ?? null,
     open: isPortalOpen(order.status),
     acknowledged: Boolean(order.acknowledgedAt),
     acknowledgedAt: order.acknowledgedAt,

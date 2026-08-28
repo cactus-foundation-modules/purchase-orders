@@ -1,0 +1,14 @@
+-- Purchase Orders - a message from you, on the supplier's own page
+--
+-- Held on the SUPPLIER rather than on the order, because what it is for is the
+-- standing instruction that never changes: "quote our account number on every
+-- invoice", "book deliveries in on 0161 496 0000 before you send anything",
+-- "we cannot take a pallet after 3pm". Somebody typing that onto each order in
+-- turn is somebody who stops typing it by the fourth one.
+--
+-- It appears at the top of their portal panel, above the "pick what you want to
+-- tell us" line, and it goes NOWHERE else - not the order document, not the
+-- packing slip, not an email. It is a note to the one person holding the link.
+--
+-- Idempotent, and 001 carries the same column for a fresh install.
+ALTER TABLE "po_suppliers" ADD COLUMN IF NOT EXISTS "portal_note" TEXT;

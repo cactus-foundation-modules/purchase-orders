@@ -81,6 +81,11 @@ export type PoSupplier = {
   defaultVatRateCode: string | null
   taxRegistrationNumber: string | null
   deliveryInstructions: string | null
+  /** Shown to THIS supplier at the top of their own portal page, above the
+   *  "pick what you want to tell us" line. Nowhere else - not the order
+   *  document, not the packing slip, not an email. `notes` below is the
+   *  opposite: internal, and never leaves this building. */
+  portalNote: string | null
   status: SupplierStatus
   notes: string | null
   orderCount: number

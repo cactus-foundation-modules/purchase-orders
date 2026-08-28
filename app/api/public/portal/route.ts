@@ -173,8 +173,17 @@ export async function POST(request: NextRequest) {
       break
     }
     case 'message': {
+      // Checked against THIS order's lines like every other line reference here,
+      // and snapshotted with the description so the history still reads properly
+      // after an amendment rewrites them. No lines at all means the whole order,
+      // which is what most messages are about.
+      const byId = new Map(order.lines.map((line) => [line.id, line]))
+      const lines = (body.lines ?? [])
+        .map((lineId) => byId.get(lineId))
+        .filter((line): line is NonNullable<typeof line> => line !== undefined)
+        .map((line) => ({ lineId: line.id, description: line.description }))
       kind = 'MESSAGE'
-      payload = { text: body.text.trim() }
+      payload = { text: body.text.trim(), lines }
       break
     }
   }

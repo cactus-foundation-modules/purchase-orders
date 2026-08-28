@@ -67,6 +67,11 @@ describe('the despatch form', () => {
     // An empty box is not a bad address, it is no address.
     expect(shipmentHeaderFrom(ShipmentBody.parse(body({ trackingUrl: '' }))).trackingUrl).toBeNull()
     expect(ShipmentBody.safeParse(body({ trackingUrl: 'not a link' })).success).toBe(false)
+    // A bare host is what most people type, and is a link.
+    expect(shipmentHeaderFrom(ShipmentBody.parse(body({ trackingUrl: 'track.example.com/PW-882' }))).trackingUrl)
+      .toBe('https://track.example.com/PW-882')
+    // And the one that matters: this ends up as an href on the order screen.
+    expect(ShipmentBody.safeParse(body({ trackingUrl: 'javascript:alert(1)' })).success).toBe(false)
   })
 
   it('does not clamp anything itself', () => {

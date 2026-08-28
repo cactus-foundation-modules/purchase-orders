@@ -81,6 +81,10 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "default_vat_rate_code"   TEXT,
     "tax_registration_number" TEXT,
     "delivery_instructions"   TEXT,
+    -- Shown to this supplier at the top of their own portal page, and nowhere
+    -- else. See 008, where this column arrives for installs that already
+    -- have 001.
+    "portal_note"             TEXT,
     "status"                  TEXT        NOT NULL DEFAULT 'ENABLED',
     "notes"                   TEXT,
     "created_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),

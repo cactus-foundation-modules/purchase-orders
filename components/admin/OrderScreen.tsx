@@ -2011,11 +2011,14 @@ function DespatchesCard({ shipments, despatchable, order, onRecord, onDelete }: 
                   </td>
                   <td style={td}>
                     {shipment.carrier ?? '—'}
-                    {shipment.trackingRef && (
+                    {/* A link with no number to hang it off still has to be
+                        clickable - suppliers hand over one or the other, and a
+                        tracking page nobody can reach is the same as none. */}
+                    {(shipment.trackingRef || shipment.trackingUrl) && (
                       <div style={muted}>
                         {shipment.trackingUrl ? (
                           <a href={shipment.trackingUrl} target="_blank" rel="noreferrer">
-                            {shipment.trackingRef}
+                            {shipment.trackingRef || 'Track this delivery'}
                           </a>
                         ) : (
                           shipment.trackingRef

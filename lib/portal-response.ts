@@ -1,4 +1,4 @@
-import { getOrder } from './db'
+import { getOrder, supplierPortalNote } from './db'
 import { getPoConfigCached } from './config'
 import { listPortalEvents } from './portal'
 import { despatchedTotalsByLine, listShipmentsForOrder } from './shipments'
@@ -27,11 +27,12 @@ export async function buildPortalView(orderId: string): Promise<PoPortalView | n
   const order = await getOrder(orderId)
   if (!order) return null
 
-  const [config, events, shipments, despatchedByLine] = await Promise.all([
+  const [config, events, shipments, despatchedByLine, note] = await Promise.all([
     getPoConfigCached(),
     listPortalEvents(orderId, 20),
     listShipmentsForOrder(orderId),
     despatchedTotalsByLine(orderId),
+    supplierPortalNote(orderId),
   ])
 
   // Their own drops, money-free and without the internal notes anybody here has
@@ -54,6 +55,7 @@ export async function buildPortalView(orderId: string): Promise<PoPortalView | n
       summary: event.summary,
     })),
     {
+      note,
       shipments: theirs,
       despatchedByLine,
       uploadsEnabled: config.portalUploadsEnabled,

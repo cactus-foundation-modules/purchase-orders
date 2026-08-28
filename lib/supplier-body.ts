@@ -53,6 +53,9 @@ export const SupplierBody = z.object({
   defaultVatRateCode: z.string().max(60).nullable().default(null),
   taxRegistrationNumber: z.string().max(60).nullable().default(null),
   deliveryInstructions: z.string().max(2000).nullable().default(null),
+  // What this supplier reads at the top of their own portal page. Bounded like
+  // everything else, and defaulted so a form written before it existed saves.
+  portalNote: z.string().max(2000).nullable().default(null),
   status: z.enum(['ENABLED', 'DISABLED', 'ON_HOLD']).default('ENABLED'),
   notes: z.string().max(5000).nullable().default(null),
 })
@@ -90,6 +93,7 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     defaultVatRateCode: orNull(body.defaultVatRateCode),
     taxRegistrationNumber: orNull(body.taxRegistrationNumber),
     deliveryInstructions: orNull(body.deliveryInstructions),
+    portalNote: orNull(body.portalNote),
     status: body.status,
     notes: orNull(body.notes),
   }

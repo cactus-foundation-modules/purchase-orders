@@ -122,6 +122,15 @@ describe('the supplier projection', () => {
     expect(wire).not.toContain('shop-item-1')
   })
 
+  it("shows the supplier's own standing message, and nothing when there is none", () => {
+    // Written on the supplier record, read live rather than snapshotted, and
+    // the ONLY thing on that record that reaches them.
+    expect(portalView(order(), []).note).toBeNull()
+    expect(
+      portalView(order(), [], { note: 'Ring 0161 496 0000 before you deliver.' }).note,
+    ).toBe('Ring 0161 496 0000 before you deliver.')
+  })
+
   it('carries what they do need to answer', () => {
     const view = portalView(order(), [])
     expect(view.orderNumber).toBe('PO-00147')
@@ -285,6 +294,16 @@ describe('what the supplier said, as a sentence', () => {
   it('reads a message as what they typed', () => {
     expect(portalEventSummary('MESSAGE', { text: '  Can we split the delivery?  ' })).toBe('Can we split the delivery?')
     expect(portalEventSummary('MESSAGE', {})).toBe('')
+    // A message about particular lines says so first, so whoever reads it knows
+    // whether it is theirs to answer before they have opened the order.
+    expect(
+      portalEventSummary('MESSAGE', {
+        text: 'These two are on back order.',
+        lines: [{ lineId: 'line-1', description: 'Oak desk 1600mm' }, { lineId: 'line-2', description: 'Pedestal' }],
+      }),
+    ).toBe('About Oak desk 1600mm; Pedestal: These two are on back order.')
+    // An empty pick is the whole order, and reads exactly as it always did.
+    expect(portalEventSummary('MESSAGE', { text: 'Anything else?', lines: [] })).toBe('Anything else?')
   })
 })
 

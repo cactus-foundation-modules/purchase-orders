@@ -27,6 +27,7 @@ type Form = {
   discountPercent: string
   taxRegistrationNumber: string
   deliveryInstructions: string
+  portalNote: string
   status: SupplierStatus
   notes: string
 }
@@ -53,6 +54,7 @@ const EMPTY_FORM: Form = {
   discountPercent: '',
   taxRegistrationNumber: '',
   deliveryInstructions: '',
+  portalNote: '',
   status: 'ENABLED',
   notes: '',
 }
@@ -134,6 +136,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       discountPercent: supplier.discountPercent ?? '',
       taxRegistrationNumber: supplier.taxRegistrationNumber ?? '',
       deliveryInstructions: supplier.deliveryInstructions ?? '',
+      portalNote: supplier.portalNote ?? '',
       status: supplier.status,
       notes: supplier.notes ?? '',
     })
@@ -175,6 +178,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         defaultVatRateCode: null,
         taxRegistrationNumber: textOrNull(form.taxRegistrationNumber),
         deliveryInstructions: textOrNull(form.deliveryInstructions),
+        portalNote: textOrNull(form.portalNote),
         status: form.status,
         notes: textOrNull(form.notes),
       }
@@ -436,6 +440,12 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
           <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.75rem' }}>
             <Field label="Delivery instructions">
               <textarea rows={2} style={input} value={form.deliveryInstructions} onChange={(e) => setForm({ ...form, deliveryInstructions: e.target.value })} />
+            </Field>
+            <Field
+              label="A message on their own order page"
+              hint="Shown to this supplier at the top of every purchase order link you send them, above everything else. Nowhere else - not on the order, not on a packing slip. The place for a standing instruction: quote the account number, ring before delivering, no pallets after three."
+            >
+              <textarea rows={3} style={input} value={form.portalNote} onChange={(e) => setForm({ ...form, portalNote: e.target.value })} maxLength={2000} />
             </Field>
             <Field label="Notes" hint="For you, not for them. Nothing here goes on a purchase order.">
               <textarea rows={3} style={input} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

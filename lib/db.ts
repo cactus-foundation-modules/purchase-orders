@@ -104,6 +104,8 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     defaultVatRateCode: (r.default_vat_rate_code as string | null) ?? null,
     taxRegistrationNumber: (r.tax_registration_number as string | null) ?? null,
     deliveryInstructions: (r.delivery_instructions as string | null) ?? null,
+    // A row written before 008 has no column to read, which is no note.
+    portalNote: (r.portal_note as string | null) ?? null,
     status: r.status as SupplierStatus,
     notes: (r.notes as string | null) ?? null,
     orderCount: Number(r.order_count ?? 0),
@@ -190,6 +192,26 @@ export async function getSupplier(id: string): Promise<PoSupplier | null> {
   return rows[0] ? mapSupplier(rows[0]) : null
 }
 
+/**
+ * The standing message this order's supplier is shown on their own page.
+ *
+ * Read LIVE off the supplier rather than snapshotted onto the order like the
+ * name and address are, and deliberately: it is a standing instruction - ring
+ * before delivering, quote the account number - so the one they read today is
+ * the one that is true today, on an order raised last month or this morning.
+ */
+export async function supplierPortalNote(orderId: string): Promise<string | null> {
+  const rows = await prisma.$queryRaw<{ portal_note: string | null }[]>`
+    SELECT s."portal_note"
+      FROM "po_orders" o
+      JOIN "po_suppliers" s ON s."id" = o."supplier_id"
+     WHERE o."id" = ${orderId}
+     LIMIT 1
+  `
+  const note = (rows[0]?.portal_note ?? '').trim()
+  return note === '' ? null : note
+}
+
 export type SupplierInput = {
   name: string
   shopSupplierId: string | null
@@ -214,6 +236,7 @@ export type SupplierInput = {
   defaultVatRateCode: string | null
   taxRegistrationNumber: string | null
   deliveryInstructions: string | null
+  portalNote: string | null
   status: SupplierStatus
   notes: string | null
 }
@@ -226,7 +249,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
       "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
       "carriage_paid_over", "carriage_charge", "discount_percent", "default_category_id",
       "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
-      "delivery_instructions", "status", "notes"
+      "delivery_instructions", "portal_note", "status", "notes"
     ) VALUES (
       ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
       ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
@@ -234,7 +257,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
       ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.accountTerms}, ${input.leadTimeDays},
       ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
       ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
-      ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.status}, ${input.notes}
+      ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.portalNote}, ${input.status}, ${input.notes}
     )
     RETURNING "id"
   `
@@ -268,6 +291,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
       "default_vat_rate_code" = ${input.defaultVatRateCode},
       "tax_registration_number" = ${input.taxRegistrationNumber},
       "delivery_instructions" = ${input.deliveryInstructions},
+      "portal_note" = ${input.portalNote},
       "status" = ${input.status},
       "notes" = ${input.notes},
       "updated_at" = now()

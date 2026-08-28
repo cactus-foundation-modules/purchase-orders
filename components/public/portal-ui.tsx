@@ -28,20 +28,26 @@ export const PORTAL_CSS = `
 .pop-dot{width:.5rem;height:.5rem;border-radius:50%;background:currentColor;flex:none}
 .pop-dot--good{color:var(--color-success,#2f6f4f)}
 .pop-dot--wait{color:var(--color-text-secondary,#666)}
-.pop-intro{margin:.875rem 0 0;font-size:.875rem;color:var(--color-text-secondary,#666);max-width:62ch}
+.pop-intro{margin:.875rem 0 0;font-size:.875rem;color:var(--color-text-secondary,#666)}
 
 .pop-note{margin:1rem 0 0;padding:.625rem .875rem;border:1px solid;border-radius:8px;font-size:.9375rem}
 .pop-note--bad{color:var(--color-error,#b3261e);border-color:var(--color-error,#b3261e)}
 .pop-note--good{color:var(--color-success,#2f6f4f);border-color:var(--color-success,#2f6f4f)}
 .pop-note--quiet{color:var(--color-text-secondary,#666);border-color:var(--color-border,#ddd)}
+/* Something a person here wrote to this supplier, so it reads as text rather
+   than as a system message: full-strength colour, and their own line breaks. */
+.pop-note--said{color:var(--color-text,#111);border-color:var(--color-primary,#2f6f4f);white-space:pre-wrap;overflow-wrap:anywhere}
 .pop-note:first-child{margin-top:0}
 
 .pop-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:.75rem;margin:1.25rem 0 0;padding:0;list-style:none}
 .pop-actions li{display:flex}
 .pop-action{display:flex;flex-direction:column;gap:.1875rem;width:100%;height:100%;text-align:left;padding:.875rem 1rem;border:1px solid var(--color-border,#ddd);border-radius:10px;background:var(--color-bg,#fff);color:inherit;font:inherit;cursor:pointer;text-decoration:none}
-.pop-action:hover{border-color:var(--color-primary,#2f6f4f)}
+.pop-action:hover{border-color:var(--color-primary,#2f6f4f);background:var(--color-primary-subtle,#eef4f1)}
 .pop-action:focus-visible{outline:2px solid var(--color-primary,#2f6f4f);outline-offset:2px}
 .pop-action--primary{border-color:var(--color-primary,#2f6f4f);background:var(--color-primary,#2f6f4f);color:var(--color-on-primary,#fff)}
+/* The filled one keeps its fill and brightens instead. Tinting it like the
+   others would drop white text onto a near-white background. */
+.pop-action--primary:hover{background:var(--color-primary,#2f6f4f);filter:brightness(1.08)}
 .pop-action-name{font-weight:600}
 .pop-action-hint{font-size:.8125rem;color:var(--color-text-secondary,#666)}
 .pop-action--primary .pop-action-hint{color:inherit;opacity:.85}
@@ -49,9 +55,11 @@ export const PORTAL_CSS = `
 .pop-quiet{display:flex;flex-wrap:wrap;gap:.5rem;margin:1.25rem 0 0;padding:1rem 0 0;border-top:1px solid var(--color-border,#ddd)}
 
 .pop-btn{display:inline-flex;align-items:center;justify-content:center;gap:.375rem;padding:.5625rem 1.125rem;border-radius:8px;border:1px solid var(--color-primary,#2f6f4f);background:var(--color-primary,#2f6f4f);color:var(--color-on-primary,#fff);font:inherit;font-weight:600;line-height:1.35;text-decoration:none;cursor:pointer}
+.pop-btn:hover:not(:disabled){filter:brightness(1.08)}
 .pop-btn:disabled{opacity:.45;cursor:not-allowed}
 .pop-btn:focus-visible{outline:2px solid var(--color-primary,#2f6f4f);outline-offset:2px}
 .pop-btn--quiet{background:transparent;color:var(--color-text,#111);border-color:var(--color-border,#ddd);font-weight:500}
+.pop-btn--quiet:hover:not(:disabled){background:var(--color-primary-subtle,#eef4f1);border-color:var(--color-primary,#2f6f4f);filter:none}
 .pop-btn--small{padding:.375rem .8125rem;font-size:.875rem}
 
 .pop-field{margin:0 0 1rem}
@@ -60,14 +68,28 @@ export const PORTAL_CSS = `
 .pop-input,.pop-textarea,.pop-file{display:block;width:100%;padding:.5rem .625rem;border:1px solid var(--color-border,#ddd);border-radius:8px;background:var(--color-bg,#fff);color:var(--color-text,#111);font:inherit}
 .pop-textarea{resize:vertical;min-height:6.5rem}
 .pop-file{padding:.4375rem;border-style:dashed;cursor:pointer}
-.pop-row{display:flex;flex-wrap:wrap;gap:1rem;margin:0 0 1rem}
+.pop-hint{margin:.3125rem 0 0;font-size:.75rem;color:var(--color-text-secondary,#666)}
+.pop-row{display:flex;flex-wrap:wrap;gap:1rem;margin:0 0 1rem;align-items:flex-start}
 .pop-row .pop-field{flex:1 1 11rem;margin:0}
 
 .pop-lines{list-style:none;margin:0;padding:0;border-top:1px solid var(--color-border,#ddd)}
-.pop-line{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.5rem 1rem;align-items:center;padding:.75rem 0;border-bottom:1px solid var(--color-border,#ddd)}
+/* A floor under the description column, not minmax(0,1fr): with a tick in
+   front of it, a long product name in a narrow dialog was shrinking to one
+   character per line rather than wrapping at words. Below 520px the whole row
+   stacks anyway, so the floor can never overflow. */
+.pop-line{display:grid;grid-template-columns:minmax(7rem,1fr) auto;gap:.5rem 1rem;align-items:center;padding:.75rem 0;border-bottom:1px solid var(--color-border,#ddd)}
 .pop-line--stack{grid-template-columns:minmax(0,1fr)}
 .pop-line-name{font-weight:500;overflow-wrap:anywhere}
 .pop-line-meta{margin:.125rem 0 0;font-size:.8125rem;color:var(--color-text-secondary,#666);overflow-wrap:anywhere}
+.pop-tick{display:flex;align-items:flex-start;gap:.625rem;cursor:pointer;min-width:0}
+/* The same tick outside a line row, where it has to bring its own spacing. */
+.pop-tick--own{align-items:center;padding:.25rem 0}
+.pop-picker{margin:.625rem 0 0;border:1px solid var(--color-border,#ddd);border-radius:8px}
+.pop-picker>summary{padding:.5rem .75rem;cursor:pointer;font-size:.875rem;font-weight:600;border-radius:8px}
+.pop-picker>summary:focus-visible{outline:2px solid var(--color-primary,#2f6f4f);outline-offset:2px}
+.pop-lines--picker{max-height:15rem;overflow-y:auto;padding:0 .75rem;border-top:0}
+.pop-lines--picker .pop-line:last-child{border-bottom:0}
+.pop-tick input{flex:none;width:1.125rem;height:1.125rem;margin:.0625rem 0 0;accent-color:var(--color-primary,#2f6f4f)}
 .pop-input--qty{width:6rem;text-align:right}
 .pop-input--date{width:10.5rem}
 .pop-tools{display:flex;flex-wrap:wrap;gap:.5rem;margin:.875rem 0 1.25rem}
@@ -191,13 +213,31 @@ export function PortalDialog({ title, intro, onClose, children, footer, closeLab
 
 /** One row of an order in a dialog: what it is on the left, the one box they
  *  have to fill on the right, and both stacked once the screen is a phone. */
-export function PortalLine({ name, meta, control }: { name: ReactNode; meta?: ReactNode; control?: ReactNode }) {
+export function PortalLine({ name, meta, control, tick }: {
+  name: ReactNode
+  meta?: ReactNode
+  control?: ReactNode
+  /** A checkbox that turns the line on. Given one, the name and the meta become
+   *  part of its <label>, so the whole description is a tap target - which is
+   *  what a warehouse on a phone actually presses at. */
+  tick?: ReactNode
+}) {
+  const body = (
+    <div>
+      <div className="pop-line-name">{name}</div>
+      {meta && <div className="pop-line-meta">{meta}</div>}
+    </div>
+  )
   return (
     <li className={control ? 'pop-line' : 'pop-line pop-line--stack'}>
-      <div>
-        <div className="pop-line-name">{name}</div>
-        {meta && <div className="pop-line-meta">{meta}</div>}
-      </div>
+      {tick ? (
+        <label className="pop-tick">
+          {tick}
+          {body}
+        </label>
+      ) : (
+        body
+      )}
       {control}
     </li>
   )

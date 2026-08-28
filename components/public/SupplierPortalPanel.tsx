@@ -4,6 +4,7 @@ import { useRef, useState, type ReactNode } from 'react'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
 import { PO_PORTAL_EVENT_LABELS, type PoPortalView } from '@/modules/purchase-orders/lib/portal-view'
 import { PortalDialog, PortalLine, PortalStyles } from '@/modules/purchase-orders/components/public/portal-ui'
+import { webAddress } from '@/modules/purchase-orders/lib/web-address'
 
 // The only part of this platform a supplier ever touches.
 //
@@ -82,6 +83,10 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
   const [shortages, setShortages] = useState<Record<string, string>>({})
   const [shortNote, setShortNote] = useState('')
   const [message, setMessage] = useState('')
+  /** A message is about the whole order until they say otherwise, because most
+   *  of them are. Unticking it opens the line picker. */
+  const [wholeOrder, setWholeOrder] = useState(true)
+  const [messageLines, setMessageLines] = useState<Record<string, boolean>>({})
 
   const [proformaRef, setProformaRef] = useState('')
   const [proformaAmount, setProformaAmount] = useState('')
@@ -93,6 +98,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
   const [despatchDate, setDespatchDate] = useState(today())
   const [carrier, setCarrier] = useState('')
   const [trackingRef, setTrackingRef] = useState('')
+  const [trackingUrl, setTrackingUrl] = useState('')
   const [despatchQty, setDespatchQty] = useState<Record<string, string>>({})
   const [despatchNote, setDespatchNote] = useState('')
 
@@ -193,6 +199,8 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
     .map(([lineId, qty]) => ({ lineId, qty: qty.trim() }))
     .filter((row) => row.qty !== '' && Number(row.qty) > 0)
 
+  const pickedLines = view.lines.filter((line) => messageLines[line.id])
+
   const stillToSend = view.lines.filter((line) => Number(line.qtyToSend) > 0)
   const despatchLines = Object.entries(despatchQty)
     .map(([lineId, qty]) => ({ lineId, qty: qty.trim() }))
@@ -204,7 +212,16 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
   const canRecordDespatch = view.open && view.canDespatch && stillToSend.length > 0
 
   return (
-    <div className="pop">
+    // data-cactus-unstyled is what stops the site's own button chrome landing on
+    // top of this panel. Core paints every <button> inside <main> with the
+    // theme's hover fill and an !important behind it (lib/design/tokens.ts), and
+    // it only recolours the TEXT where the markup asks for it - so on Deskwell
+    // in the dark the four action cards turned gold on hover with grey hint text
+    // still sitting on them, which is to say invisible. This panel draws its own
+    // chrome in PORTAL_CSS, so it opts the whole subtree out and owns every
+    // state itself, hover included. The dialogs live inside this div for the
+    // same reason: the opt-out covers descendants.
+    <div className="pop" data-cactus-unstyled="">
       <PortalStyles />
 
       <h2 className="pop-title">Purchase order {view.orderNumber}</h2>
@@ -242,6 +259,13 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
           </li>
         )}
       </ul>
+
+      {/* Whatever the buying side has written on this supplier's record: the
+          standing instruction that is true of every order to them. Above the
+          "pick what you want to tell us" line because a note underneath it is a
+          note nobody reads. Their own words are their own paragraphs, hence the
+          pre-wrap on .pop-said. */}
+      {view.note && <p className="pop-note pop-note--said">{view.note}</p>}
 
       <p className="pop-intro">
         Pick what you want to tell us and we will ask for the lines it applies to. Nothing here changes the order, so
@@ -485,7 +509,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
       {job === 'delay' && (
         <PortalDialog
           title="Report a delay"
-          intro="Put a date against any line you cannot do on time and leave the rest blank. Somebody here will confirm them."
+          intro="Tick anything you cannot do on time, then give us the date you can. Somebody here will confirm them."
           onClose={() => setJob(null)}
           footer={
             <button
@@ -504,12 +528,30 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
           }
         >
           <DialogError error={error} />
+          {/* Tick the line, then say when. Every line showing a date box at once
+              reads as eleven questions; ticked, it is one. */}
           <ul className="pop-lines">
             {view.lines.map((line) => {
               const asked = line.expectedDate ?? view.expectedDate
+              const late = dates[line.id] !== undefined
               return (
                 <PortalLine
                   key={line.id}
+                  tick={
+                    <input
+                      type="checkbox"
+                      checked={late}
+                      onChange={(e) =>
+                        setDates((d) => {
+                          const next = { ...d }
+                          if (e.target.checked) next[line.id] = ''
+                          else delete next[line.id]
+                          return next
+                        })
+                      }
+                      aria-label={`${line.description} will be late`}
+                    />
+                  }
                   name={line.description}
                   meta={
                     <>
@@ -518,13 +560,15 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     </>
                   }
                   control={
-                    <input
-                      type="date"
-                      className="pop-input pop-input--date"
-                      value={dates[line.id] ?? ''}
-                      onChange={(e) => setDates((d) => ({ ...d, [line.id]: e.target.value }))}
-                      aria-label={`The date you can deliver ${line.description}`}
-                    />
+                    late ? (
+                      <input
+                        type="date"
+                        className="pop-input pop-input--date"
+                        value={dates[line.id] ?? ''}
+                        onChange={(e) => setDates((d) => ({ ...d, [line.id]: e.target.value }))}
+                        aria-label={`The date you can deliver ${line.description}`}
+                      />
+                    ) : undefined
                   }
                 />
               )
@@ -551,7 +595,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
       {job === 'stock' && (
         <PortalDialog
           title="Report out of stock"
-          intro="Put in how many of a line you cannot send at all. Leave the rest blank."
+          intro="Tick anything you cannot send at all, then tell us how many."
           onClose={() => setJob(null)}
           footer={
             <button
@@ -570,24 +614,48 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
           }
         >
           <DialogError error={error} />
+          {/* Tick the line that is short, then say how many. No prefill here,
+              unlike the despatch form: "all of it" is the usual answer to what
+              is going out and very much not to what is missing, and a box that
+              opens holding the whole line is a box somebody sends by mistake. */}
           <ul className="pop-lines">
-            {view.lines.map((line) => (
-              <PortalLine
-                key={line.id}
-                name={line.description}
-                meta={[line.supplierSku, `${line.qty} ${line.unit} ordered`].filter(Boolean).join(' · ')}
-                control={
-                  <input
-                    className="pop-input pop-input--qty"
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={shortages[line.id] ?? ''}
-                    onChange={(e) => setShortages((s) => ({ ...s, [line.id]: e.target.value }))}
-                    aria-label={`How many of ${line.description} you cannot send`}
-                  />
-                }
-              />
-            ))}
+            {view.lines.map((line) => {
+              const short = shortages[line.id] !== undefined
+              return (
+                <PortalLine
+                  key={line.id}
+                  tick={
+                    <input
+                      type="checkbox"
+                      checked={short}
+                      onChange={(e) =>
+                        setShortages((current) => {
+                          const next = { ...current }
+                          if (e.target.checked) next[line.id] = ''
+                          else delete next[line.id]
+                          return next
+                        })
+                      }
+                      aria-label={`${line.description} is out of stock`}
+                    />
+                  }
+                  name={line.description}
+                  meta={[line.supplierSku, `${line.qty} ${line.unit} ordered`].filter(Boolean).join(' · ')}
+                  control={
+                    short ? (
+                      <input
+                        className="pop-input pop-input--qty"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={shortages[line.id] ?? ''}
+                        onChange={(e) => setShortages((current) => ({ ...current, [line.id]: e.target.value }))}
+                        aria-label={`How many of ${line.description} you cannot send`}
+                      />
+                    ) : undefined
+                  }
+                />
+              )
+            })}
           </ul>
           <div className="pop-field" style={{ marginTop: '1.25rem' }}>
             <label className="pop-label" htmlFor="pop-short-note">
@@ -611,7 +679,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
       {job === 'despatch' && (
         <PortalDialog
           title="Record a despatch"
-          intro="Tell us what has gone and we will give you a packing slip to put in the box. Send it in as many deliveries as suits you - each one gets its own slip."
+          intro="Tick what has gone and we will give you a packing slip to put in the box. Send it in as many deliveries as suits you - each one gets its own slip."
           onClose={() => setJob(null)}
           footer={
             <button
@@ -626,6 +694,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     lines: despatchLines,
                     carrier: carrier.trim() || undefined,
                     trackingRef: trackingRef.trim() || undefined,
+                    trackingUrl: webAddress(trackingUrl) ?? (trackingUrl.trim() || undefined),
                     note: despatchNote.trim() || undefined,
                   },
                   'Thank you - your packing slip is ready under Packing slips.',
@@ -633,6 +702,7 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                   if (!ok) return
                   setDespatchQty({})
                   setTrackingRef('')
+                  setTrackingUrl('')
                   setDespatchNote('')
                 })
               }}
@@ -679,6 +749,22 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                 maxLength={200}
               />
             </div>
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-tracking-url">
+                Tracking link (optional)
+              </label>
+              <input
+                id="pop-tracking-url"
+                className="pop-input"
+                type="url"
+                inputMode="url"
+                value={trackingUrl}
+                onChange={(e) => setTrackingUrl(e.target.value)}
+                maxLength={500}
+                placeholder="https://..."
+              />
+              <p className="pop-hint">Your own tracking page. It is seen here only, never on the packing slip.</p>
+            </div>
           </div>
 
           {/* Whole orders go in one lorry more often than they go in three, and
@@ -705,29 +791,53 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             )}
           </div>
 
+          {/* Tick what is going, and the box arrives already holding everything
+              still owed on that line - which is what a whole pallet of it is.
+              Typing the number they can already see is a step nobody enjoys, and
+              they can still overtype it for a part load. */}
           <ul className="pop-lines">
-            {stillToSend.map((line) => (
-              <PortalLine
-                key={line.id}
-                name={line.description}
-                meta={
-                  <>
-                    {[line.supplierSku, `${line.qtyToSend} ${line.unit} still to send`].filter(Boolean).join(' · ')}
-                    {Number(line.qtyDespatched) > 0 ? ` · ${line.qtyDespatched} of ${line.qty} already sent` : ''}
-                  </>
-                }
-                control={
-                  <input
-                    className="pop-input pop-input--qty"
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={despatchQty[line.id] ?? ''}
-                    onChange={(e) => setDespatchQty((q) => ({ ...q, [line.id]: e.target.value }))}
-                    aria-label={`How many of ${line.description} you are sending`}
-                  />
-                }
-              />
-            ))}
+            {stillToSend.map((line) => {
+              const sending = despatchQty[line.id] !== undefined
+              return (
+                <PortalLine
+                  key={line.id}
+                  tick={
+                    <input
+                      type="checkbox"
+                      checked={sending}
+                      onChange={(e) =>
+                        setDespatchQty((q) => {
+                          const next = { ...q }
+                          if (e.target.checked) next[line.id] = line.qtyToSend
+                          else delete next[line.id]
+                          return next
+                        })
+                      }
+                      aria-label={`We are sending ${line.description}`}
+                    />
+                  }
+                  name={line.description}
+                  meta={
+                    <>
+                      {[line.supplierSku, `${line.qtyToSend} ${line.unit} still to send`].filter(Boolean).join(' · ')}
+                      {Number(line.qtyDespatched) > 0 ? ` · ${line.qtyDespatched} of ${line.qty} already sent` : ''}
+                    </>
+                  }
+                  control={
+                    sending ? (
+                      <input
+                        className="pop-input pop-input--qty"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={despatchQty[line.id] ?? ''}
+                        onChange={(e) => setDespatchQty((q) => ({ ...q, [line.id]: e.target.value }))}
+                        aria-label={`How many of ${line.description} you are sending`}
+                      />
+                    ) : undefined
+                  }
+                />
+              )
+            })}
           </ul>
 
           <div className="pop-field" style={{ marginTop: '1.25rem' }}>
@@ -754,13 +864,21 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             <button
               type="button"
               className="pop-btn"
-              disabled={busy || !message.trim()}
+              disabled={busy || !message.trim() || (!wholeOrder && pickedLines.length === 0)}
               onClick={() => {
-                void send({ action: 'message', text: message.trim() }, 'Thank you - your message is with them.').then(
-                  (ok) => {
-                    if (ok) setMessage('')
+                void send(
+                  {
+                    action: 'message',
+                    text: message.trim(),
+                    lines: wholeOrder ? undefined : pickedLines.map((line) => line.id),
                   },
-                )
+                  'Thank you - your message is with them.',
+                ).then((ok) => {
+                  if (!ok) return
+                  setMessage('')
+                  setMessageLines({})
+                  setWholeOrder(true)
+                })
               }}
             >
               Send it
@@ -768,6 +886,58 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
           }
         >
           <DialogError error={error} />
+
+          {/* What it is about, before what it says. A message naming the two
+              lines it concerns is one somebody here can answer without opening
+              the order and guessing. */}
+          <div className="pop-field">
+            <label className="pop-tick pop-tick--own">
+              <input
+                type="checkbox"
+                checked={wholeOrder}
+                onChange={(e) => {
+                  setWholeOrder(e.target.checked)
+                  if (e.target.checked) setMessageLines({})
+                }}
+              />
+              <span className="pop-line-name">The whole order</span>
+            </label>
+
+            {!wholeOrder && (
+              <details className="pop-picker" open>
+                <summary>
+                  {pickedLines.length === 0
+                    ? 'Pick the lines it is about'
+                    : `${pickedLines.length} ${pickedLines.length === 1 ? 'line' : 'lines'} picked`}
+                </summary>
+                <ul className="pop-lines pop-lines--picker">
+                  {view.lines.map((line) => (
+                    <PortalLine
+                      key={line.id}
+                      tick={
+                        <input
+                          type="checkbox"
+                          checked={Boolean(messageLines[line.id])}
+                          onChange={(e) =>
+                            setMessageLines((picked) => {
+                              const next = { ...picked }
+                              if (e.target.checked) next[line.id] = true
+                              else delete next[line.id]
+                              return next
+                            })
+                          }
+                          aria-label={`This message is about ${line.description}`}
+                        />
+                      }
+                      name={line.description}
+                      meta={[line.supplierSku, `${line.qty} ${line.unit}`].filter(Boolean).join(' · ')}
+                    />
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+
           <div className="pop-field">
             <label className="pop-label" htmlFor="pop-message">
               Your message

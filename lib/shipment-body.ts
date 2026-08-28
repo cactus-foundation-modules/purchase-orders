@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { WEB_ADDRESS_MESSAGE, webAddress } from '@/modules/purchase-orders/lib/web-address'
+
 // The despatch form, from this side of it: somebody here typing in what the
 // supplier has just emailed to say has left them.
 //
@@ -37,16 +39,17 @@ export const ShipmentBody = z.object({
   despatchedDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Dates need to look like 2026-08-27'),
   carrier: z.string().max(120).nullable().default(null),
   trackingRef: z.string().max(200).nullable().default(null),
-  // Their own tracking page. Shape-checked here and only ever rendered as a link
-  // on the order screen, for somebody in this building to click - it never
-  // reaches the packing slip.
+  // Their own tracking page. Only ever rendered as a link on the order screen,
+  // for somebody in this building to click - it never reaches the packing slip.
+  // webAddress() rather than zod's .url() because .url() is happy with
+  // javascript:, and this string becomes an href on a page behind the login.
   trackingUrl: z
     .string()
     .max(500)
-    .url('That tracking link does not look like a web address')
     .nullable()
     .default(null)
-    .or(z.literal('').transform(() => null)),
+    .refine((value) => value === null || value.trim() === '' || webAddress(value) !== null, WEB_ADDRESS_MESSAGE)
+    .transform((value) => webAddress(value)),
   notes: z.string().max(2000).nullable().default(null),
   lines: z.array(ShipmentLineBody).min(1, 'A despatch needs at least one line').max(200),
 })

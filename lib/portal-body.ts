@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { WEB_ADDRESS_MESSAGE, webAddress } from '@/modules/purchase-orders/lib/web-address'
+
 // What a supplier is allowed to post through the portal, and nothing else.
 //
 // A discriminated union rather than one loose object with everything optional:
@@ -18,6 +20,14 @@ const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'That is not a date we can r
 
 /** A quantity as typed: up to three decimals, matching po_order_lines.qty. */
 const QTY = z.string().regex(/^\d{1,9}(\.\d{1,3})?$/, 'That is not a quantity we can read.')
+
+/** A tracking page as typed, normalised to an http(s) address - or refused. An
+ *  empty box is "not given" rather than a complaint. */
+const TRACKING_URL = z
+  .string()
+  .max(500)
+  .refine((value) => value.trim() === '' || webAddress(value) !== null, WEB_ADDRESS_MESSAGE)
+  .transform((value) => webAddress(value))
 
 const LINE_ID = z.string().min(1).max(64)
 
@@ -63,16 +73,21 @@ export const PortalActionBody = z.discriminatedUnion('action', [
       .max(200),
     carrier: z.string().max(120).optional(),
     trackingRef: z.string().max(200).optional(),
-    // Their own tracking page. Checked for shape here and rendered as a link
-    // nowhere a customer sees - it goes on the order screen in the admin, for
-    // somebody in this building to click.
-    trackingUrl: z.string().max(500).url('That tracking link does not look like a web address.').optional(),
+    // Their own tracking page. Rendered as a link nowhere a customer sees - it
+    // goes on the order screen in the admin, for somebody in this building to
+    // click, which is exactly why it goes through webAddress() rather than
+    // zod's .url(): that one waves javascript: straight through.
+    trackingUrl: TRACKING_URL.optional(),
     note: NOTE,
   }),
   z.object({
     token: TOKEN,
     action: z.literal('message'),
     text: z.string().min(1, 'There is nothing to send.').max(2000),
+    // Which lines they are talking about, when it is not the whole order.
+    // Absent or empty means the whole order, which is the ordinary case and the
+    // panel's own default - so an older page that sends neither still works.
+    lines: z.array(LINE_ID).max(200).optional(),
   }),
 ])
 
