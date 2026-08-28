@@ -129,3 +129,59 @@ export function poReturnDocumentBasePath(returnNumber: string): string {
 export function poReturnDocumentPath(returnNumber: string): string {
   return `${poReturnDocumentBasePath(returnNumber)}?t=${signPoReturnPrintToken(returnNumber)}`
 }
+
+// ---------------------------------------------------------------------------
+// Packing slips
+// ---------------------------------------------------------------------------
+//
+// A third key on the same door, under its own subject string, so a token minted
+// for order PO-00147 cannot open packing slip DSP-00003 and neither can one
+// minted for a returns note.
+//
+// This one is opened by a supplier as well as by the printing browser: it is the
+// slip they put in the box. They reach it through their own portal token rather
+// than through this, exactly as they reach the order - see the packing slip's
+// own page.
+
+function packingDigest(shipmentNumber: string, expiresAtMinute: number): string {
+  return createHmac('sha256', getKey())
+    .update(`purchase-packing-slip:${shipmentNumber}:${expiresAtMinute}`)
+    .digest('base64url')
+}
+
+/** A token for one packing slip, good for `PRINT_TOKEN_TTL_MINUTES`. */
+export function signPoPackingSlipToken(shipmentNumber: string, ttlMinutes = PRINT_TOKEN_TTL_MINUTES): string {
+  const expiresAtMinute = Math.floor(Date.now() / 60_000) + Math.max(1, Math.trunc(ttlMinutes))
+  return `${expiresAtMinute}.${packingDigest(shipmentNumber, expiresAtMinute)}`
+}
+
+/** Whether this token was issued for this packing slip and has not aged out.
+ *  Constant-time, and false for anything malformed rather than throwing. */
+export function verifyPoPackingSlipToken(shipmentNumber: string, token: string | null | undefined): boolean {
+  if (!shipmentNumber || !token) return false
+  const dot = token.indexOf('.')
+  if (dot < 1) return false
+  const expiresAtMinute = Number(token.slice(0, dot))
+  if (!Number.isSafeInteger(expiresAtMinute)) return false
+  if (expiresAtMinute < Math.floor(Date.now() / 60_000)) return false
+  try {
+    const a = Buffer.from(token.slice(dot + 1))
+    const b = Buffer.from(packingDigest(shipmentNumber, expiresAtMinute))
+    if (a.length !== b.length) return false
+    return timingSafeEqual(a, b)
+  } catch {
+    return false
+  }
+}
+
+/** The site-relative address of one packing slip's page, with no token on it.
+ *  Nested under the module's own public base, two segments deep, so it can never
+ *  collide with the order's own /purchase-order/<number>. */
+export function poPackingSlipBasePath(shipmentNumber: string): string {
+  return `/purchase-order/packing-slip/${encodeURIComponent(shipmentNumber)}`
+}
+
+/** The same, for somebody to click. */
+export function poPackingSlipPath(shipmentNumber: string): string {
+  return `${poPackingSlipBasePath(shipmentNumber)}?t=${signPoPackingSlipToken(shipmentNumber)}`
+}

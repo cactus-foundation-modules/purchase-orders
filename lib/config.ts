@@ -54,6 +54,16 @@ const WordingSchema = z.object({
   footerNote: z.string().default(''),
 })
 
+// The packing slip is a third document with a third job: it goes IN THE BOX, and
+// on a drop-shipped order the person opening that box is the customer. So it
+// gets its own wording, and it never carries a price or the supplier's name -
+// see components/puck/po-packing-parts.tsx.
+const PackingSlipWordingSchema = z.object({
+  heading: z.string().default('Packing slip'),
+  intro: z.string().default('Everything in this delivery is listed below. Please check it against the goods and tell us straight away if anything is missing or damaged.'),
+  terms: z.string().default(''),
+})
+
 // The return note is a different document with a different job, so it gets its
 // own wording rather than borrowing the order's. "Please supply the following"
 // on a note about goods going back would be quite the mixed message.
@@ -68,6 +78,9 @@ export const PoConfigSchema = z.object({
   orderNumberPrefix: z.string().default('PO-'),
   receiptNumberPrefix: z.string().default('GRN-'),
   returnNumberPrefix: z.string().default('SRN-'),
+  // Despatches: what the supplier says they have SENT, which is a different
+  // number series from what we booked IN.
+  shipmentNumberPrefix: z.string().default('DSP-'),
 
   // Approval. `approvalRequired` off means no order ever waits for anybody;
   // on, an order whose total is at or above the threshold needs somebody with
@@ -132,6 +145,23 @@ export const PoConfigSchema = z.object({
   portalEnabled: z.boolean().default(false),
   portalTokenLifetimeDays: z.number().int().min(1).max(365).default(60),
 
+  // Whether a supplier may put a file on the site through their own link - the
+  // proforma they want paying, and the acknowledgement they send back when they
+  // confirm.
+  //
+  // ON, because a portal that cannot take the two documents the portal exists to
+  // collect is a portal nobody uses. It is still worth a switch: this is the one
+  // place on the platform where somebody with no account can put bytes on the
+  // site, and a business that would rather those arrived by email can say so.
+  // Every file is type-sniffed and size-capped either way - see
+  // lib/portal-upload.ts.
+  portalUploadsEnabled: z.boolean().default(true),
+
+  // Whether the supplier's link lets them say what they have SENT, drop by
+  // drop, and take away a packing slip for each one. On: an order that arrives
+  // in three lorries is an ordinary order, and the alternative is three emails.
+  portalDespatchEnabled: z.boolean().default(true),
+
   // Chasing overdue orders.
   chaseEnabled: z.boolean().default(false),
   chaseAfterDays: z.number().int().min(0).max(365).default(3),
@@ -140,8 +170,10 @@ export const PoConfigSchema = z.object({
   organisation: OrganisationSchema.default({}),
   wording: WordingSchema.default({}),
   returnWording: ReturnWordingSchema.default({}),
+  packingSlipWording: PackingSlipWordingSchema.default({}),
   pdfFilenamePrefix: z.string().default('purchase-order'),
   returnPdfFilenamePrefix: z.string().default('returns-note'),
+  packingSlipFilenamePrefix: z.string().default('packing-slip'),
 
   // Bookkeeping category every bill line falls back to. A plain string: the
   // books may not be installed, and this module never holds a foreign key into

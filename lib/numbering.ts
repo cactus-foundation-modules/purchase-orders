@@ -29,6 +29,17 @@ export async function generateReceiptNumber(): Promise<string> {
   return `${config.receiptNumberPrefix}${pad(rows[0]!.nextval)}`
 }
 
+/** A despatch: what the supplier says they have sent. Its own series, because
+ *  what left them and what we booked in are different facts and a shared number
+ *  would suggest otherwise. */
+export async function generateShipmentNumber(): Promise<string> {
+  const config = await getPoConfigCached()
+  const rows = await prisma.$queryRaw<{ nextval: bigint }[]>`
+    SELECT nextval('po_shipment_number_seq') AS nextval
+  `
+  return `${config.shipmentNumberPrefix}${pad(rows[0]!.nextval)}`
+}
+
 export async function generateReturnNumber(): Promise<string> {
   const config = await getPoConfigCached()
   const rows = await prisma.$queryRaw<{ nextval: bigint }[]>`

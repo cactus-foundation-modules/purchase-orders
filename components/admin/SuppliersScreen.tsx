@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { PoAddress } from '@/modules/purchase-orders/lib/config'
-import type { PoSupplier, SupplierStatus } from '@/modules/purchase-orders/lib/types'
+import type { PoSupplier, SupplierAccountTerms, SupplierStatus } from '@/modules/purchase-orders/lib/types'
 import { card, Field, input, linkButton, muted, table, td, th, thRight } from './ui'
 
 type ShopSupplier = { id: string; name: string; email: string | null; accountNumber: string | null }
@@ -19,6 +19,7 @@ type Form = {
   currency: string
   paymentTerms: string
   paymentTermsDays: string
+  accountTerms: SupplierAccountTerms
   leadTimeDays: string
   minimumOrderValue: string
   carriagePaidOver: string
@@ -44,6 +45,7 @@ const EMPTY_FORM: Form = {
   currency: 'GBP',
   paymentTerms: '',
   paymentTermsDays: '',
+  accountTerms: 'CREDIT',
   leadTimeDays: '',
   minimumOrderValue: '',
   carriagePaidOver: '',
@@ -124,6 +126,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       currency: supplier.currency,
       paymentTerms: supplier.paymentTerms ?? '',
       paymentTermsDays: supplier.paymentTermsDays == null ? '' : String(supplier.paymentTermsDays),
+      accountTerms: supplier.accountTerms ?? 'CREDIT',
       leadTimeDays: supplier.leadTimeDays == null ? '' : String(supplier.leadTimeDays),
       minimumOrderValue: supplier.minimumOrderValue ?? '',
       carriagePaidOver: supplier.carriagePaidOver ?? '',
@@ -161,6 +164,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         currency: form.currency,
         paymentTerms: textOrNull(form.paymentTerms),
         paymentTermsDays: intOrNull(form.paymentTermsDays),
+        accountTerms: form.accountTerms,
         leadTimeDays: intOrNull(form.leadTimeDays),
         minimumOrderValue: moneyOrNull(form.minimumOrderValue),
         carriagePaidOver: moneyOrNull(form.carriagePaidOver),
@@ -262,7 +266,12 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
                     {s.email && <div style={muted}>{s.email}</div>}
                     {s.phone && <div style={muted}>{s.phone}</div>}
                   </td>
-                  <td style={td}>{s.paymentTerms ?? '—'}</td>
+                  <td style={td}>
+                    {s.accountTerms === 'PROFORMA' ? 'Proforma' : (s.paymentTerms ?? '—')}
+                    {s.accountTerms === 'PROFORMA' && (
+                      <div style={muted}>Paid before they confirm</div>
+                    )}
+                  </td>
                   <td style={{ ...td, textAlign: 'right' }}>
                     {s.discountPercent == null ? '—' : `${Number(s.discountPercent)}%`}
                   </td>
@@ -348,6 +357,19 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
             </Field>
             <Field label="Currency">
               <input style={input} maxLength={3} value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
+            </Field>
+            <Field
+              label="How we buy from them"
+              hint="Proforma means they invoice first and will not confirm an order until it is paid. Their own link says so, and holds the confirm button back until somebody here marks it paid."
+            >
+              <select
+                style={input}
+                value={form.accountTerms}
+                onChange={(e) => setForm({ ...form, accountTerms: e.target.value as SupplierAccountTerms })}
+              >
+                <option value="CREDIT">Credit account</option>
+                <option value="PROFORMA">Proforma, paid before they confirm</option>
+              </select>
             </Field>
             <Field label="Payment terms" hint='However you say it: "Net 30", "End of month plus 30".'>
               <input style={input} value={form.paymentTerms} onChange={(e) => setForm({ ...form, paymentTerms: e.target.value })} />

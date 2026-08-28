@@ -3,11 +3,11 @@ import { z } from 'zod'
 // What a supplier is allowed to post through the portal, and nothing else.
 //
 // A discriminated union rather than one loose object with everything optional:
-// the four things they can say have four different shapes, and a union is what
-// stops "message" arriving with a lines array that some later edit starts
-// trusting. Every string is bounded - this endpoint takes writes from anybody
-// holding a link, and an unbounded text field is a free jsonb column on somebody
-// else's site.
+// the things they can say have different shapes, and a union is what stops
+// "message" arriving with a lines array that some later edit starts trusting.
+// Every string is bounded - this endpoint takes writes from anybody holding a
+// link, and an unbounded text field is a free jsonb column on somebody else's
+// site.
 
 const TOKEN = z.string().min(1).max(200)
 const NOTE = z.string().max(500).optional()
@@ -19,16 +19,27 @@ const DAY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'That is not a date we can r
 /** A quantity as typed: up to three decimals, matching po_order_lines.qty. */
 const QTY = z.string().regex(/^\d{1,9}(\.\d{1,3})?$/, 'That is not a quantity we can read.')
 
+const LINE_ID = z.string().min(1).max(64)
+
 export const PortalActionBody = z.discriminatedUnion('action', [
   z.object({
     token: TOKEN,
     action: z.literal('acknowledge'),
     note: NOTE,
+    /** Their own acknowledgement number, where they quote one. The document
+     *  itself goes up the multipart route - a file cannot ride on JSON. */
+    ref: z.string().max(120).optional(),
   }),
   z.object({
     token: TOKEN,
     action: z.literal('propose-date'),
-    date: DAY,
+    // Per LINE, because a supplier who ships an order in three drops has three
+    // answers and one box for all of them was never the truth. At least one, and
+    // a ceiling that matches the shortage form's.
+    lines: z
+      .array(z.object({ lineId: LINE_ID, date: DAY }))
+      .min(1, 'Put a date against at least one line.')
+      .max(200),
     note: NOTE,
   }),
   z.object({
@@ -37,9 +48,25 @@ export const PortalActionBody = z.discriminatedUnion('action', [
     // At least one line, and a sane ceiling: an order with more than two hundred
     // lines short is a phone call, not a form.
     lines: z
-      .array(z.object({ lineId: z.string().min(1).max(64), qty: QTY }))
+      .array(z.object({ lineId: LINE_ID, qty: QTY }))
       .min(1, 'Say which line is short.')
       .max(200),
+    note: NOTE,
+  }),
+  z.object({
+    token: TOKEN,
+    action: z.literal('despatch'),
+    date: DAY,
+    lines: z
+      .array(z.object({ lineId: LINE_ID, qty: QTY }))
+      .min(1, 'Tick what you have sent.')
+      .max(200),
+    carrier: z.string().max(120).optional(),
+    trackingRef: z.string().max(200).optional(),
+    // Their own tracking page. Checked for shape here and rendered as a link
+    // nowhere a customer sees - it goes on the order screen in the admin, for
+    // somebody in this building to click.
+    trackingUrl: z.string().max(500).url('That tracking link does not look like a web address.').optional(),
     note: NOTE,
   }),
   z.object({
@@ -50,3 +77,20 @@ export const PortalActionBody = z.discriminatedUnion('action', [
 ])
 
 export type PortalAction = z.infer<typeof PortalActionBody>
+
+/** The fields that ride ALONGSIDE a file on the multipart upload. The file
+ *  itself is pulled off the form and checked in lib/portal-upload.ts. */
+export const PortalUploadFields = z.object({
+  token: TOKEN,
+  kind: z.enum(['proforma', 'acknowledgement']),
+  ref: z.string().max(120).optional(),
+  /** What their proforma is for, as they typed it. Money as a string all the way
+   *  into the numeric column, like everywhere else in this module. */
+  amount: z
+    .string()
+    .regex(/^\d{1,10}(\.\d{1,2})?$/, 'That amount does not look right.')
+    .optional(),
+  note: NOTE,
+})
+
+export type PortalUploadFieldsInput = z.infer<typeof PortalUploadFields>

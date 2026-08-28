@@ -8,7 +8,7 @@ import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { createPortalToken, listPortalEvents, listPortalTokens, revokeAllPortalTokens } from '@/modules/purchase-orders/lib/portal'
 import { portalPath } from '@/modules/purchase-orders/lib/portal-token'
-import { parsePortalDate } from '@/modules/purchase-orders/lib/portal-view'
+import { parsePortalDate, proposedLinesFrom } from '@/modules/purchase-orders/lib/portal-view'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -37,15 +37,20 @@ export async function GET(_request: NextRequest, { params }: Params) {
     enabled: config.portalEnabled,
     lifetimeDays: config.portalTokenLifetimeDays,
     tokens,
-    // The payload itself stays here. What the screen needs off it is the date
-    // somebody might press a button to accept, and that is worth naming rather
+    // The payload itself stays here. What the screen needs off it is the dates
+    // somebody might press a button to accept, and those are worth naming rather
     // than handing over a jsonb blob for a component to rummage through.
+    //
+    // Both shapes, because both exist: a supplier who ships an order in three
+    // drops answers per line, and everything filed before per-line dates arrived
+    // carries one date for the whole order.
     events: events.map((event) => ({
       id: event.id,
       kind: event.kind,
       createdAt: event.createdAt,
       summary: event.summary,
       proposedDate: event.kind === 'DATE_PROPOSED' ? parsePortalDate(event.payload.date) : null,
+      proposedLines: event.kind === 'DATE_PROPOSED' ? proposedLinesFrom(event.payload) : [],
     })),
   })
 }

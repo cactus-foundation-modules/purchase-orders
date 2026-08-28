@@ -4,14 +4,14 @@ import { notFound } from 'next/navigation'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { DocumentFooterRegion } from '@/lib/documents/page-settings'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
-import { getOrder, getOrderIdByNumber } from '@/modules/purchase-orders/lib/db'
+import { getOrderIdByNumber } from '@/modules/purchase-orders/lib/db'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { verifyPoPrintToken } from '@/modules/purchase-orders/lib/print-token'
 import { loadPoDocContext, renderPoDocument, renderPoRunningFooter } from '@/modules/purchase-orders/lib/document'
-import { listPortalEvents, resolvePortalToken, touchPortalToken } from '@/modules/purchase-orders/lib/portal'
+import { resolvePortalToken, touchPortalToken } from '@/modules/purchase-orders/lib/portal'
 import { PORTAL_TOKEN_QUERY_KEY } from '@/modules/purchase-orders/lib/portal-token'
 import { allowPortalReadIp, allowPortalReadToken, portalClientIpFrom } from '@/modules/purchase-orders/lib/portal-rate-limit'
-import { portalView } from '@/modules/purchase-orders/lib/portal-view'
+import { buildPortalView } from '@/modules/purchase-orders/lib/portal-response'
 import { SupplierPortalPanel } from '@/modules/purchase-orders/components/public/SupplierPortalPanel'
 
 // The purchase order document on its own: no site header, no footer, nothing but
@@ -141,22 +141,21 @@ export default async function PurchaseOrderDocumentPage({
   let panel = null
   if (portalTokenId && portalKey && !print) {
     await touchPortalToken(portalTokenId)
-    const [order, events] = await Promise.all([getOrder(id), listPortalEvents(id, 20)])
-    if (order) {
-      const view = portalView(
-        order,
-        events.map((event) => ({ id: event.id, kind: event.kind, createdAt: event.createdAt, summary: event.summary })),
-      )
-      panel = <SupplierPortalPanel view={view} token={portalKey} />
-    }
+    const view = await buildPortalView(id)
+    if (view) panel = <SupplierPortalPanel view={view} token={portalKey} />
   }
 
   return (
     <>
       <style dangerouslySetInnerHTML={{ __html: BARE_CSS }} />
       <div className="po-view">
-        {document}
+        {/* ABOVE the document, not under it. Everything a supplier can press is
+            in this panel, and an order with thirty lines on it used to bury the
+            lot below a page and a half of desks - which is a fine way to get a
+            phone call instead of a confirmation. The admin's own view of this
+            page has no panel at all and is unchanged. */}
         {panel}
+        {document}
       </div>
       <DocumentFooterRegion>{runningFooter}</DocumentFooterRegion>
     </>

@@ -34,6 +34,17 @@ export const PO_STATUS_LABELS: Record<PoStatus, string> = {
 export const SUPPLIER_STATUSES = ['ENABLED', 'DISABLED', 'ON_HOLD'] as const
 export type SupplierStatus = (typeof SUPPLIER_STATUSES)[number]
 
+/** How we buy from a supplier. CREDIT is an account with terms; PROFORMA means
+ *  they invoice before anything is confirmed and we pay it before they will
+ *  acknowledge the order. */
+export const SUPPLIER_ACCOUNT_TERMS = ['CREDIT', 'PROFORMA'] as const
+export type SupplierAccountTerms = (typeof SUPPLIER_ACCOUNT_TERMS)[number]
+
+export const SUPPLIER_ACCOUNT_TERMS_LABELS: Record<SupplierAccountTerms, string> = {
+  CREDIT: 'Credit account',
+  PROFORMA: 'Proforma - they invoice first, we pay before they confirm',
+}
+
 export const SHIP_TO_KINDS = ['WAREHOUSE', 'CUSTOMER', 'OTHER'] as const
 export type ShipToKind = (typeof SHIP_TO_KINDS)[number]
 
@@ -55,6 +66,8 @@ export type PoSupplier = {
   currency: string
   paymentTerms: string | null
   paymentTermsDays: number | null
+  /** Credit account, or proforma-before-confirmation. */
+  accountTerms: SupplierAccountTerms
   leadTimeDays: number | null
   minimumOrderValue: string | null
   carriagePaidOver: string | null
@@ -160,6 +173,20 @@ export type PoOrder = PoOrderSummary & {
   sentAt: string | null
   acknowledgedAt: string | null
   acknowledgedNote: string | null
+  /** Frozen off the supplier when the order was raised. A supplier moved onto
+   *  credit next year does not rewrite what this order was waiting for. */
+  proformaRequired: boolean
+  /** Their proforma invoice, in core Media. Uploaded through the supplier link. */
+  proformaMediaId: string | null
+  proformaRef: string | null
+  proformaAmount: string | null
+  proformaReceivedAt: string | null
+  proformaPaidAt: string | null
+  proformaPaidByUserId: string | null
+  proformaPaymentRef: string | null
+  /** Their order acknowledgement, attached when they confirmed. */
+  ackMediaId: string | null
+  ackRef: string | null
   cancelledAt: string | null
   cancelReason: string | null
   closedAt: string | null
@@ -275,6 +302,59 @@ export type PoReceipt = PoReceiptSummary & {
   stockAppliedAt: string | null
   stockResult: PoStockResult
   lines: PoReceiptLine[]
+}
+
+// ---------------------------------------------------------------------------
+// Despatches
+// ---------------------------------------------------------------------------
+//
+// What the SUPPLIER says they have sent. Deliberately not a receipt: a despatch
+// moves no stock, closes no line and changes no status. It is the other half of
+// the conversation - "this much left us on Tuesday, here is the tracking" - and
+// it is what a packing slip is printed from.
+
+export const SHIPMENT_SOURCES = ['PORTAL', 'ADMIN'] as const
+export type PoShipmentSource = (typeof SHIPMENT_SOURCES)[number]
+
+export type PoShipmentLine = {
+  id: string
+  orderLineId: string
+  qty: string
+  /** Snapshotted off the order line for display, never stored here. */
+  description: string
+  supplierSku: string | null
+  ourSku: string | null
+  productId: string | null
+  unit: string
+}
+
+export type PoShipmentSummary = {
+  id: string
+  number: string
+  orderId: string
+  orderNumber: string
+  supplierName: string
+  despatchedDate: string
+  carrier: string | null
+  trackingRef: string | null
+  trackingUrl: string | null
+  notes: string | null
+  source: PoShipmentSource
+  createdAt: string
+}
+
+export type PoShipment = PoShipmentSummary & { lines: PoShipmentLine[] }
+
+/** One of an order's lines as the despatch form offers it: what is left to send
+ *  once everything already despatched is taken off. */
+export type PoDespatchableLine = {
+  orderLineId: string
+  description: string
+  supplierSku: string | null
+  unit: string
+  qtyOrdered: string
+  qtyDespatched: string
+  qtyOutstanding: string
 }
 
 // ---------------------------------------------------------------------------

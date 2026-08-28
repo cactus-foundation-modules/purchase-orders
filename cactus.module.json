@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
@@ -83,6 +83,8 @@
   "teardown": [
     "po_catalogue_items",
     "po_supplier_catalogues",
+    "po_shipment_lines",
+    "po_shipments",
     "po_portal_events",
     "po_portal_tokens",
     "po_bill_lines",
@@ -197,7 +199,8 @@
       "rscComponent": "poDocStylePuckRscComponent",
       "layoutTypes": [
         "purchaseOrderDocument",
-        "purchaseReturnDocument"
+        "purchaseReturnDocument",
+        "purchasePackingSlip"
       ]
     },
     {
@@ -216,7 +219,8 @@
       "rscComponent": "poDocDividerPuckRscComponent",
       "layoutTypes": [
         "purchaseOrderDocument",
-        "purchaseReturnDocument"
+        "purchaseReturnDocument",
+        "purchasePackingSlip"
       ]
     },
     {
@@ -290,6 +294,60 @@
       "layoutTypes": [
         "purchaseReturnDocument"
       ]
+    },
+    {
+      "type": "PoPsHeader",
+      "import": "./components/puck/po-packing-parts",
+      "component": "poPsHeaderPuckComponent",
+      "rscComponent": "poPsHeaderPuckRscComponent",
+      "layoutTypes": [
+        "purchasePackingSlip"
+      ]
+    },
+    {
+      "type": "PoPsFrom",
+      "import": "./components/puck/po-packing-parts",
+      "component": "poPsFromPuckComponent",
+      "rscComponent": "poPsFromPuckRscComponent",
+      "layoutTypes": [
+        "purchasePackingSlip"
+      ]
+    },
+    {
+      "type": "PoPsShipTo",
+      "import": "./components/puck/po-packing-parts",
+      "component": "poPsShipToPuckComponent",
+      "rscComponent": "poPsShipToPuckRscComponent",
+      "layoutTypes": [
+        "purchasePackingSlip"
+      ]
+    },
+    {
+      "type": "PoPsLines",
+      "import": "./components/puck/po-packing-parts",
+      "component": "poPsLinesPuckComponent",
+      "rscComponent": "poPsLinesPuckRscComponent",
+      "layoutTypes": [
+        "purchasePackingSlip"
+      ]
+    },
+    {
+      "type": "PoPsTracking",
+      "import": "./components/puck/po-packing-parts",
+      "component": "poPsTrackingPuckComponent",
+      "rscComponent": "poPsTrackingPuckRscComponent",
+      "layoutTypes": [
+        "purchasePackingSlip"
+      ]
+    },
+    {
+      "type": "PoPsNotes",
+      "import": "./components/puck/po-packing-parts",
+      "component": "poPsNotesPuckComponent",
+      "rscComponent": "poPsNotesPuckRscComponent",
+      "layoutTypes": [
+        "purchasePackingSlip"
+      ]
     }
   ],
   "layoutTypes": {
@@ -308,6 +366,14 @@
         "label": "Returns note",
         "starterImport": "./lib/starterLayouts",
         "starterExport": "purchaseReturnDocumentStarters",
+        "pageSettingsImport": "./lib/doc-page-settings",
+        "pageSettingsExport": "poDocPageSettings"
+      },
+      {
+        "key": "purchasePackingSlip",
+        "label": "Packing slip",
+        "starterImport": "./lib/starterLayouts",
+        "starterExport": "purchasePackingSlipStarters",
         "pageSettingsImport": "./lib/doc-page-settings",
         "pageSettingsExport": "poDocPageSettings"
       }

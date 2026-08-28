@@ -17,8 +17,10 @@ import type {
   PoBillSummary,
   PoOrder,
   PoReceiptSummary,
+  PoDespatchableLine,
   PoReturnSummary,
   PoRevisionSummary,
+  PoShipment,
   PoStatus,
   PoSupplier,
 } from '@/modules/purchase-orders/lib/types'
@@ -29,6 +31,7 @@ import {
   formatDay,
   formatWhen,
   input,
+  localToday,
   linkButton,
   MatchBadge,
   Money,
@@ -196,6 +199,13 @@ function formFromOrder(order: PoOrder): Form {
   }
 }
 
+/** The two documents the supplier sends us, resolved to something clickable.
+ *  The order row holds a Media id and nothing else - core owns that table - so
+ *  the link is looked up on the server rather than being a column here that
+ *  could drift out of step with the library. */
+type SupplierDocument = { url: string; originalName: string | null; mimeType: string | null }
+type SupplierDocuments = { proforma: SupplierDocument | null; acknowledgement: SupplierDocument | null }
+
 /** What the supplier link endpoint hands back for one order. */
 type PortalState = {
   enabled: boolean
@@ -240,6 +250,15 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const [receipts, setReceipts] = useState<PoReceiptSummary[]>([])
   const [returns, setReturns] = useState<PoReturnSummary[]>([])
   const [bills, setBills] = useState<PoBillSummary[]>([])
+  // What the supplier says they have SENT, drop by drop. Its own request for the
+  // same reason deliveries and invoices are: most orders arrive in one go and
+  // never have a despatch filed against them at all.
+  const [shipments, setShipments] = useState<PoShipment[]>([])
+  // What is still left to send, worked out by the server off the same function
+  // the save is clamped against - rather than by this screen doing the same
+  // arithmetic and getting a different answer on a stale page.
+  const [despatchable, setDespatchable] = useState<PoDespatchableLine[]>([])
+  const [documents, setDocuments] = useState<SupplierDocuments>({ proforma: null, acknowledgement: null })
   // The supplier's link, and what they have said through it. Its own request
   // again: most orders never have a link at all, and the join would be earning
   // its keep on a minority of order screens.
@@ -287,18 +306,25 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         fetch(`/api/m/purchase-orders/admin/orders/${orderId}/portal`)
           .then((r) => (r.ok ? r.json() : null))
           .catch(() => null),
+        // And the despatches, for the same reason again.
+        fetch(`/api/m/purchase-orders/admin/orders/${orderId}/shipments`)
+          .then((r) => (r.ok ? r.json() : { shipments: [], outstanding: [] }))
+          .catch(() => ({ shipments: [], outstanding: [] })),
       ])
-        .then(([data, deliveries, sentBack, invoices, supplierLink]) => {
+        .then(([data, deliveries, sentBack, invoices, supplierLink, despatches]) => {
           if (data?.order) {
             setOrder(data.order)
             setHistory(data.history ?? [])
             setRevisions(data.revisions ?? [])
+            setDocuments(data.documents ?? { proforma: null, acknowledgement: null })
             setForm(formFromOrder(data.order))
           }
           setReceipts(deliveries?.receipts ?? [])
           setReturns(sentBack?.returns ?? [])
           setBills(invoices?.bills ?? [])
           setPortal(supplierLink ?? null)
+          setShipments(despatches?.shipments ?? [])
+          setDespatchable(despatches?.outstanding ?? [])
           setLoaded(true)
         })
         .catch(() => setLoaded(true)),
@@ -538,6 +564,88 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       return
     }
     await loadOrder()
+  }
+
+  // The proforma. Marking it paid is what releases the supplier's own confirm
+  // button, so it is a decision somebody makes rather than something inferred
+  // from a bank feed nobody has connected.
+  async function payProforma(paymentRef: string) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/proforma`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paymentRef: paymentRef.trim() || undefined }),
+    })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not mark that as paid.')
+      return
+    }
+    await loadOrder()
+  }
+
+  async function unpayProforma() {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/proforma`, { method: 'DELETE' })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not take that back.')
+      return
+    }
+    await loadOrder()
+  }
+
+  async function setProformaTerms(required: boolean) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/proforma`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ required }),
+    })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not change that.')
+      return
+    }
+    await loadOrder()
+  }
+
+  /** Reloads the despatch card on its own. The order itself has not changed - a
+   *  despatch moves no stock and no status - so pulling the whole order back
+   *  would be a round trip to redraw a table that is already right. */
+  async function loadShipments() {
+    const data = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/shipments`)
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null)
+    setShipments(data?.shipments ?? [])
+    setDespatchable(data?.outstanding ?? [])
+  }
+
+  /** Writing down what the supplier has just emailed to say has left them.
+   *  Returns what the server made of it, so the card can say "recorded
+   *  DSP-00007" and own up to anything it had to trim. */
+  async function recordDespatch(body: Record<string, unknown>): Promise<{ number: string; trimmed: number } | null> {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/shipments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(data.error ?? 'Could not record that despatch.')
+      return null
+    }
+    setShipments(data.shipments ?? [])
+    setDespatchable(data.outstanding ?? [])
+    return { number: data.number as string, trimmed: Number(data.trimmed ?? 0) }
+  }
+
+  async function deleteDespatch(shipmentId: string) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/shipments/${shipmentId}`, { method: 'DELETE' })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not remove that despatch.')
+      return
+    }
+    await loadShipments()
   }
 
   async function deleteOrder() {
@@ -791,6 +899,14 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           onRevokeLink={access.canCreate ? revokePortalLink : null}
           onRevokeAllLinks={access.canCreate ? revokeAllPortalLinks : null}
           onApplyDate={access.canCreate ? applyPortalDate : null}
+          shipments={shipments}
+          despatchable={despatchable}
+          onRecordDespatch={access.canReceive || access.canCreate ? recordDespatch : null}
+          onDeleteDespatch={access.canReceive || access.canCreate ? deleteDespatch : null}
+          documents={documents}
+          onPayProforma={access.canApprove || access.canBills ? payProforma : null}
+          onUnpayProforma={access.canApprove || access.canBills ? unpayProforma : null}
+          onSetProformaTerms={access.canCreate ? setProformaTerms : null}
         />
       )}
     </div>
@@ -1090,6 +1206,19 @@ type ViewProps = {
    *  only moment anybody can copy it. */
   newLink: string | null
   onMakeLink: (() => void) | null
+  /** What the supplier says has left them, drop by drop. */
+  shipments: PoShipment[]
+  /** What is still to send, for the form that writes one down by hand. */
+  despatchable: PoDespatchableLine[]
+  /** Null for anybody who may neither buy nor receive. */
+  onRecordDespatch: ((body: Record<string, unknown>) => Promise<{ number: string; trimmed: number } | null>) | null
+  onDeleteDespatch: ((shipmentId: string) => void) | null
+  /** Their proforma and their acknowledgement, where either has arrived. */
+  documents: SupplierDocuments
+  /** Null for anybody without the permission to say money has moved. */
+  onPayProforma: ((paymentRef: string) => void) | null
+  onUnpayProforma: (() => void) | null
+  onSetProformaTerms: ((required: boolean) => void) | null
   onRevokeLink: ((tokenId: string) => void) | null
   onRevokeAllLinks: (() => void) | null
   onApplyDate: ((eventId: string) => void) | null
@@ -1099,6 +1228,8 @@ function OrderView({
   order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
   receipts, returns, bills, receivingHref, returnsBase, billsBase, canReceive, canBills,
   onCancelLine, portal, newLink, onMakeLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
+  shipments, despatchable, onRecordDespatch, onDeleteDespatch,
+  documents, onPayProforma, onUnpayProforma, onSetProformaTerms,
 }: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -1400,6 +1531,22 @@ function OrderView({
         )}
       </div>
 
+      <ProformaCard
+        order={order}
+        documents={documents}
+        onPay={onPayProforma}
+        onUnpay={onUnpayProforma}
+        onSetTerms={onSetProformaTerms}
+      />
+
+      <DespatchesCard
+        shipments={shipments}
+        despatchable={despatchable}
+        order={order}
+        onRecord={onRecordDespatch}
+        onDelete={onDeleteDespatch}
+      />
+
       <SupplierLinkCard
         order={order}
         portal={portal}
@@ -1486,6 +1633,421 @@ function OrderView({
         )}
       </div>
     </>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+type ProformaCardProps = {
+  order: PoOrder
+  documents: SupplierDocuments
+  onPay: ((paymentRef: string) => void) | null
+  onUnpay: (() => void) | null
+  onSetTerms: ((required: boolean) => void) | null
+}
+
+/**
+ * The proforma, and the two documents the supplier sends us.
+ *
+ * On proforma terms nothing about this order is agreed until the money has
+ * moved: the supplier's own page will not let them confirm it, and the button
+ * below is what releases them. So "paid" is somebody's decision here, recorded
+ * with their name against it - not something inferred from a bank feed nobody
+ * has connected.
+ *
+ * Whether an order waits for a proforma at all is frozen onto it when it is
+ * raised, off the supplier's account terms. The switch at the foot is for the
+ * exception: a one-off from a supplier we have an account with who wants the
+ * money up front, or the other way about.
+ */
+function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: ProformaCardProps) {
+  const [paymentRef, setPaymentRef] = useState('')
+
+  // A draft nobody has sent has no supplier documents and no proforma to chase.
+  if (order.status === 'DRAFT' && !order.proformaRequired) return null
+
+  const received = Boolean(order.proformaMediaId) || Boolean(order.proformaReceivedAt)
+  const paid = Boolean(order.proformaPaidAt)
+
+  return (
+    <div style={card}>
+      <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>Proforma and supplier documents</h2>
+
+      {order.proformaRequired ? (
+        <>
+          <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
+            This supplier invoices before they confirm. Until the proforma is marked paid here, their own link tells
+            them so and holds their confirm button back.
+          </p>
+
+          <table style={table}>
+            <tbody>
+              <tr>
+                <td style={td}>Their proforma</td>
+                <td style={td}>
+                  {received ? (
+                    <>
+                      {documents.proforma ? (
+                        <a href={documents.proforma.url} target="_blank" rel="noreferrer">
+                          {documents.proforma.originalName ?? 'Open it'}
+                        </a>
+                      ) : (
+                        'Recorded'
+                      )}
+                      {order.proformaRef && <div style={muted}>Their reference {order.proformaRef}</div>}
+                      {order.proformaAmount && (
+                        <div style={muted}>
+                          For <Money value={order.proformaAmount} currency={order.currency} />
+                        </div>
+                      )}
+                      {order.proformaReceivedAt && <div style={muted}>Sent {formatWhen(order.proformaReceivedAt)}</div>}
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      Not here yet. It arrives through the supplier&apos;s own link, or by email for you to file.
+                    </span>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td style={td}>Paid</td>
+                <td style={td}>
+                  {paid ? (
+                    <>
+                      {formatWhen(order.proformaPaidAt)}
+                      {order.proformaPaymentRef && <div style={muted}>Reference {order.proformaPaymentRef}</div>}
+                      {onUnpay && (
+                        <div style={{ marginTop: '0.375rem' }}>
+                          <button style={{ ...linkButton, color: 'var(--color-danger)' }} onClick={onUnpay}>
+                            Take that back
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  ) : onPay ? (
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                      <input
+                        style={{ ...input, maxWidth: 220 }}
+                        placeholder="Your payment reference (optional)"
+                        value={paymentRef}
+                        onChange={(e) => setPaymentRef(e.target.value)}
+                        maxLength={120}
+                      />
+                      <button className="btn btn-primary btn-sm" onClick={() => onPay(paymentRef)}>
+                        Mark the proforma as paid
+                      </button>
+                    </div>
+                  ) : (
+                    <span style={{ color: 'var(--color-text-secondary)' }}>Not yet.</span>
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td style={td}>Their acknowledgement</td>
+                <td style={td}>
+                  {documents.acknowledgement ? (
+                    <>
+                      <a href={documents.acknowledgement.url} target="_blank" rel="noreferrer">
+                        {documents.acknowledgement.originalName ?? 'Open it'}
+                      </a>
+                      {order.ackRef && <div style={muted}>Their reference {order.ackRef}</div>}
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      {order.acknowledgedAt ? 'Confirmed without one.' : 'Not confirmed yet.'}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          {onSetTerms && !paid && (
+            <p style={{ ...muted, marginBottom: 0, marginTop: '0.75rem' }}>
+              <button style={linkButton} onClick={() => onSetTerms(false)}>
+                Put this order on their account instead
+              </button>
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <table style={table}>
+            <tbody>
+              <tr>
+                <td style={td}>Their acknowledgement</td>
+                <td style={td}>
+                  {documents.acknowledgement ? (
+                    <>
+                      <a href={documents.acknowledgement.url} target="_blank" rel="noreferrer">
+                        {documents.acknowledgement.originalName ?? 'Open it'}
+                      </a>
+                      {order.ackRef && <div style={muted}>Their reference {order.ackRef}</div>}
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--color-text-secondary)' }}>
+                      {order.acknowledgedAt ? 'Confirmed without one.' : 'Not confirmed yet.'}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          {onSetTerms && (
+            <p style={{ ...muted, marginBottom: 0, marginTop: '0.75rem' }}>
+              This order is on the supplier&apos;s account, so no proforma is expected.{' '}
+              <button style={linkButton} onClick={() => onSetTerms(true)}>
+                Ask for a proforma on this one
+              </button>
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+
+type DespatchesCardProps = {
+  shipments: PoShipment[]
+  despatchable: PoDespatchableLine[]
+  order: PoOrder
+  onRecord: ((body: Record<string, unknown>) => Promise<{ number: string; trimmed: number } | null>) | null
+  onDelete: ((shipmentId: string) => void) | null
+}
+
+/**
+ * What the supplier says has left them, drop by drop, and the packing slip that
+ * went in each box - plus the form for writing one down yourself.
+ *
+ * The supplier's own link is the happy path and plenty of suppliers will never
+ * touch it: they email, or they ring, and somebody here writes it down. Same
+ * row, same packing slip, and the table says which of the two it was.
+ *
+ * Deliberately NOT the Deliveries card above. A despatch is the supplier saying
+ * a pallet left them on Tuesday; a delivery is somebody here saying it turned up
+ * and counting it. The two are different facts, they arrive days apart, and the
+ * day they are merged is the day a stock count moves because somebody typed in
+ * an email.
+ */
+function DespatchesCard({ shipments, despatchable, order, onRecord, onDelete }: DespatchesCardProps) {
+  const [open, setOpen] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [said, setSaid] = useState<string | null>(null)
+  const [despatchedDate, setDespatchedDate] = useState(localToday())
+  const [carrier, setCarrier] = useState('')
+  const [trackingRef, setTrackingRef] = useState('')
+  const [trackingUrl, setTrackingUrl] = useState('')
+  const [notes, setNotes] = useState('')
+  const [qty, setQty] = useState<Record<string, string>>({})
+
+  const canRecord = Boolean(onRecord) && isReceivable(order.status)
+  // Nothing to show and nothing anybody could add: no card at all, rather than a
+  // heading over an empty table.
+  if (shipments.length === 0 && !canRecord) return null
+
+  const lines = Object.entries(qty)
+    .map(([orderLineId, value]) => ({ orderLineId, qty: value.trim() }))
+    .filter((row) => row.qty !== '' && Number(row.qty) > 0)
+
+  async function save() {
+    if (!onRecord || saving) return
+    setSaving(true)
+    setSaid(null)
+    try {
+      const result = await onRecord({
+        despatchedDate,
+        carrier: carrier.trim() || null,
+        trackingRef: trackingRef.trim() || null,
+        trackingUrl: trackingUrl.trim() || null,
+        notes: notes.trim() || null,
+        lines,
+      })
+      if (!result) return
+      setSaid(
+        result.trimmed > 0
+          ? `Recorded ${result.number}. ${result.trimmed} line${result.trimmed === 1 ? ' was' : 's were'} trimmed to what was still to send.`
+          : `Recorded ${result.number}. The packing slip is in the table below.`,
+      )
+      setQty({})
+      setTrackingRef('')
+      setTrackingUrl('')
+      setNotes('')
+      setOpen(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div style={card}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>What the supplier has sent</h2>
+        {canRecord && despatchable.length > 0 && (
+          <button className="btn btn-secondary btn-sm" onClick={() => setOpen((o) => !o)}>
+            {open ? 'Never mind' : 'Record a despatch'}
+          </button>
+        )}
+      </div>
+      <p style={{ ...muted, marginTop: 0 }}>
+        What the supplier says has left them, whether they told you through their own link or by email. Nothing here
+        has been booked in, counted or added to stock - that is still Deliveries, above.
+        {shipments.length > 0 &&
+          ` Order ${order.number} has ${shipments.length} despatch${shipments.length === 1 ? '' : 'es'} against it.`}
+      </p>
+
+      {said && (
+        <p style={{ color: 'var(--color-success)', margin: '0 0 0.75rem', fontSize: 'var(--text-sm)' }} role="status">
+          {said}
+        </p>
+      )}
+
+      {canRecord && despatchable.length === 0 && shipments.length > 0 && (
+        <p style={{ ...muted, marginTop: 0 }}>Everything on this order has been despatched.</p>
+      )}
+
+      {open && canRecord && (
+        <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: '0.75rem', marginBottom: '1rem' }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>Line</th>
+                  <th style={thRight}>Still to send</th>
+                  <th style={thRight}>Sent now</th>
+                </tr>
+              </thead>
+              <tbody>
+                {despatchable.map((line) => (
+                  <tr key={line.orderLineId}>
+                    <td style={td}>
+                      {line.description}
+                      {line.supplierSku && <div style={muted}>{line.supplierSku}</div>}
+                    </td>
+                    <td style={tdRight}>
+                      {Number(line.qtyOutstanding)} {line.unit}
+                    </td>
+                    <td style={tdRight}>
+                      <input
+                        style={{ ...input, width: 100, textAlign: 'right' }}
+                        inputMode="decimal"
+                        value={qty[line.orderLineId] ?? ''}
+                        onChange={(e) => setQty((q) => ({ ...q, [line.orderLineId]: e.target.value }))}
+                        aria-label={`How many of ${line.description} have been sent`}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginTop: '0.75rem' }}>
+            <Field label="The date it left them">
+              <input type="date" style={input} value={despatchedDate} onChange={(e) => setDespatchedDate(e.target.value)} />
+            </Field>
+            <Field label="Carrier">
+              <input style={input} value={carrier} onChange={(e) => setCarrier(e.target.value)} maxLength={120} />
+            </Field>
+            <Field label="Tracking number">
+              <input style={input} value={trackingRef} onChange={(e) => setTrackingRef(e.target.value)} maxLength={200} />
+            </Field>
+            <Field label="Tracking link" hint="Only ever shown here, never on the packing slip.">
+              <input style={input} value={trackingUrl} onChange={(e) => setTrackingUrl(e.target.value)} maxLength={500} placeholder="https://..." />
+            </Field>
+          </div>
+
+          <div style={{ marginTop: '0.75rem' }}>
+            <Field label="Note" hint="Prints on the packing slip, so write it for whoever opens the box.">
+              <input style={input} value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={2000} />
+            </Field>
+          </div>
+
+          <p style={{ ...muted, marginTop: '0.75rem' }}>
+            Anything over what is still to send is trimmed to it. A supplier sending more than you ordered is an
+            over-delivery to flag when it turns up, not a packing slip to print.
+          </p>
+
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+            <button className="btn btn-primary btn-sm" onClick={() => void save()} disabled={saving || lines.length === 0 || !despatchedDate}>
+              {saving ? 'Recording…' : 'Record this despatch'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {shipments.length === 0 ? (
+        <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
+          Nothing has been despatched against this one yet.
+        </p>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={th}>Despatch</th>
+                <th style={th}>Sent</th>
+                <th style={th}>What went</th>
+                <th style={th}>Carrier and tracking</th>
+                <th style={th} />
+              </tr>
+            </thead>
+            <tbody>
+              {shipments.map((shipment) => (
+                <tr key={shipment.id}>
+                  <td style={td}>
+                    {shipment.number}
+                    <div style={muted}>{shipment.source === 'PORTAL' ? 'Told to us by the supplier' : 'Entered here'}</div>
+                  </td>
+                  <td style={td}>{formatDay(shipment.despatchedDate)}</td>
+                  <td style={td}>
+                    {shipment.lines.map((line) => (
+                      <div key={line.id}>
+                        {Number(line.qty)} {line.unit} {line.description}
+                      </div>
+                    ))}
+                    {shipment.notes && <div style={muted}>{shipment.notes}</div>}
+                  </td>
+                  <td style={td}>
+                    {shipment.carrier ?? '—'}
+                    {shipment.trackingRef && (
+                      <div style={muted}>
+                        {shipment.trackingUrl ? (
+                          <a href={shipment.trackingUrl} target="_blank" rel="noreferrer">
+                            {shipment.trackingRef}
+                          </a>
+                        ) : (
+                          shipment.trackingRef
+                        )}
+                      </div>
+                    )}
+                  </td>
+                  <td style={td}>
+                    <a
+                      href={`/api/m/purchase-orders/admin/shipments/${shipment.id}/pdf`}
+                      style={{ color: 'var(--color-primary)' }}
+                    >
+                      Packing slip
+                    </a>
+                    {onDelete && (
+                      <div style={{ marginTop: '0.375rem' }}>
+                        <button
+                          style={{ ...linkButton, color: 'var(--color-danger)' }}
+                          onClick={() => onDelete(shipment.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1617,12 +2179,26 @@ function SupplierLinkCard({ order, portal, newLink, onMakeLink, onRevokeLink, on
                   <td style={td}>
                     {/* Only where it would actually change something. A button
                         that sets the date it is already on is a button that
-                        teaches people the buttons do nothing. */}
-                    {event.proposedDate && event.proposedDate !== order.expectedDate && onApplyDate && (
+                        teaches people the buttons do nothing.
+                        Two shapes: dates offered line by line, which is what a
+                        supplier shipping an order in drops answers with, and one
+                        date for the whole order, which is what everything filed
+                        before per-line dates existed carries. */}
+                    {onApplyDate && event.proposedLines?.length > 0 && (
                       <button style={linkButton} onClick={() => onApplyDate(event.id)}>
-                        Use {event.proposedDate}
+                        Use {event.proposedLines.length === 1
+                          ? `${event.proposedLines[0]!.date}`
+                          : `these ${event.proposedLines.length} dates`}
                       </button>
                     )}
+                    {onApplyDate &&
+                      !event.proposedLines?.length &&
+                      event.proposedDate &&
+                      event.proposedDate !== order.expectedDate && (
+                        <button style={linkButton} onClick={() => onApplyDate(event.id)}>
+                          Use {event.proposedDate}
+                        </button>
+                      )}
                   </td>
                 </tr>
               ))}

@@ -213,18 +213,67 @@ export async function acknowledgeFromPortal(orderId: string, note: string | null
 }
 
 /**
- * Somebody here taking the supplier up on the date they offered.
+ * Somebody here taking the supplier up on the date they offered for the WHOLE
+ * order.
  *
  * The one place a portal proposal ever reaches the order, and it is pressed by a
  * person in the admin rather than by the supplier. Only the whole order's
  * expected date moves; the lines keep their own dates, because a supplier saying
  * "the lot will be a fortnight" is not the same as them re-dating each line and
  * guessing would be worse than leaving them.
+ *
+ * Still here because events filed before per-line dates existed carry exactly
+ * this shape, and a history that stops being applicable is not much of a history.
  */
 export async function applyProposedExpectedDate(orderId: string, date: string): Promise<void> {
   await prisma.$executeRaw`
     UPDATE "po_orders" SET "expected_date" = ${date}::date, "updated_at" = now() WHERE "id" = ${orderId}
   `
+}
+
+/**
+ * The same, per line - which is what a supplier who ships an order in three
+ * drops actually answers with.
+ *
+ * Each line's own expected date moves, and the ORDER's moves to the last of
+ * them: "when will this order be here" has one honest answer and it is the day
+ * the last of it turns up. Scoped to the order in the WHERE clause, so a line id
+ * belonging to somebody else's order cannot be re-dated through this.
+ *
+ * Returns how many lines actually moved, which is what the caller reports and
+ * logs - a proposal against a line since amended away moves nothing, and saying
+ * "done" would be a lie.
+ */
+export async function applyProposedLineDates(
+  orderId: string,
+  lines: { lineId: string; date: string }[],
+): Promise<number> {
+  let moved = 0
+  for (const line of lines) {
+    const count = await prisma.$executeRaw`
+      UPDATE "po_order_lines"
+         SET "expected_date" = ${line.date}::date, "updated_at" = now()
+       WHERE "id" = ${line.lineId} AND "order_id" = ${orderId}
+    `
+    moved += count
+  }
+  if (moved === 0) return 0
+
+  // The order's own date follows the LAST line, and only ever forwards: an
+  // order is here when the last of it is here, and a second proposal about one
+  // early line must not drag the whole order's date back in front of a later one
+  // somebody already accepted.
+  await prisma.$executeRaw`
+    UPDATE "po_orders" o
+       SET "expected_date" = GREATEST(
+             COALESCE(o."expected_date", '-infinity'::date),
+             (SELECT MAX(l."expected_date") FROM "po_order_lines" l WHERE l."order_id" = o."id")
+           ),
+           "updated_at" = now()
+     WHERE o."id" = ${orderId}
+       AND EXISTS (SELECT 1 FROM "po_order_lines" l WHERE l."order_id" = o."id" AND l."expected_date" IS NOT NULL)
+  `
+  return moved
 }
 
 /**

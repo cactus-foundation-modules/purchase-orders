@@ -327,3 +327,123 @@ export function purchaseReturnDocumentStarters() {
     },
   ]
 }
+
+// ---------------------------------------------------------------------------
+// The packing slip
+// ---------------------------------------------------------------------------
+//
+// A third layout type on the same module, collected the same way. It is the
+// sheet that goes IN THE BOX, printed by the supplier off their own link - which
+// is why it carries no money and does not name them. See
+// lib/packing-slip-context.ts for the whole of that reasoning; there is no field
+// here to print a price from, so no starter can accidentally offer one.
+//
+// Two starters, like the returns note: a packing slip is a docket, and the
+// difference between "plain" and "standard" on one page of it would be a choice
+// nobody wanted to make.
+
+const PACKING_STANDARD_CONTENT = [
+  logo(48),
+  block('PoPsHeader', 'po-ps-head', {
+    heading: '', fontFamily: '', titleSize: 'medium', sides: 'logo-left', rule: 'hairline',
+    factsLayout: 'columns', numberStyle: 'row',
+    showSlipNumber: 'yes', slipLabel: 'Delivery', showDate: 'yes', dateLabel: 'Sent',
+    orderLabel: 'Order', showReference: 'yes', referenceLabel: 'Your reference', showIntro: 'yes',
+  }),
+  block('PoPsFrom', 'po-ps-from', {
+    heading: 'From', fontFamily: '', align: 'left',
+    showContact: 'no', showEmail: 'yes', showPhone: 'yes', showRegistration: 'no',
+  }),
+  block('PoPsShipTo', 'po-ps-shipto', {
+    heading: 'Delivered to', fontFamily: '', look: 'panel',
+    showInstructions: 'no', showCountry: 'no',
+  }),
+  block('PoPsLines', 'po-ps-lines', {
+    fontFamily: '', headStyle: 'rule', headCase: 'caps', rowRules: 'every', zebra: 'no',
+    descWidth: 'wide', showOurSku: 'yes', showSupplierSku: 'no', showOrdered: 'yes',
+    itemLabel: 'Item', codeLabel: 'Code', qtyLabel: 'In this delivery', orderedLabel: 'Ordered',
+    showPartialNote: 'yes', partialNote: '',
+  }),
+  block('PoPsTracking', 'po-ps-tracking', {
+    showHeading: 'yes', heading: 'How it travelled', capsHeading: 'yes', fontFamily: '', look: 'plain',
+    carrierLabel: 'Carrier', trackingLabel: 'Tracking', showDate: 'no', dateLabel: 'Sent',
+  }),
+  block('PoPsNotes', 'po-ps-notes', {
+    showHeading: 'yes', heading: 'Notes', capsHeading: 'yes', fontFamily: '', columns: '1',
+    showNotes: 'yes', showTerms: 'yes', termsHeading: 'If anything is wrong',
+    extraHeading: '', extra: '',
+  }),
+]
+
+/** What the slip renders when nothing at all has been published - which is every
+ *  site until somebody publishes one. Same reasoning as the order and the
+ *  returns note: a packing slip may never refuse to print, because somebody is
+ *  standing over an open box with a roll of tape. */
+export const PO_PACKING_SLIP_FALLBACK_DATA = {
+  content: PACKING_STANDARD_CONTENT,
+  root: { props: {} },
+  zones: {},
+}
+
+export function purchasePackingSlipStarters() {
+  return [
+    {
+      id: 'starter-po-packing-standard',
+      name: 'Standard packing slip',
+      description: 'Your name at the top, where it is going, what is in this box against what was ordered, and how it travelled. No prices anywhere.',
+      publishByDefault: true,
+      data: PO_PACKING_SLIP_FALLBACK_DATA,
+    },
+    {
+      id: 'starter-po-packing-designed',
+      name: 'Designed packing slip',
+      description: 'The same slip in your own accent colour, with the delivery address in a panel, a banded item table and a line telling your customer what to do if something is missing.',
+      data: {
+        content: [
+          // Colours are site tokens, not values, exactly as the order's designed
+          // starter uses them - so this is the SHAPE of a designed slip in
+          // whatever colours the site already wears.
+          block('PoDocStyle', 'po-ps-style', {
+            accent: 'var(--color-primary)', labelColour: 'var(--color-primary)', titleColour: '',
+            tableHeadBg: 'var(--color-bg-subtle)', tableHeadInk: '',
+            panelBg: 'var(--color-bg-subtle)', panelInk: '', zebraBg: '',
+            ruleWeight: 'thick', corners: 'square', density: 'normal',
+            bodyFont: '', headingFont: '',
+          }),
+          logo(72),
+          block('PoPsHeader', 'po-ps-head', {
+            heading: '', fontFamily: '', titleSize: 'display', sides: 'logo-left', rule: 'accent',
+            factsLayout: 'stacked', numberStyle: 'lead',
+            showSlipNumber: 'yes', slipLabel: 'Delivery', showDate: 'yes', dateLabel: 'Sent',
+            orderLabel: 'Order', showReference: 'yes', referenceLabel: 'Your reference', showIntro: 'yes',
+          }),
+          block('PoPsFrom', 'po-ps-from', {
+            heading: 'From', fontFamily: '', align: 'left',
+            showContact: 'no', showEmail: 'yes', showPhone: 'yes', showRegistration: 'no',
+          }),
+          block('PoPsShipTo', 'po-ps-shipto', {
+            heading: 'Delivered to', fontFamily: '', look: 'panel',
+            showInstructions: 'no', showCountry: 'no',
+          }),
+          block('PoPsLines', 'po-ps-lines', {
+            fontFamily: '', headStyle: 'filled', headCase: 'caps', rowRules: 'every', zebra: 'no',
+            descWidth: 'half', showOurSku: 'yes', showSupplierSku: 'no', showOrdered: 'yes',
+            itemLabel: 'Item', codeLabel: 'Code', qtyLabel: 'In this delivery', orderedLabel: 'Ordered',
+            showPartialNote: 'yes', partialNote: '',
+          }),
+          block('PoPsTracking', 'po-ps-tracking', {
+            showHeading: 'yes', heading: 'How it travelled', capsHeading: 'yes', fontFamily: '', look: 'panel',
+            carrierLabel: 'Carrier', trackingLabel: 'Tracking', showDate: 'yes', dateLabel: 'Sent',
+          }),
+          block('PoPsNotes', 'po-ps-notes', {
+            showHeading: 'yes', heading: 'Notes', capsHeading: 'yes', fontFamily: '', columns: '2',
+            showNotes: 'yes', showTerms: 'yes', termsHeading: 'If anything is wrong',
+            extraHeading: 'Questions', extra: 'Quote {{ORDER_NUMBER}} and we will find it straight away. {{BUSINESS_EMAIL}} {{BUSINESS_PHONE}}',
+          }),
+        ],
+        root: { props: {} },
+        zones: {},
+      },
+    },
+  ]
+}

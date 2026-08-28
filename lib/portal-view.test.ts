@@ -82,6 +82,16 @@ function order(patch: Partial<PoOrder> = {}): PoOrder {
     sentAt: '2026-04-06T12:00:00.000Z',
     acknowledgedAt: null,
     acknowledgedNote: null,
+    proformaRequired: false,
+    proformaMediaId: null,
+    proformaRef: null,
+    proformaAmount: null,
+    proformaReceivedAt: null,
+    proformaPaidAt: null,
+    proformaPaidByUserId: null,
+    proformaPaymentRef: null,
+    ackMediaId: null,
+    ackRef: null,
     cancelledAt: null,
     cancelReason: null,
     closedAt: null,
@@ -149,6 +159,64 @@ describe('the supplier projection', () => {
     expect(portalView(order(), []).acknowledged).toBe(false)
     expect(portalView(order({ acknowledgedAt: '2026-04-07T09:00:00.000Z' }), []).acknowledged).toBe(true)
   })
+
+  it('says nothing about proformas on an ordinary credit-account order', () => {
+    const view = portalView(order(), [])
+    expect(view.proforma.required).toBe(false)
+    expect(view.canAcknowledge).toBe(true)
+    expect(view.acknowledgeBlockedReason).toBeNull()
+  })
+
+  it('will not let a proforma order be confirmed until we have paid', () => {
+    const waiting = portalView(order({ proformaRequired: true }), [])
+    expect(waiting.canAcknowledge).toBe(false)
+    expect(waiting.acknowledgeBlockedReason).toContain('Send us your proforma first')
+
+    const sent = portalView(order({ proformaRequired: true, proformaMediaId: 'media-1' }), [])
+    expect(sent.canAcknowledge).toBe(false)
+    expect(sent.acknowledgeBlockedReason).toContain('with us to pay')
+
+    const paid = portalView(
+      order({ proformaRequired: true, proformaMediaId: 'media-1', proformaPaidAt: '2026-04-08T10:00:00.000Z' }),
+      [],
+    )
+    expect(paid.canAcknowledge).toBe(true)
+    expect(paid.acknowledgeBlockedReason).toBeNull()
+  })
+
+  it('never carries what we paid the proforma with', () => {
+    const wire = JSON.stringify(
+      portalView(
+        order({
+          proformaRequired: true,
+          proformaPaidAt: '2026-04-08T10:00:00.000Z',
+          proformaPaidByUserId: 'user-9',
+          proformaPaymentRef: 'BACS-99887',
+        }),
+        [],
+      ),
+    )
+    expect(wire).not.toContain('BACS-99887')
+    expect(wire).not.toContain('user-9')
+  })
+
+  it('takes what they have already despatched off what is left to send', () => {
+    const view = portalView(order(), [], { despatchedByLine: { 'line-1': '5.000' } })
+    expect(view.lines[0]!.qty).toBe('12')
+    expect(view.lines[0]!.qtyDespatched).toBe('5')
+    expect(view.lines[0]!.qtyToSend).toBe('7')
+  })
+
+  it('never says there is more to send than there is', () => {
+    const view = portalView(order(), [], { despatchedByLine: { 'line-1': '20.000' } })
+    expect(view.lines[0]!.qtyToSend).toBe('0')
+  })
+
+  it('carries the switches this site has set', () => {
+    expect(portalView(order(), []).canUpload).toBe(true)
+    expect(portalView(order(), [], { uploadsEnabled: false }).canUpload).toBe(false)
+    expect(portalView(order(), [], { despatchEnabled: false }).canDespatch).toBe(false)
+  })
 })
 
 describe('what the supplier said, as a sentence', () => {
@@ -160,6 +228,47 @@ describe('what the supplier said, as a sentence', () => {
   it('reads a date, and survives one that is not a date', () => {
     expect(portalEventSummary('DATE_PROPOSED', { date: '2026-05-04' })).toBe('Offered 2026-05-04 instead.')
     expect(portalEventSummary('DATE_PROPOSED', { date: 'next Tuesday' })).toBe('Offered a different date.')
+  })
+
+  it('reads dates offered line by line', () => {
+    expect(
+      portalEventSummary('DATE_PROPOSED', {
+        lines: [
+          { lineId: 'line-1', description: 'Oak desk 1600mm', date: '2026-05-04' },
+          { lineId: 'line-2', description: 'Task chair', date: '2026-05-18' },
+        ],
+        note: 'Veneer is the hold-up.',
+      }),
+    ).toBe('Offered new dates: Oak desk 1600mm on 2026-05-04; Task chair on 2026-05-18. Veneer is the hold-up.')
+  })
+
+  it('still reads an event filed before per-line dates existed', () => {
+    // Stored events are never rewritten to match a newer shape, so the old one
+    // has to keep reading for good.
+    expect(portalEventSummary('DATE_PROPOSED', { lines: [{ lineId: 'line-1', date: 'soon' }], date: '2026-05-04' }))
+      .toBe('Offered 2026-05-04 instead.')
+  })
+
+  it('reads a proforma and a despatch', () => {
+    expect(portalEventSummary('PROFORMA', { ref: 'PI-4471', amount: '2376.00' })).toBe(
+      'Sent their proforma, their PI-4471 for 2376.00.',
+    )
+    expect(portalEventSummary('PROFORMA', {})).toBe('Sent their proforma invoice.')
+    expect(
+      portalEventSummary('DESPATCHED', {
+        number: 'DSP-00007',
+        date: '2026-04-21',
+        lines: [{ description: 'Oak desk 1600mm', qty: '8' }],
+        carrier: 'Palletways',
+        trackingRef: 'PW-88213445',
+      }),
+    ).toBe('Despatched DSP-00007 on 2026-04-21: 8 x Oak desk 1600mm. Palletways, tracking PW-88213445.')
+  })
+
+  it('says when an acknowledgement came with its own document', () => {
+    expect(portalEventSummary('ACKNOWLEDGED', { document: true, ref: 'OA-9912' })).toBe(
+      'Accepted the order and sent their acknowledgement (OA-9912).',
+    )
   })
 
   it('reads a shortage, however odd the payload', () => {

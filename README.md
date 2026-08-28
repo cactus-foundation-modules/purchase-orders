@@ -19,8 +19,8 @@ things.
 
 ## What is in this release
 
-- Suppliers, with the terms you buy on: payment terms, lead times, minimum
-  order value, carriage-paid thresholds.
+- Suppliers, with the terms you buy on: a credit account or proforma, payment
+  terms, lead times, minimum order value, carriage-paid thresholds.
 - Purchase orders: draft, line editor, approval where you want one, and the
   full order lifecycle through to closed or cancelled.
 - The order as a document you design yourself, printed as a PDF and emailed to
@@ -34,10 +34,19 @@ things.
   where UK Bookkeeping is installed.
 - Reorder levels per product, and the draft orders that follow when a count
   drops below one - grouped by supplier and mindful of their minimum.
-- A link for the supplier: their own view of their own order, which they can
-  accept, offer a different date on, or report a shortage against, and change
-  nothing at all. Scoped to one order, expiring, revocable, and stored only as
-  a hash.
+- Proforma terms: an order to a supplier who invoices first waits for their
+  proforma, waits again while somebody here marks it paid, and only then can
+  they confirm it. Frozen onto the order, and overridable per order.
+- A link for the supplier: their own view of their own order, where they can
+  download it as a PDF, send their proforma, confirm it with their own
+  acknowledgement attached, offer a date line by line, report a shortage, and
+  say what has actually left them - and change nothing at all. Scoped to one
+  order, expiring, revocable, and stored only as a hash.
+- Despatches and packing slips: what the supplier says they have sent, drop by
+  drop, with a tracking number each - filed through their own link, or typed in
+  here for the suppliers who would rather email - and a packing slip for every
+  one, printed from a layout you design, carrying no prices and never naming the
+  supplier, because on a drop-shipped order it is the customer who opens the box.
 - Reports: what you have committed to and not yet received, what is late, goods
   in without an invoice, invoices in without the goods, and what you spend with
   whom, month by month and by category.

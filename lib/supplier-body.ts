@@ -38,6 +38,11 @@ export const SupplierBody = z.object({
   currency: z.string().trim().length(3, 'Currency is a three-letter code').default('GBP'),
   paymentTerms: z.string().max(200).nullable().default(null),
   paymentTermsDays: z.number().int().min(0).max(365).nullable().default(null),
+  // Credit account, or proforma-before-confirmation. Defaulted rather than
+  // required, so a form written before this field existed still saves - and a
+  // supplier nobody has thought about is on an account, which is what every
+  // existing row is.
+  accountTerms: z.enum(['CREDIT', 'PROFORMA']).default('CREDIT'),
   leadTimeDays: z.number().int().min(0).max(365).nullable().default(null),
   minimumOrderValue: Money.default(null),
   carriagePaidOver: Money.default(null),
@@ -74,6 +79,7 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     currency: body.currency.trim().toUpperCase(),
     paymentTerms: orNull(body.paymentTerms),
     paymentTermsDays: body.paymentTermsDays,
+    accountTerms: body.accountTerms,
     leadTimeDays: body.leadTimeDays,
     minimumOrderValue: orNull(body.minimumOrderValue),
     carriagePaidOver: orNull(body.carriagePaidOver),

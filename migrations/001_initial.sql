@@ -25,6 +25,7 @@
 CREATE SEQUENCE IF NOT EXISTS "po_number_seq" START 1;
 CREATE SEQUENCE IF NOT EXISTS "po_receipt_number_seq" START 1;
 CREATE SEQUENCE IF NOT EXISTS "po_return_number_seq" START 1;
+CREATE SEQUENCE IF NOT EXISTS "po_shipment_number_seq" START 1;
 
 -- ---------------------------------------------------------------------------
 -- Settings (singleton row, JSONB config validated by lib/config.ts)
@@ -63,6 +64,10 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "currency"                TEXT        NOT NULL DEFAULT 'GBP',
     "payment_terms"           TEXT,
     "payment_terms_days"      INTEGER,
+    -- How we buy from them. CREDIT is an account; PROFORMA means they invoice
+    -- first and confirm nothing until it is paid. See 007, where this column
+    -- arrives for installs that already have 001.
+    "account_terms"           TEXT        NOT NULL DEFAULT 'CREDIT',
     "lead_time_days"          INTEGER,
     "minimum_order_value"     NUMERIC(12,2),
     "carriage_paid_over"      NUMERIC(12,2),
@@ -82,6 +87,7 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "updated_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_suppliers_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "po_suppliers_status_check" CHECK ("status" IN ('ENABLED','DISABLED','ON_HOLD')),
+    CONSTRAINT "po_suppliers_account_terms_check" CHECK ("account_terms" IN ('CREDIT','PROFORMA')),
     CONSTRAINT "po_suppliers_discount_percent_check"
         CHECK ("discount_percent" IS NULL OR ("discount_percent" >= 0 AND "discount_percent" <= 100))
 );
@@ -134,6 +140,23 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     "sent_to"             JSONB       NOT NULL DEFAULT '[]',
     "acknowledged_at"     TIMESTAMPTZ,
     "acknowledged_note"   TEXT,
+    -- The proforma dance, for a supplier who is not on credit. Frozen onto the
+    -- order rather than read off the supplier every time: moving them onto an
+    -- account next year must not rewrite what an order raised last year was
+    -- waiting for. The media ids are plain columns and never foreign keys -
+    -- core owns Media, and this module holds no key into a table it does not
+    -- own. (Also in 007, for installs that predate it.)
+    "proforma_required"   BOOLEAN     NOT NULL DEFAULT false,
+    "proforma_media_id"   TEXT,
+    "proforma_ref"        TEXT,
+    "proforma_amount"     NUMERIC(12,2),
+    "proforma_received_at" TIMESTAMPTZ,
+    "proforma_paid_at"    TIMESTAMPTZ,
+    "proforma_paid_by_user_id" TEXT,
+    "proforma_payment_ref" TEXT,
+    -- The supplier's own order acknowledgement, attached when they confirm.
+    "ack_media_id"        TEXT,
+    "ack_ref"             TEXT,
     "cancelled_at"        TIMESTAMPTZ,
     "cancel_reason"       TEXT,
     "closed_at"           TIMESTAMPTZ,
@@ -431,10 +454,57 @@ CREATE TABLE IF NOT EXISTS "po_portal_events" (
     "ip_hash"    TEXT,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_portal_events_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "po_portal_events_kind_check" CHECK ("kind" IN ('ACKNOWLEDGED','DATE_PROPOSED','SHORTAGE','MESSAGE')),
+    CONSTRAINT "po_portal_events_kind_check" CHECK ("kind" IN ('ACKNOWLEDGED','DATE_PROPOSED','SHORTAGE','MESSAGE','PROFORMA','DESPATCHED')),
     CONSTRAINT "po_portal_events_token_fk" FOREIGN KEY ("token_id") REFERENCES "po_portal_tokens" ("id") ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS "po_portal_events_order_idx" ON "po_portal_events" ("order_id", "created_at");
+
+-- ---------------------------------------------------------------------------
+-- Despatches
+--
+-- What the SUPPLIER says they have sent, which is a different fact from what
+-- turned up (po_receipts) and is never confused with it: a despatch moves no
+-- stock, closes no line and changes no status. It exists so a part-shipped
+-- order can be tracked drop by drop, and so each drop can carry a packing slip
+-- into the box.
+--
+-- token_id records which supplier link filed it, and is nulled rather than
+-- cascaded: a revoked link must not take the despatch with it.
+-- (Also in 007, for installs that predate it.)
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS "po_shipments" (
+    "id"                 TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+    "number"             TEXT        NOT NULL,
+    "order_id"           TEXT        NOT NULL,
+    "despatched_date"    DATE        NOT NULL,
+    "carrier"            TEXT,
+    "tracking_ref"       TEXT,
+    "tracking_url"       TEXT,
+    "notes"              TEXT,
+    "source"             TEXT        NOT NULL DEFAULT 'PORTAL',
+    "token_id"           TEXT,
+    "created_by_user_id" TEXT,
+    "created_at"         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT "po_shipments_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "po_shipments_number_unique" UNIQUE ("number"),
+    CONSTRAINT "po_shipments_source_check" CHECK ("source" IN ('PORTAL','ADMIN')),
+    CONSTRAINT "po_shipments_order_fk" FOREIGN KEY ("order_id") REFERENCES "po_orders" ("id") ON DELETE CASCADE,
+    CONSTRAINT "po_shipments_token_fk" FOREIGN KEY ("token_id") REFERENCES "po_portal_tokens" ("id") ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS "po_shipments_order_idx" ON "po_shipments" ("order_id", "despatched_date");
+
+CREATE TABLE IF NOT EXISTS "po_shipment_lines" (
+    "id"            TEXT NOT NULL DEFAULT gen_random_uuid()::text,
+    "shipment_id"   TEXT NOT NULL,
+    "order_line_id" TEXT NOT NULL,
+    "qty"           NUMERIC(12,3) NOT NULL,
+    CONSTRAINT "po_shipment_lines_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "po_shipment_lines_qty_check" CHECK ("qty" > 0),
+    CONSTRAINT "po_shipment_lines_shipment_fk" FOREIGN KEY ("shipment_id") REFERENCES "po_shipments" ("id") ON DELETE CASCADE,
+    CONSTRAINT "po_shipment_lines_order_line_fk" FOREIGN KEY ("order_line_id") REFERENCES "po_order_lines" ("id") ON DELETE RESTRICT
+);
+CREATE INDEX IF NOT EXISTS "po_shipment_lines_shipment_idx" ON "po_shipment_lines" ("shipment_id");
+CREATE INDEX IF NOT EXISTS "po_shipment_lines_order_line_idx" ON "po_shipment_lines" ("order_line_id");
 
 -- ---------------------------------------------------------------------------
 -- Audit log (append-only)

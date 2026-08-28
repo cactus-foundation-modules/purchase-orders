@@ -49,6 +49,10 @@ export function PurchaseOrdersSettingsTab() {
     setConfig((prev) => (prev ? { ...prev, wording: { ...prev.wording, ...patch } } : prev))
   }
 
+  function setPackingSlipWording(patch: Partial<PoConfig['packingSlipWording']>) {
+    setConfig((prev) => (prev ? { ...prev, packingSlipWording: { ...prev.packingSlipWording, ...patch } } : prev))
+  }
+
   function setReturnWording(patch: Partial<PoConfig['returnWording']>) {
     setConfig((prev) => (prev ? { ...prev, returnWording: { ...prev.returnWording, ...patch } } : prev))
   }
@@ -90,6 +94,9 @@ export function PurchaseOrdersSettingsTab() {
           </Field>
           <Field label="Returns prefix">
             <input style={input} value={config.returnNumberPrefix} onChange={(e) => set('returnNumberPrefix', e.target.value)} />
+          </Field>
+          <Field label="Despatch prefix" hint="What the supplier says they have sent. Its own series, because what left them and what you booked in are different things.">
+            <input style={input} value={config.shipmentNumberPrefix} onChange={(e) => set('shipmentNumberPrefix', e.target.value)} />
           </Field>
         </div>
         <p style={{ ...muted, marginTop: '0.5rem' }}>
@@ -332,6 +339,30 @@ export function PurchaseOrdersSettingsTab() {
       </div>
 
       <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Wording on a packing slip</h3>
+        <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+          The sheet that goes in the box. On an order you have drop-shipped, the person who opens that box is your
+          customer - so it carries no prices at all and never names your supplier.
+        </p>
+        <div style={{ display: 'grid', gap: '0.75rem' }}>
+          <Field label="Heading">
+            <input style={input} value={config.packingSlipWording.heading} onChange={(e) => setPackingSlipWording({ heading: e.target.value })} />
+          </Field>
+          <Field label="Opening line">
+            <textarea rows={2} style={input} value={config.packingSlipWording.intro} onChange={(e) => setPackingSlipWording({ intro: e.target.value })} />
+          </Field>
+          <Field label="If anything is wrong" hint="What somebody should do when the box is short or damaged. Printed under the items.">
+            <textarea rows={3} style={input} value={config.packingSlipWording.terms} onChange={(e) => setPackingSlipWording({ terms: e.target.value })} />
+          </Field>
+        </div>
+        <div style={{ marginTop: '0.75rem', maxWidth: 320 }}>
+          <Field label="PDF filename starts with" hint="A saved packing slip is named after this and its despatch number.">
+            <input style={input} value={config.packingSlipFilenamePrefix} onChange={(e) => set('packingSlipFilenamePrefix', e.target.value)} />
+          </Field>
+        </div>
+      </div>
+
+      <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Reordering</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -420,12 +451,33 @@ export function PurchaseOrdersSettingsTab() {
             />
           </Field>
         </div>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.75rem' }}>
+          <input
+            type="checkbox"
+            checked={config.portalUploadsEnabled}
+            disabled={!config.portalEnabled}
+            onChange={(e) => set('portalUploadsEnabled', e.target.checked)}
+          />
+          Let suppliers send you their proforma and their order acknowledgement through the link
+        </label>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={config.portalDespatchEnabled}
+            disabled={!config.portalEnabled}
+            onChange={(e) => set('portalDespatchEnabled', e.target.checked)}
+          />
+          Let suppliers say what they have sent, and take away a packing slip for each delivery
+        </label>
         <p style={{ ...muted, marginTop: '0.5rem' }}>
-          With the link on, every order you send carries one of its own. The supplier can read that order, accept it,
-          offer a different date or say something is short - and change none of it. Each link is listed on the order
-          itself and can be stopped there. With chasing on, a supplier who is late gets a short note asking where the
-          order has got to - once, and then on the repeat above; set the repeat to zero to ask only the once. Either
-          way the Reports tab works out who is late, and you can send one from there yourself.
+          With the link on, every order you send carries one of its own. The supplier can read that order, download it,
+          accept it, offer a date line by line or say something is short - and change none of it. Each link is listed
+          on the order itself and can be stopped there. The two switches above are worth a thought: a file arriving
+          through the link is the one place on this site where somebody with no account can put something on it. Every
+          file is checked for what it really is and capped in size, and nothing is ever run - but if you would rather
+          those came by email, turn it off and the page says so. With chasing on, a supplier who is late gets a short
+          note asking where the order has got to - once, and then on the repeat above; set the repeat to zero to ask
+          only the once. Either way the Reports tab works out who is late, and you can send one from there yourself.
         </p>
       </div>
 

@@ -13,6 +13,7 @@ import type {
   PoSupplier,
   ShipToKind,
   SourceKind,
+  SupplierAccountTerms,
   SupplierStatus,
 } from './types'
 import type { PoAddress } from './config'
@@ -90,6 +91,9 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     currency: r.currency as string,
     paymentTerms: (r.payment_terms as string | null) ?? null,
     paymentTermsDays: (r.payment_terms_days as number | null) ?? null,
+    // A row written before 007 has no column to read, which is a credit account
+    // rather than a missing answer.
+    accountTerms: ((r.account_terms as string | null) ?? 'CREDIT') as SupplierAccountTerms,
     leadTimeDays: (r.lead_time_days as number | null) ?? null,
     minimumOrderValue: decOrNull(r.minimum_order_value),
     carriagePaidOver: decOrNull(r.carriage_paid_over),
@@ -199,6 +203,7 @@ export type SupplierInput = {
   currency: string
   paymentTerms: string | null
   paymentTermsDays: number | null
+  accountTerms: SupplierAccountTerms
   leadTimeDays: number | null
   minimumOrderValue: string | null
   carriagePaidOver: string | null
@@ -218,7 +223,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
     INSERT INTO "po_suppliers" (
       "name", "name_key", "shop_supplier_id", "shop_supplier_name", "account_number",
       "contact_name", "phone", "email", "email_cc", "address", "currency",
-      "payment_terms", "payment_terms_days", "lead_time_days", "minimum_order_value",
+      "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
       "carriage_paid_over", "carriage_charge", "discount_percent", "default_category_id",
       "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
       "delivery_instructions", "status", "notes"
@@ -226,7 +231,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
       ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
       ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
       ${JSON.stringify(input.address)}::jsonb, ${input.currency},
-      ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.leadTimeDays},
+      ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.accountTerms}, ${input.leadTimeDays},
       ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
       ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
       ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.status}, ${input.notes}
@@ -252,6 +257,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
       "currency" = ${input.currency},
       "payment_terms" = ${input.paymentTerms},
       "payment_terms_days" = ${input.paymentTermsDays},
+      "account_terms" = ${input.accountTerms},
       "lead_time_days" = ${input.leadTimeDays},
       "minimum_order_value" = ${input.minimumOrderValue}::numeric,
       "carriage_paid_over" = ${input.carriagePaidOver}::numeric,
@@ -503,6 +509,16 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     sentAt: stamp(r.sent_at),
     acknowledgedAt: stamp(r.acknowledged_at),
     acknowledgedNote: (r.acknowledged_note as string | null) ?? null,
+    proformaRequired: Boolean(r.proforma_required),
+    proformaMediaId: (r.proforma_media_id as string | null) ?? null,
+    proformaRef: (r.proforma_ref as string | null) ?? null,
+    proformaAmount: decOrNull(r.proforma_amount),
+    proformaReceivedAt: stamp(r.proforma_received_at),
+    proformaPaidAt: stamp(r.proforma_paid_at),
+    proformaPaidByUserId: (r.proforma_paid_by_user_id as string | null) ?? null,
+    proformaPaymentRef: (r.proforma_payment_ref as string | null) ?? null,
+    ackMediaId: (r.ack_media_id as string | null) ?? null,
+    ackRef: (r.ack_ref as string | null) ?? null,
     cancelledAt: stamp(r.cancelled_at),
     cancelReason: (r.cancel_reason as string | null) ?? null,
     closedAt: stamp(r.closed_at),
@@ -591,7 +607,7 @@ export async function createOrder(
         "number", "status", "supplier_id", "ship_to_kind", "ship_to", "currency", "base_currency",
         "fx_rate", "tax_mode", "subtotal", "discount_amount", "carriage_amount", "tax_amount", "total",
         "raised_date", "required_by_date", "expected_date", "payment_terms", "delivery_terms",
-        "notes_supplier", "notes_internal", "approval_required",
+        "notes_supplier", "notes_internal", "approval_required", "proforma_required",
         "source_kind", "source_ref",
         "created_by_user_id", "updated_by_user_id"
       ) VALUES (
@@ -602,6 +618,10 @@ export async function createOrder(
         CURRENT_DATE, ${input.requiredByDate}::date, ${input.expectedDate}::date,
         ${input.paymentTerms}, ${input.deliveryTerms}, ${input.notesSupplier}, ${input.notesInternal},
         ${approvalRequired},
+        -- Read off the supplier here rather than passed in, so every caller that
+        -- raises an order - the screen, the reorder run, a paid shop order -
+        -- gets the same answer without any of them having to know the rule.
+        COALESCE((SELECT s."account_terms" = 'PROFORMA' FROM "po_suppliers" s WHERE s."id" = ${input.supplierId}), false),
         ${source.kind}, ${source.ref === null ? null : JSON.stringify(source.ref)}::jsonb,
         ${userId}, ${userId}
       )
@@ -642,6 +662,13 @@ export async function updateOrder(
         "notes_supplier" = ${input.notesSupplier},
         "notes_internal" = ${input.notesInternal},
         "approval_required" = ${approvalRequired},
+        -- Only re-read when the supplier on the order has actually changed. The
+        -- right-hand sides all see the OLD row, so this compares against the
+        -- supplier the order had before this save. Left alone otherwise: moving
+        -- a supplier onto a credit account next year must not quietly rewrite
+        -- what an order raised last year was waiting for.
+        "proforma_required" = CASE WHEN "supplier_id" = ${input.supplierId} THEN "proforma_required"
+          ELSE COALESCE((SELECT s."account_terms" = 'PROFORMA' FROM "po_suppliers" s WHERE s."id" = ${input.supplierId}), false) END,
         "updated_by_user_id" = ${userId},
         "updated_at" = now()
       WHERE "id" = ${id}

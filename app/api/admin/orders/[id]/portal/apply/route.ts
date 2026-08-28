@@ -5,19 +5,30 @@ import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder } from '@/modules/purchase-orders/lib/db'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
-import { applyProposedExpectedDate, listPortalEvents } from '@/modules/purchase-orders/lib/portal'
-import { parsePortalDate } from '@/modules/purchase-orders/lib/portal-view'
+import {
+  applyProposedExpectedDate, applyProposedLineDates, listPortalEvents,
+} from '@/modules/purchase-orders/lib/portal'
+import { parsePortalDate, proposedLinesFrom } from '@/modules/purchase-orders/lib/portal-view'
 
 type Params = { params: Promise<{ id: string }> }
 
 const Body = z.object({ eventId: z.string().min(1) })
 
-// POST - takes the supplier up on the date they offered.
+// POST - takes the supplier up on the dates they offered.
 //
 // The one place a portal proposal ever reaches the order, and a person here
-// presses it. The date is read off the stored event rather than taken from the
+// presses it. The dates are read off the stored event rather than taken from the
 // request, so what gets applied is what the supplier actually said and not what
 // somebody typed into a console afterwards.
+//
+// Two shapes, both applied for good:
+//
+//  - per LINE, which is what a supplier who ships an order in three drops
+//    answers with. Each line's own expected date moves and the order's follows
+//    the last of them.
+//  - one date for the WHOLE order, which is what everything filed before per-line
+//    dates existed carries. Rewriting stored events to match a newer shape is how
+//    a history stops being a history, so the old ones are simply still read.
 //
 // A shortage deliberately has no button. Cutting a line down is an amendment -
 // the supplier is holding a copy of the old one and is owed the new one - so it
@@ -42,6 +53,30 @@ export async function POST(request: NextRequest, { params }: Params) {
   const events = await listPortalEvents(id, 200)
   const event = events.find((row) => row.id === parsed.data.eventId)
   if (!event || event.kind !== 'DATE_PROPOSED') return errorResponse('That is not a date the supplier offered.', 404)
+
+  const perLine = proposedLinesFrom(event.payload)
+  if (perLine.length > 0) {
+    const moved = await applyProposedLineDates(
+      id,
+      perLine.map((row) => ({ lineId: row.lineId, date: row.date })),
+    )
+    if (moved === 0) {
+      return errorResponse('Those lines are not on this order any more, so there is nothing to move.', 409)
+    }
+    await recordAudit(
+      'order',
+      id,
+      'order.portal-date-applied',
+      {
+        note: `Moved ${moved} line${moved === 1 ? '' : 's'} to the dates the supplier offered`,
+        lines: perLine,
+        eventId: event.id,
+      },
+      user.id,
+    )
+    const after = await getOrder(id)
+    return NextResponse.json({ ok: true, lines: moved, expectedDate: after?.expectedDate ?? null })
+  }
 
   const date = parsePortalDate(event.payload.date)
   if (!date) return errorResponse('That is not a date the supplier offered.', 409)

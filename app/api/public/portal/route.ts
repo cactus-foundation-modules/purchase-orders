@@ -5,22 +5,27 @@ import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { sendPortalReplyToBuyer } from '@/modules/purchase-orders/lib/email'
 import { PortalActionBody } from '@/modules/purchase-orders/lib/portal-body'
+import { buildPortalView } from '@/modules/purchase-orders/lib/portal-response'
+import { generateShipmentNumber } from '@/modules/purchase-orders/lib/numbering'
+import { createShipment, despatchableLines } from '@/modules/purchase-orders/lib/shipments'
 import {
-  acknowledgeFromPortal, listPortalEvents, portalNoticeRecipient, recordPortalEvent, resolvePortalToken,
+  acknowledgeFromPortal, portalNoticeRecipient, recordPortalEvent, resolvePortalToken,
 } from '@/modules/purchase-orders/lib/portal'
 import { hashPortalIp } from '@/modules/purchase-orders/lib/portal-token'
 import { allowPortalWriteIp, allowPortalWriteToken, portalClientIp } from '@/modules/purchase-orders/lib/portal-rate-limit'
-import { isPortalOpen, portalEventSummary, portalView } from '@/modules/purchase-orders/lib/portal-view'
+import { isPortalOpen, portalEventSummary } from '@/modules/purchase-orders/lib/portal-view'
 import type { PoPortalEventKind } from '@/modules/purchase-orders/lib/portal-view'
 
-// POST - the four things a supplier may say back through their own link.
+// POST - the things a supplier may say back through their own link.
 //
 // The only write endpoint on this platform that takes instructions from outside
 // the building with no account behind them, so the shape of it matters:
 //
-//  - Every reply is a PROPOSAL. Accepting the order stamps it and nothing more;
-//    a date or a shortage lands in po_portal_events for somebody here to apply.
-//    Nothing a supplier types ever reaches a line, a price or a total.
+//  - Every reply is a PROPOSAL, with two exceptions that are theirs to state
+//    rather than ours to guess: accepting the order stamps it, and telling us
+//    what has left them files a despatch. Neither touches a line, a price, a
+//    total or a stock count. A date or a shortage still lands in
+//    po_portal_events for somebody here to apply.
 //  - A token opens exactly one order, and the order is looked up FROM the token
 //    rather than from anything the caller sends. There is no order id on the
 //    wire to tamper with.
@@ -60,8 +65,17 @@ export async function POST(request: NextRequest) {
 
   switch (body.action) {
     case 'acknowledge': {
+      // On proforma terms an order is not theirs to confirm until the money has
+      // moved. Checked here as well as hidden on the panel, because a button
+      // being absent from a page has never stopped a request being sent.
+      if (order.proformaRequired && !order.proformaPaidAt) {
+        return errorResponse(
+          'We have not paid your proforma yet. Send it to us if you have not already, and confirm the order once it is settled.',
+          409,
+        )
+      }
       kind = 'ACKNOWLEDGED'
-      payload = { note }
+      payload = { note, ref: (body.ref ?? '').trim(), document: false }
       // The one write to the order itself, and it is guarded in SQL: two people
       // at the supplier pressing the button at the same moment cannot both move
       // the status.
@@ -69,15 +83,23 @@ export async function POST(request: NextRequest) {
       break
     }
     case 'propose-date': {
+      // Line ids are checked against THIS order's own lines, exactly as a
+      // shortage is: a supplier holding one link cannot re-date somebody else's
+      // order. The description is snapshotted alongside so the history still
+      // reads properly after an amendment rewrites the lines.
+      const byId = new Map(order.lines.map((line) => [line.id, line]))
+      const lines = body.lines
+        .map((row) => {
+          const line = byId.get(row.lineId)
+          return line ? { lineId: line.id, description: line.description, date: row.date } : null
+        })
+        .filter((row): row is { lineId: string; description: string; date: string } => row !== null)
+      if (lines.length === 0) return errorResponse('Those lines are not on this order.')
       kind = 'DATE_PROPOSED'
-      payload = { date: body.date, note }
+      payload = { lines, note }
       break
     }
     case 'shortage': {
-      // Line ids are checked against THIS order's own lines, so a supplier
-      // holding one link cannot file a shortage against a line belonging to
-      // somebody else's order. The description is snapshotted alongside, so the
-      // history still reads properly after an amendment rewrites the lines.
       const byId = new Map(order.lines.map((line) => [line.id, line]))
       const lines = body.lines
         .map((row) => {
@@ -90,6 +112,64 @@ export async function POST(request: NextRequest) {
       if (lines.length === 0) return errorResponse('Those lines are not on this order.')
       kind = 'SHORTAGE'
       payload = { lines, note }
+      break
+    }
+    case 'despatch': {
+      if (!config.portalDespatchEnabled) {
+        return errorResponse('We are not taking despatch notes through this page. Email them to us instead.', 409)
+      }
+      // What is genuinely left to send, worked out here rather than trusted off
+      // the form: a supplier with two tabs open would otherwise despatch the same
+      // pallet twice, and a packing slip for goods nobody ordered is worse than
+      // no packing slip.
+      const outstanding = new Map(
+        (await despatchableLines(order.id)).map((line) => [line.orderLineId, line]),
+      )
+      const lines: { lineId: string; description: string; supplierSku: string | null; qty: string }[] = []
+      for (const row of body.lines) {
+        const line = outstanding.get(row.lineId)
+        if (!line) continue
+        const qty = Math.min(Number(row.qty), Number(line.qtyOutstanding))
+        if (!(qty > 0)) continue
+        lines.push({
+          lineId: row.lineId,
+          description: line.description,
+          supplierSku: line.supplierSku,
+          qty: qty.toFixed(3),
+        })
+      }
+      if (lines.length === 0) {
+        return errorResponse('There is nothing left to send on those lines.', 409)
+      }
+
+      const number = await generateShipmentNumber()
+      await createShipment(number, {
+        orderId: order.id,
+        despatchedDate: body.date,
+        carrier: (body.carrier ?? '').trim() || null,
+        trackingRef: (body.trackingRef ?? '').trim() || null,
+        trackingUrl: (body.trackingUrl ?? '').trim() || null,
+        notes: note || null,
+        source: 'PORTAL',
+        tokenId: token.id,
+        createdByUserId: null,
+        lines: lines.map((line) => ({ orderLineId: line.lineId, qty: line.qty })),
+      })
+
+      kind = 'DESPATCHED'
+      payload = {
+        number,
+        date: body.date,
+        carrier: (body.carrier ?? '').trim(),
+        trackingRef: (body.trackingRef ?? '').trim(),
+        trackingUrl: (body.trackingUrl ?? '').trim(),
+        lines: lines.map((line) => ({
+          lineId: line.lineId,
+          description: line.description,
+          qty: String(Number(line.qty)),
+        })),
+        note,
+      }
       break
     }
     case 'message': {
@@ -115,12 +195,6 @@ export async function POST(request: NextRequest) {
 
   // Read back rather than patched together here, so what the supplier sees after
   // pressing the button is what the database now says.
-  const [fresh, events] = await Promise.all([getOrder(order.id), listPortalEvents(order.id, 20)])
-  return NextResponse.json({
-    ok: true,
-    view: portalView(
-      fresh ?? order,
-      events.map((event) => ({ id: event.id, kind: event.kind, createdAt: event.createdAt, summary: event.summary })),
-    ),
-  })
+  const view = await buildPortalView(order.id)
+  return NextResponse.json({ ok: true, view })
 }
