@@ -9,9 +9,16 @@ import type { EmailTemplateDef } from '@/lib/email/registry'
 // is not on a mailing list, and an amendment or a cancellation they never see is
 // how two of something turn up.
 //
-// `lines` is the table the sending code assembles, every value escaped as it
-// goes - hence rawTags. Everything else core escapes as normal, which matters
-// because a line description is whatever somebody typed into the line editor.
+// `lines` is the whole table the sending code assembles, `<table>` tags and all,
+// every value escaped as it goes - hence rawTags. Everything else core escapes as
+// normal, which matters because a line description is whatever somebody typed into
+// the line editor.
+//
+// It goes in bare. NEVER wrap it in a `<table>` of its own: a table nested
+// straight inside another table is not markup any browser accepts, and every
+// mail client fixes it by throwing the rest of the message - the delivery
+// address, the sign-off - clean out of the wrapper's cell, where it lands
+// unstyled and jammed against the left edge.
 
 export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
   {
@@ -21,7 +28,7 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     bodyHtml:
       '<p>Hello {{supplierName}},</p>' +
       '<p>Our purchase order <strong>{{orderNumber}}</strong> is attached. Please quote that number on your paperwork.</p>' +
-      '<table>{{lines}}</table>' +
+      '{{lines}}' +
       '<p>Delivery is wanted by {{requiredByDate}}, to:</p>' +
       '<p>{{shipTo}}</p>' +
       '{{portalLink}}' +
@@ -56,7 +63,7 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     bodyHtml:
       '<p>Hello {{supplierName}},</p>' +
       '<p>We are returning the goods below against our order <strong>{{orderNumber}}</strong>. Our returns note {{returnNumber}} is attached.</p>' +
-      '<table>{{lines}}</table>' +
+      '{{lines}}' +
       '<p>{{reason}}</p>' +
       '<p>Please raise a credit note for {{creditExpected}}, quoting {{returnNumber}}.</p>' +
       '<p>Thank you,<br />{{siteName}}</p>',
@@ -79,7 +86,7 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
       '<p>Our purchase order <strong>{{orderNumber}}</strong> was due on {{dueDate}} and has not arrived. ' +
       'That is {{daysLate}} now, so we thought we would ask.</p>' +
       '<p>Still to come:</p>' +
-      '<table>{{lines}}</table>' +
+      '{{lines}}' +
       '{{portalLink}}' +
       '<p>If it is already on its way, do ignore this.</p>' +
       '<p>Thank you,<br />{{siteName}}</p>',
@@ -127,7 +134,7 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     bodyHtml:
       '<p>{{orderNumber}} has been paid for and its purchase orders were drafted automatically.</p>' +
       '<p><strong>{{whatHappened}}</strong></p>' +
-      '<table>{{lines}}</table>' +
+      '{{lines}}' +
       '<p>Nothing has been sent to any supplier. Open the customer order to see where it stands, ' +
       'or Purchasing to send the drafts that did come out.</p>',
     mergeTags: ['orderNumber', 'whatHappened', 'lines', 'siteName'],
