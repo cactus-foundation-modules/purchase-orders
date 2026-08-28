@@ -103,9 +103,22 @@ export const PO_DOC_CSS = `
 .po-doc-lines.po-doc-thead-fill td:first-child { padding-left: var(--po-doc-thead-pad-x, 0.75rem); }
 .po-doc-lines.po-doc-thead-fill td:last-child { padding-right: var(--po-doc-thead-pad-x, 0.75rem); }
 .po-doc-lines.po-doc-thead-plain th { text-transform: none; letter-spacing: normal; }
-.po-doc-lines.po-doc-zebra tbody tr:nth-child(even) td { background: var(--po-doc-zebra-bg, var(--color-bg-subtle)); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+/* Shaded off a class the renderer counts off the LINE, not off nth-child: a
+   line that charges for delivery prints as two rows, and counting rows would
+   flip the stripe halfway down it and leave every line after it inverted. */
+.po-doc-lines.po-doc-zebra tbody tr.po-doc-alt td { background: var(--po-doc-zebra-bg, var(--color-bg-subtle)); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .po-doc-lines.po-doc-zebra tbody tr td:first-child { border-radius: var(--po-doc-row-radius, 0) 0 0 var(--po-doc-row-radius, 0); }
 .po-doc-lines.po-doc-zebra tbody tr td:last-child { border-radius: 0 var(--po-doc-row-radius, 0) var(--po-doc-row-radius, 0) 0; }
+/* The two rows of one line are one shaded block: the goods row keeps the top
+   corners and loses the bottom ones, the delivery row the other way about. */
+.po-doc-lines.po-doc-zebra tbody tr.po-doc-row-open td:first-child { border-radius: var(--po-doc-row-radius, 0) 0 0 0; }
+.po-doc-lines.po-doc-zebra tbody tr.po-doc-row-open td:last-child { border-radius: 0 var(--po-doc-row-radius, 0) 0 0; }
+.po-doc-lines.po-doc-zebra tbody tr.po-doc-row-cont td:first-child { border-radius: 0 0 0 var(--po-doc-row-radius, 0); }
+.po-doc-lines.po-doc-zebra tbody tr.po-doc-row-cont td:last-child { border-radius: 0 0 var(--po-doc-row-radius, 0) 0; }
+/* A line and its delivery are one line on the sheet: no rule between them, and
+   the delivery sits tight under the goods rather than a full row's air away. */
+.po-doc-lines tbody tr.po-doc-row-open td { border-bottom: 0; padding-bottom: 0; }
+.po-doc-lines tbody tr.po-doc-row-cont td { padding-top: 0.25rem; }
 .po-doc-lines.po-doc-rows-none td { border-bottom: 0; }
 .po-doc-lines.po-doc-rows-none tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }
 .po-doc-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -115,10 +128,13 @@ export const PO_DOC_CSS = `
    of its row, which prints as a stray white box sitting under the codes rather
    than as a column of them. */
 .po-doc-sku { font-size: var(--po-doc-sku-size, 0.8125rem); color: var(--color-text-muted); }
-/* The delivery figures, under the goods figures, lined up with the service name
-   in the description column - same top margin and same size as a detail row, so
-   the four of them read across as one line about delivery. */
-.po-doc-num-sub { display: block; margin-top: 0.25rem; font-size: var(--po-doc-detail-size, 0.8125rem); font-weight: 400; color: var(--color-text-muted); }
+/* The delivery figures sit in a ROW of their own with the service name, so they
+   line up with it whatever the description above did - a name that wrapped onto
+   a second line used to leave its own money stranded a line above it. */
+.po-doc-num-sub { display: block; font-size: var(--po-doc-detail-size, 0.8125rem); font-weight: 400; color: var(--color-text-muted); }
+/* Qualified with the cell, because the td rule above colours every cell and
+   would otherwise out-specify this and print the delivery in full goods black. */
+.po-doc-lines td.po-doc-service { font-size: var(--po-doc-detail-size, 0.8125rem); color: var(--color-text-muted); }
 .po-doc-detail { list-style: none; margin: 0.25rem 0 0; padding: 0; display: grid; gap: 0.125rem; font-size: var(--po-doc-detail-size, 0.8125rem); color: var(--color-text-muted); }
 .po-doc-detail span { font-weight: 500; }
 /* A cancelled quantity is struck through rather than removed: the line still has
@@ -191,7 +207,7 @@ export const PO_DOC_CSS = `
   .po-doc-terms, .po-doc-notes, .po-doc-notice, .po-doc-approval { color: #111 !important; }
   .po-doc-name, .po-doc-grand, .po-doc-strong, .po-doc-facts dd, .po-doc-lines td,
   .po-doc-totals dd, .po-doc-signed { color: #111 !important; }
-  .po-doc-facts dt, .po-doc-sku, .po-doc-detail, .po-doc-num-sub, .po-doc-empty, .po-doc-note, .po-doc-reg,
+  .po-doc-facts dt, .po-doc-sku, .po-doc-detail, .po-doc-num-sub, .po-doc-service, .po-doc-empty, .po-doc-note, .po-doc-reg,
   .po-doc-cancelled, .po-doc-instructions, .po-doc-terms p, .po-doc-totals dt,
   .po-doc-lines th, .po-doc-signline { color: #444 !important; }
   .po-doc-h1, .po-doc-lead, .po-doc-totals.po-doc-total-accent .po-doc-grand { color: var(--po-doc-title-ink, #111) !important; }
@@ -213,6 +229,8 @@ export const PO_DOC_CSS = `
   .po-doc-rule { border-top-color: var(--po-doc-rule-ink, #ccc) !important; }
   .po-doc-lines { page-break-inside: auto; }
   .po-doc-lines tr { page-break-inside: avoid; page-break-after: auto; }
+  /* A line and the delivery charged on it never break apart across a page. */
+  .po-doc-lines tr.po-doc-row-open { page-break-after: avoid; break-after: avoid; }
   .po-doc-totals, .po-doc-terms, .po-doc-notes, .po-doc-notice, .po-doc-parties,
   .po-doc-shipto, .po-doc-approval { page-break-inside: avoid; }
 }

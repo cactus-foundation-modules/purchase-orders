@@ -414,15 +414,18 @@ export function PoRetLines(props: RetLinesProps) {
           </tr>
         </thead>
         <tbody>
-          {ret.lines.map((line) => {
+          {ret.lines.map((line, index) => {
             // Which delivery it came in on. The single most useful thing on the
             // sheet for a supplier's own goods-in desk, who file by their own
             // despatch note and not by our order.
             const detail = props.showReceipt !== 'no' && line.receiptNumber
               ? [`Delivered on ${line.receiptNumber}`]
               : []
+            // Shading marked on the row rather than counted by nth-child, so it
+            // stays in step with the order sheet, whose lines can run to two
+            // rows when there is a delivery charged on one.
             return (
-              <tr key={line.id}>
+              <tr key={line.id} className={index % 2 === 1 ? 'po-doc-alt' : undefined}>
                 <td>
                   <span className="po-doc-name">{line.description}</span>
                   {detail.length > 0 && (

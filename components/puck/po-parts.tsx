@@ -1,3 +1,4 @@
+import { Fragment } from 'react'
 import { formatMoney, formatQty, serviceExtendedCost, serviceLineName } from '@/modules/purchase-orders/lib/money'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
@@ -668,21 +669,23 @@ export function PoDocLines(props: LinesProps) {
           </tr>
         </thead>
         <tbody>
-          {order.lines.map((line) => {
+          {order.lines.map((line, index) => {
             const cancelled = Number(line.qtyCancelled)
             const discount = Number(line.discountPercent ?? 0)
             const detail: string[] = []
             const qty = Number(line.qty) - cancelled
-            // First in the list on purpose: it is the one thing on the line the
-            // supplier has to act on differently from every other order.
-            //
             // NAMED here and PRICED in the money columns, rather than described
             // in a sentence with the figures buried in it: delivery is a thing
             // being bought, so it is read the way everything else being bought
             // is read - down the columns. The carriage at the foot is one figure
             // for the whole order and says nothing about which line it came off.
+            //
+            // A ROW of its own, not a note tucked under the description. Sharing
+            // the goods row only lined the name up with its figures while the
+            // description happened to fit on one line; the moment a desk needed
+            // two, the name slid a line below its own money and the sheet read
+            // as though the figures belonged to the goods above them.
             const service = serviceLineName(line.serviceName, line.serviceCost)
-            if (service) detail.push(service)
             // Still not IN the line total, and still summed into the carriage at
             // the foot. The columns say what it costs; they do not move where it
             // is counted.
@@ -694,36 +697,48 @@ export function PoDocLines(props: LinesProps) {
             if (showOurSku && line.ourSku) detail.push(`Our code ${line.ourSku}`)
             if (props.showLineDates !== 'no' && line.expectedDate) detail.push(`Expected ${formatDate(line.expectedDate)}`)
             if (props.showDiscount !== 'no' && discount > 0) detail.push(`Less ${formatQty(discount)}%`)
+            // Shading counted off the LINE, not off the row: the second row of a
+            // delivery pair would otherwise flip the stripe halfway down a line
+            // and start every line after it on the wrong colour.
+            const alt = index % 2 === 1 ? ' po-doc-alt' : ''
             return (
-              <tr key={line.id}>
-                <td>
-                  <span className="po-doc-name">{line.description}</span>
-                  {detail.length > 0 && (
-                    <ul className="po-doc-detail">
-                      {detail.map((row, i) => <li key={i}>{row}</li>)}
-                    </ul>
-                  )}
-                  {/* A cancelled quantity stays on the sheet rather than being
-                      deleted: the supplier is holding an earlier revision, and
-                      what they need to see is which line changed. */}
-                  {cancelled > 0 && (
-                    <span className="po-doc-cancelled">{formatQty(cancelled)} {line.unit} cancelled</span>
-                  )}
-                </td>
-                {codeColumn && <td className="po-doc-sku">{line.supplierSku ?? ''}</td>}
-                <td className="po-doc-num">
-                  {formatQty(qty)} {line.unit}
-                  {serviceTotal && <span className="po-doc-num-sub">{formatQty(qty)} {line.unit}</span>}
-                </td>
-                <td className="po-doc-num">
-                  {formatMoney(line.unitCost, order.currency)}
-                  {serviceTotal && <span className="po-doc-num-sub">{formatMoney(line.serviceCost, order.currency)}</span>}
-                </td>
-                <td className="po-doc-num">
-                  {formatMoney(line.lineTotal, order.currency)}
-                  {serviceTotal && <span className="po-doc-num-sub">{formatMoney(serviceTotal, order.currency)}</span>}
-                </td>
-              </tr>
+              <Fragment key={line.id}>
+                <tr className={`${service ? 'po-doc-row-open' : ''}${alt}`.trim() || undefined}>
+                  <td>
+                    <span className="po-doc-name">{line.description}</span>
+                    {detail.length > 0 && (
+                      <ul className="po-doc-detail">
+                        {detail.map((row, i) => <li key={i}>{row}</li>)}
+                      </ul>
+                    )}
+                    {/* A cancelled quantity stays on the sheet rather than being
+                        deleted: the supplier is holding an earlier revision, and
+                        what they need to see is which line changed. */}
+                    {cancelled > 0 && (
+                      <span className="po-doc-cancelled">{formatQty(cancelled)} {line.unit} cancelled</span>
+                    )}
+                  </td>
+                  {codeColumn && <td className="po-doc-sku">{line.supplierSku ?? ''}</td>}
+                  <td className="po-doc-num">{formatQty(qty)} {line.unit}</td>
+                  <td className="po-doc-num">{formatMoney(line.unitCost, order.currency)}</td>
+                  <td className="po-doc-num">{formatMoney(line.lineTotal, order.currency)}</td>
+                </tr>
+                {service && (
+                  <tr className={`po-doc-row-cont${alt}`}>
+                    <td className="po-doc-service">{service}</td>
+                    {codeColumn && <td className="po-doc-sku" />}
+                    <td className="po-doc-num">
+                      {serviceTotal && <span className="po-doc-num-sub">{formatQty(qty)} {line.unit}</span>}
+                    </td>
+                    <td className="po-doc-num">
+                      {serviceTotal && <span className="po-doc-num-sub">{formatMoney(line.serviceCost, order.currency)}</span>}
+                    </td>
+                    <td className="po-doc-num">
+                      {serviceTotal && <span className="po-doc-num-sub">{formatMoney(serviceTotal, order.currency)}</span>}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             )
           })}
           {order.lines.length === 0 && (

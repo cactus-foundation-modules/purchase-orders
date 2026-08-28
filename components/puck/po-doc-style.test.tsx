@@ -169,6 +169,38 @@ describe('the purchase order document blocks', () => {
     expect(html).toContain('\u00a31,980.00')
   })
 
+  it('keeps the delivery name in the same ROW as the delivery figures', () => {
+    // The bug this replaces: the name sat in the description cell and the
+    // figures sat under the goods figures, so they only lined up while the
+    // description fitted on one line. A desk with a long name pushed the name
+    // a line below its own money, and the sheet read as though the £8.95 went
+    // with the goods above it. Name and figures now share a row, so nothing
+    // the description does can separate them.
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={ctx} />))
+    const row = /<tr class="po-doc-row-cont[^"]*">(.*?)<\/tr>/s.exec(html)?.[1] ?? ''
+    expect(row).toContain('Pre-assembled delivery')
+    expect(row).toContain('\u00a33.75')
+    expect(row).toContain('\u00a345.00')
+    // And the goods row keeps only the goods figures.
+    const goods = /<tr class="po-doc-row-open[^"]*">(.*?)<\/tr>/s.exec(html)?.[1] ?? ''
+    expect(goods).toContain('\u00a31,980.00')
+    expect(goods).not.toContain('Pre-assembled delivery')
+    expect(goods).not.toContain('\u00a33.75')
+  })
+
+  it('counts the zebra off the line, not off the row', () => {
+    // A line that charges for delivery prints as two rows. Shading on
+    // nth-child would stripe half a line and invert every line after it, so
+    // the renderer marks the pair itself.
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={ctx} zebra="yes" />))
+    // Sample line one has a delivery (two rows, unshaded), line two has none
+    // and is the one that should be shaded.
+    expect(/<tr class="po-doc-row-open">/.test(html)).toBe(true)
+    expect(/<tr class="po-doc-row-cont">/.test(html)).toBe(true)
+    expect(html.match(/po-doc-alt/g)?.length).toBe(1)
+    expect(PO_DOC_CSS).not.toContain('po-doc-zebra tbody tr:nth-child')
+  })
+
   it('leaves a line with no delivery service showing nothing but its own figures', () => {
     const html = visible(renderToStaticMarkup(<PoDocLines _ctx={ctx} />))
     // The second sample line has no service at all. One sub-figure per money
