@@ -34,6 +34,28 @@ export const PO_DOC_CSS = `
 .po-doc-h1 { font-family: var(--po-doc-head-font, var(--h1-family, var(--font-heading, var(--font-body, inherit)))); font-weight: var(--h1-weight, 700); letter-spacing: var(--h1-letter-spacing, normal); text-transform: var(--h1-transform, none); }
 .po-doc-h2 { font-family: var(--po-doc-head-font, var(--h2-family, var(--font-heading, var(--font-body, inherit)))); font-weight: var(--h2-weight, 700); letter-spacing: var(--h2-letter-spacing, normal); text-transform: var(--h2-transform, none); }
 
+/* Leading, stated by the document rather than inherited from the page it is
+   sitting on.
+
+   A site's body typography is written for a web page, and Appearance > Styles
+   lets an owner set it as an exact line height in PIXELS - "16px text, 24px
+   leading", which is how a type scale is normally written. A px line-height is
+   inherited as a LENGTH, so it arrives unchanged on a run of text an owner has
+   set to 11px here, and the document prints with two lines of air between every
+   address line. The small headings are worse: 'main h2' carries the site's own
+   h2 leading (36px, under a 13px label) and an INHERITED value cannot beat a
+   rule that matches, so the parts had to say it themselves.
+
+   Unitless on purpose. That is the whole fix: every size field on every block
+   now gets leading in proportion to the size an owner picked, on screen and on
+   paper alike. --po-doc-leading is the Document style block's Line spacing field;
+   the fallbacks below are what each part reads best at, and the parts that want
+   a little more air (the notice, the small print) keep it. */
+.po-doc-head, .po-doc-intro, .po-doc-lead, .po-doc-parties, .po-doc-shipto,
+.po-doc-lines, .po-doc-totals, .po-doc-note, .po-doc-terms, .po-doc-notes,
+.po-doc-notice, .po-doc-approval, .po-doc-rule,
+.po-doc-h1, .po-doc-h2 { line-height: var(--po-doc-leading, 1.4); }
+
 /* ---------------------------------------------------------------------------
    Heading
    --------------------------------------------------------------------------- */
@@ -57,7 +79,7 @@ export const PO_DOC_CSS = `
 .po-doc-facts .po-doc-fact { display: contents; }
 .po-doc-facts dt { color: var(--color-text-muted); }
 .po-doc-facts dd { margin: 0; color: var(--color-text); font-variant-numeric: tabular-nums; }
-.po-doc-facts.po-doc-facts-stack { display: block; text-align: right; line-height: 1.5; }
+.po-doc-facts.po-doc-facts-stack { display: block; text-align: right; line-height: var(--po-doc-leading, 1.5); }
 .po-doc-facts.po-doc-facts-stack .po-doc-fact { display: block; }
 .po-doc-facts.po-doc-facts-stack dt { display: inline; }
 .po-doc-facts.po-doc-facts-stack dd { display: inline; }
@@ -92,9 +114,14 @@ export const PO_DOC_CSS = `
 /* ---------------------------------------------------------------------------
    The lines
    --------------------------------------------------------------------------- */
+/* 'font-size: inherit' on the cells is load-bearing, not tidying. globals.css
+   styles bare 'td' for the site's own tables, font size included, and an element
+   selector beats a size INHERITED from the table above it - so the items block's
+   row size moved the <table> and every cell on the page carried on at the site's
+   table size. It looked exactly like a field that did nothing. */
 .po-doc-lines { width: 100%; border-collapse: collapse; margin: var(--po-doc-gap, 1.5rem) 0 0; font-size: var(--po-doc-row-size, 0.9375rem); }
-.po-doc-lines th { text-align: left; padding: 0.5rem 0.5rem 0.5rem 0; border-bottom: 1px solid var(--color-border); color: var(--po-doc-thead-ink, var(--color-text-muted)); font-weight: 600; font-size: var(--po-doc-thead-size, 0.8125rem); text-transform: uppercase; letter-spacing: 0.02em; }
-.po-doc-lines td { padding: var(--po-doc-row-y, 0.625rem) 0.5rem var(--po-doc-row-y, 0.625rem) 0; border-bottom: 1px solid var(--color-border-subtle, var(--color-border)); vertical-align: top; color: var(--color-text); }
+.po-doc-lines th { background: transparent; text-align: left; padding: 0.5rem 0.5rem 0.5rem 0; border-bottom: 1px solid var(--color-border); color: var(--po-doc-thead-ink, var(--color-text-muted)); font-weight: 600; font-size: var(--po-doc-thead-size, 0.8125rem); text-transform: uppercase; letter-spacing: 0.02em; }
+.po-doc-lines td { padding: var(--po-doc-row-y, 0.625rem) 0.5rem var(--po-doc-row-y, 0.625rem) 0; border-bottom: 1px solid var(--color-border-subtle, var(--color-border)); vertical-align: top; color: var(--color-text); font-size: inherit; }
 .po-doc-lines th:last-child, .po-doc-lines td:last-child { padding-right: 0; }
 .po-doc-lines.po-doc-thead-fill th { background: var(--po-doc-thead-bg, var(--color-bg-subtle)); padding: var(--po-doc-thead-pad-y, 0.625rem) var(--po-doc-thead-pad-x, 0.75rem); border-bottom: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .po-doc-lines.po-doc-thead-fill th:first-child { padding-left: var(--po-doc-thead-pad-x, 0.75rem); border-radius: var(--po-doc-thead-radius, var(--po-doc-radius, 0)) 0 0 var(--po-doc-thead-radius, var(--po-doc-radius, 0)); }
@@ -121,6 +148,25 @@ export const PO_DOC_CSS = `
 .po-doc-lines tbody tr.po-doc-row-cont td { padding-top: 0.25rem; }
 .po-doc-lines.po-doc-rows-none td { border-bottom: 0; }
 .po-doc-lines.po-doc-rows-none tbody tr:last-child td { border-bottom: 1px solid var(--color-border); }
+/* Three of the site's own table rules reach into the document and beat what the
+   rules above say, because a bare element selector still outranks a value that
+   was merely INHERITED, and app/globals.css styles tables for the site's own
+   content:
+
+    - 'tr:last-child td { border-bottom: none }' outranks '.po-doc-lines td'
+      (two elements and a pseudo-class against one class and an element), so the
+      rule that closes the table never printed at all.
+    - bare 'th' carries the site's subtle fill, and nothing above says anything
+      about a heading's background, so a head set to "Ruled underneath" came out
+      on a grey band anyway.
+    - 'tbody tr:hover' lit the rows up under the pointer on the document page. A
+      printed document is not a data table somebody is picking a row out of.
+
+   Each is answered at the specificity it takes to win and no more, so the items
+   block's own filled band, its zebra shading and its "rules under the last row
+   only" all still outrank these. */
+.po-doc-lines tbody tr:last-child td { border-bottom: 1px solid var(--color-border-subtle, var(--color-border)); }
+.po-doc-lines tbody tr:hover { background: transparent; }
 .po-doc-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .po-doc-name { display: block; font-weight: 500; }
 /* NO display here. This is a TABLE CELL - it was a span under the description
@@ -167,7 +213,7 @@ export const PO_DOC_CSS = `
 .po-doc-terms p { margin: 0 0 0.5rem; font-size: var(--po-doc-smallprint-size, 0.8125rem); color: var(--color-text-muted); }
 .po-doc-notes p { margin: 0 0 0.5rem; font-size: var(--po-doc-notes-size, inherit); color: var(--color-text); }
 
-.po-doc-notice { margin: var(--po-doc-gap, 1.5rem) 0 0; font-size: var(--po-doc-notice-size, 0.9375rem); line-height: 1.55; color: var(--po-doc-panel-ink, var(--color-text)); }
+.po-doc-notice { margin: var(--po-doc-gap, 1.5rem) 0 0; font-size: var(--po-doc-notice-size, 0.9375rem); line-height: var(--po-doc-leading, 1.55); color: var(--po-doc-panel-ink, var(--color-text)); }
 .po-doc-notice p { margin: 0 0 0.5rem; }
 .po-doc-notice p:last-child { margin-bottom: 0; }
 .po-doc-notice .po-doc-notice-lead { font-weight: 700; }
