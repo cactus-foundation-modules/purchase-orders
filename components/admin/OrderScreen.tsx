@@ -577,10 +577,14 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ paymentRef: paymentRef.trim() || undefined }),
     })
+    const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      setError((await res.json().catch(() => ({}))).error ?? 'Could not mark that as paid.')
+      setError(data.error ?? 'Could not mark that as paid.')
       return
     }
+    // The payment is in either way. If the supplier could not be told, say so
+    // here rather than leaving somebody to find out when they ring up asking.
+    if (data.emailProblem) setError(data.emailProblem)
     await loadOrder()
   }
 

@@ -34,6 +34,54 @@ export const PO_PORTAL_EVENT_LABELS: Record<PoPortalEventKind, string> = {
   DESPATCHED: 'Despatched part of the order',
 }
 
+/** The other half of the history: things WE did, said back to the supplier in
+ *  their terms. Deliberately a separate list of kinds from theirs, because the
+ *  two are read together but written by completely different code - one by a
+ *  supplier pressing a button, one by a person here sending, paying or booking
+ *  something in. */
+export const PO_PORTAL_OURS_KINDS = [
+  'ORDER_SENT',
+  'AMENDMENT_SENT',
+  'CHASED',
+  'PROFORMA_RECEIVED',
+  'PROFORMA_PAID',
+  'GOODS_RECEIVED',
+  'ORDER_CANCELLED',
+  'ORDER_CLOSED',
+] as const
+export type PoPortalOursKind = (typeof PO_PORTAL_OURS_KINDS)[number]
+
+export const PO_PORTAL_OURS_LABELS: Record<PoPortalOursKind, string> = {
+  ORDER_SENT: 'We sent you the order',
+  AMENDMENT_SENT: 'We sent you a change to the order',
+  CHASED: 'We sent you a reminder',
+  PROFORMA_RECEIVED: 'We received your proforma',
+  PROFORMA_PAID: 'We paid your proforma',
+  GOODS_RECEIVED: 'We booked in a delivery',
+  ORDER_CANCELLED: 'We cancelled the order',
+  ORDER_CLOSED: 'We closed the order',
+}
+
+/** Something WE did about this order, as it reads back to the supplier. Same
+ *  shape as theirs so the two merge into one list. */
+export type PoPortalOursEvent = {
+  id: string
+  kind: PoPortalOursKind
+  createdAt: string
+  summary: string
+}
+
+/** One line of the whole story, whoever it came from. */
+export type PoPortalHistoryEntry = {
+  id: string
+  /** Who did it. The panel puts a word in front of the line rather than making
+   *  the supplier work it out from the wording. */
+  side: 'us' | 'them'
+  createdAt: string
+  label: string
+  summary: string
+}
+
 /** One line of the order as the supplier sees it in the panel. No money: the
  *  document above the panel already prints their own prices, and the panel only
  *  needs enough to point at a line. */
@@ -125,6 +173,8 @@ export type PoPortalView = {
   lines: PoPortalLine[]
   shipments: PoPortalShipment[]
   events: PoPortalEvent[]
+  /** Both sides of it, newest first: what they told us and what we did. */
+  history: PoPortalHistoryEntry[]
 }
 
 /** One link, as the order screen lists it. Never the hash: no screen anywhere
@@ -287,6 +337,83 @@ export type PortalViewExtras = {
   despatchedByLine?: Record<string, string>
   uploadsEnabled?: boolean
   despatchEnabled?: boolean
+  /** What we did that the supplier can see: sends, reminders, deliveries booked
+   *  in. Gathered on the server; everything else on our side of the history is
+   *  worked out from the order row below. */
+  ours?: PoPortalOursEvent[]
+}
+
+/** The part of our side that is simply true of the order row: a proforma that
+ *  has been paid, an order that has been cancelled. Built here rather than
+ *  queried, because these are stamps on the order itself and a second source
+ *  for them is a second chance to disagree.
+ *
+ *  No reasons. `cancel_reason` and `close_reason` are written by somebody here
+ *  for somebody here, and the allow-list this file exists to be does not hand a
+ *  supplier a field just because it is on the row. */
+function oursFromOrder(order: PoOrder): PoPortalOursEvent[] {
+  const out: PoPortalOursEvent[] = []
+  if (order.proformaReceivedAt) {
+    out.push({
+      id: `own:proforma-received`,
+      kind: 'PROFORMA_RECEIVED',
+      createdAt: order.proformaReceivedAt,
+      summary: order.proformaRef
+        ? `Your proforma ${order.proformaRef} reached us.`
+        : 'Your proforma reached us.',
+    })
+  }
+  if (order.proformaPaidAt) {
+    out.push({
+      id: `own:proforma-paid`,
+      kind: 'PROFORMA_PAID',
+      createdAt: order.proformaPaidAt,
+      // Never the payment reference. That is our bank's business with our
+      // bank, the test beside this file says so, and the supplier's own
+      // remittance tells them the same thing from the side they can act on.
+      summary: 'We paid your proforma.',
+    })
+  }
+  if (order.cancelledAt) {
+    out.push({
+      id: `own:cancelled`,
+      kind: 'ORDER_CANCELLED',
+      createdAt: order.cancelledAt,
+      summary: `We cancelled ${order.number}. There is nothing left to send.`,
+    })
+  }
+  if (order.closedAt) {
+    out.push({
+      id: `own:closed`,
+      kind: 'ORDER_CLOSED',
+      createdAt: order.closedAt,
+      summary: `We closed ${order.number} off.`,
+    })
+  }
+  return out
+}
+
+/** Both sides in one list, newest first. Ties keep ours behind theirs on the
+ *  same instant, which is the order things actually happen in: a supplier sends
+ *  a proforma, and the stamp that says we have it lands with it. */
+export function portalHistory(theirs: PoPortalEvent[], ours: PoPortalOursEvent[]): PoPortalHistoryEntry[] {
+  const entries: PoPortalHistoryEntry[] = [
+    ...theirs.map((event) => ({
+      id: `them:${event.id}`,
+      side: 'them' as const,
+      createdAt: event.createdAt,
+      label: PO_PORTAL_EVENT_LABELS[event.kind],
+      summary: event.summary,
+    })),
+    ...ours.map((event) => ({
+      id: `us:${event.id}`,
+      side: 'us' as const,
+      createdAt: event.createdAt,
+      label: PO_PORTAL_OURS_LABELS[event.kind],
+      summary: event.summary,
+    })),
+  ]
+  return entries.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
 }
 
 /**
@@ -359,6 +486,7 @@ export function portalView(
       }),
     shipments: extras.shipments ?? [],
     events,
+    history: portalHistory(events, [...(extras.ours ?? []), ...oursFromOrder(order)]),
   }
 }
 

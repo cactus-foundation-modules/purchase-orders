@@ -4,9 +4,9 @@ import { useRef, useState, type ReactNode } from 'react'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
 import { withUnit } from '@/modules/purchase-orders/lib/money'
 import {
-  PO_PORTAL_EVENT_LABELS, qtyProblem, qtySaying, type PoPortalLine, type PoPortalView,
+  qtyProblem, qtySaying, type PoPortalLine, type PoPortalView,
 } from '@/modules/purchase-orders/lib/portal-view'
-import { PortalDialog, PortalLine, PortalStyles } from '@/modules/purchase-orders/components/public/portal-ui'
+import { PortalDialog, PortalDrop, PortalLine, PortalStyles } from '@/modules/purchase-orders/components/public/portal-ui'
 import { webAddress } from '@/modules/purchase-orders/lib/web-address'
 
 // The only part of this platform a supplier ever touches.
@@ -381,9 +381,9 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             Packing slips ({view.shipments.length})
           </button>
         )}
-        {view.events.length > 0 && (
+        {view.history.length > 0 && (
           <button type="button" className="pop-btn pop-btn--quiet pop-btn--small" onClick={() => open('history')}>
-            What you have told us ({view.events.length})
+            Purchase History ({view.history.length})
           </button>
         )}
       </div>
@@ -428,14 +428,14 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             <>
               <div className="pop-field">
                 <label className="pop-label" htmlFor="pop-ack">
-                  Your order acknowledgement, if you have one (PDF, JPEG, PNG or WebP)
+                  Your order acknowledgement, if you have one
                 </label>
-                <input
+                <PortalDrop
                   id="pop-ack"
-                  ref={ackFile}
-                  type="file"
-                  className="pop-file"
+                  inputRef={ackFile}
                   accept=".pdf,.jpg,.jpeg,.png,.webp"
+                  say="Drop your acknowledgement here"
+                  hint="or choose a file - PDF, JPEG, PNG or WebP"
                 />
               </div>
               <div className="pop-field">
@@ -489,14 +489,14 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
           <DialogError error={error} />
           <div className="pop-field">
             <label className="pop-label" htmlFor="pop-proforma">
-              Your proforma (PDF, JPEG, PNG or WebP)
+              Your proforma
             </label>
-            <input
+            <PortalDrop
               id="pop-proforma"
-              ref={proformaFile}
-              type="file"
-              className="pop-file"
+              inputRef={proformaFile}
               accept=".pdf,.jpg,.jpeg,.png,.webp"
+              say="Drop your proforma here"
+              hint="or choose a file - PDF, JPEG, PNG or WebP"
             />
           </div>
           <div className="pop-row">
@@ -1006,22 +1006,36 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
         </PortalDialog>
       )}
 
+      {/* -------------------------------------------------------------------
+          The whole story of this order, both ways round: what we have sent
+          them and what they have told us, in one list. Every line says which
+          of the two it is before it says anything else - "we paid your
+          proforma" and "you sent us your proforma" are a day apart and easily
+          read as each other otherwise.
+          ------------------------------------------------------------------- */}
       {job === 'history' && (
         <PortalDialog
-          title="What you have told us"
-          intro={`Everything sent through this link about ${view.orderNumber}, newest first.`}
+          title="Purchase History"
+          intro={`Everything either of us has done about ${view.orderNumber}, newest first.`}
           onClose={() => setJob(null)}
           closeLabel="Close history"
         >
           <ul className="pop-lines">
-            {view.events.map((event) => (
+            {view.history.map((entry) => (
               <PortalLine
-                key={event.id}
-                name={PO_PORTAL_EVENT_LABELS[event.kind]}
+                key={entry.id}
+                name={
+                  <>
+                    <span className={entry.side === 'us' ? 'pop-who pop-who--us' : 'pop-who pop-who--them'}>
+                      {entry.side === 'us' ? 'From us' : 'From you'}
+                    </span>
+                    {entry.label}
+                  </>
+                }
                 meta={
                   <>
-                    {when(event.createdAt)}
-                    <div style={{ marginTop: '.25rem' }}>{event.summary}</div>
+                    {when(entry.createdAt)}
+                    <div style={{ marginTop: '.25rem' }}>{entry.summary}</div>
                   </>
                 }
               />

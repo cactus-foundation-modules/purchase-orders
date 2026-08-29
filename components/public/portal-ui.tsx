@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useId, useRef, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 // The chrome the supplier's panel is drawn with: one stylesheet and one dialog.
 //
@@ -69,6 +69,21 @@ export const PORTAL_CSS = `
 .pop-textarea{resize:vertical;min-height:6.5rem}
 .pop-file{padding:.4375rem;border-style:dashed;cursor:pointer}
 .pop-hint{margin:.3125rem 0 0;font-size:.75rem;color:var(--color-text-secondary,#666)}
+
+/* The drop box. A supplier with a PDF of their acknowledgement open in another
+   window drags it here; everyone else presses the picker sitting in the middle
+   of it. Big on purpose - a 2rem file input is a target nobody finds in a
+   warehouse yard, and it is the one thing on this dialog we actually want. */
+.pop-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.625rem;text-align:center;min-height:11rem;padding:1.5rem 1rem;border:2px dashed var(--color-border,#ddd);border-radius:12px;background:var(--color-bg,#fff);cursor:pointer}
+.pop-drop:hover{border-color:var(--color-primary,#2f6f4f);background:var(--color-primary-subtle,#eef4f1)}
+.pop-drop--over{border-color:var(--color-primary,#2f6f4f);background:var(--color-primary-subtle,#eef4f1)}
+.pop-drop:focus-within{outline:2px solid var(--color-primary,#2f6f4f);outline-offset:2px}
+.pop-drop-icon{color:var(--color-text-secondary,#666)}
+.pop-drop-say{margin:0;font-size:.9375rem;font-weight:600}
+.pop-drop-hint{margin:0;font-size:.75rem;color:var(--color-text-secondary,#666)}
+/* The picker itself, in the middle of the box rather than stretched across it. */
+.pop-drop .pop-file{width:auto;max-width:100%;border-style:solid;background:var(--color-surface,#fff)}
+.pop-drop-name{margin:0;font-size:.875rem;font-weight:600;overflow-wrap:anywhere;color:var(--color-success,#2f6f4f)}
 .pop-row{display:flex;flex-wrap:wrap;gap:1rem;margin:0 0 1rem;align-items:flex-start}
 .pop-row .pop-field{flex:1 1 11rem;margin:0}
 
@@ -102,6 +117,12 @@ export const PORTAL_CSS = `
 .pop-input--date{width:10.5rem}
 .pop-tools{display:flex;flex-wrap:wrap;gap:.5rem;margin:.875rem 0 1.25rem}
 .pop-empty{margin:0;color:var(--color-text-secondary,#666)}
+/* Who a history line came from, said before the line says anything else. Two
+   tints rather than one, because "we paid your proforma" and "you sent your
+   proforma" sit a day apart in the same list. */
+.pop-who{display:inline-block;margin:0 .5rem .125rem 0;padding:.0625rem .5rem;border-radius:999px;font-size:.6875rem;font-weight:700;letter-spacing:.02em;text-transform:uppercase;vertical-align:.05em;border:1px solid}
+.pop-who--us{color:var(--color-primary,#2f6f4f);border-color:var(--color-primary,#2f6f4f);background:var(--color-primary-subtle,#eef4f1)}
+.pop-who--them{color:var(--color-text-secondary,#666);border-color:var(--color-border,#ddd);background:var(--color-bg,#fff)}
 
 .pop-dialog{box-sizing:border-box;width:min(46rem,calc(100vw - 2rem));max-height:calc(100vh - 2rem);max-height:calc(100dvh - 2rem);padding:0;overflow:hidden;border:1px solid var(--color-border,#ddd);border-radius:14px;background:var(--color-surface,#fff);color:var(--color-text,#111);font:inherit}
 .pop-dialog *{box-sizing:border-box}
@@ -135,6 +156,77 @@ export const PORTAL_CSS = `
 
 export function PortalStyles() {
   return <style dangerouslySetInnerHTML={{ __html: PORTAL_CSS }} />
+}
+
+function PaperclipIcon() {
+  return (
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 17V3M12 3l-4 4M12 3l4 4M4 15v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+    </svg>
+  )
+}
+
+/** A big box to drop a file into, with the ordinary file picker sat in the
+ *  middle of it.
+ *
+ *  The picker is still a plain <input type="file"> with the caller's own ref on
+ *  it, because everything that reads the chosen file - the preflight, the
+ *  upload - reads it off that input. Dropping a file assigns dataTransfer.files
+ *  straight onto it, so the two routes in are the same route out. */
+export function PortalDrop({ id, inputRef, accept, say, hint }: {
+  id: string
+  inputRef: React.RefObject<HTMLInputElement | null>
+  accept: string
+  /** The line above the picker, in the supplier's words. */
+  say: string
+  /** The small print under it: which file types, usually. */
+  hint?: ReactNode
+}) {
+  const [name, setName] = useState<string | null>(null)
+  const [over, setOver] = useState(false)
+
+  return (
+    <div
+      className={over ? 'pop-drop pop-drop--over' : 'pop-drop'}
+      // Anywhere on the box opens the picker, EXCEPT the picker itself - it
+      // opens on its own, and clicking it through here would ask twice.
+      onClick={(e) => {
+        if (e.target !== inputRef.current) inputRef.current?.click()
+      }}
+      onDragOver={(e) => {
+        e.preventDefault()
+        setOver(true)
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault()
+        setOver(false)
+        const dropped = e.dataTransfer?.files?.[0]
+        const input = inputRef.current
+        if (!dropped || !input) return
+        // One file, whatever they dragged: the server takes one, and a supplier
+        // dragging a folder's worth of PDFs meant the first of them either way.
+        const one = new DataTransfer()
+        one.items.add(dropped)
+        input.files = one.files
+        setName(dropped.name)
+      }}
+    >
+      <span className="pop-drop-icon">
+        <PaperclipIcon />
+      </span>
+      <p className="pop-drop-say">{say}</p>
+      <input
+        id={id}
+        ref={inputRef}
+        type="file"
+        className="pop-file"
+        accept={accept}
+        onChange={(e) => setName(e.target.files?.[0]?.name ?? null)}
+      />
+      {name ? <p className="pop-drop-name">{name}</p> : hint ? <p className="pop-drop-hint">{hint}</p> : null}
+    </div>
+  )
 }
 
 function CloseIcon() {

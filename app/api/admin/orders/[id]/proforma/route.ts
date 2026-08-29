@@ -3,8 +3,11 @@ import { z } from 'zod'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
-import { getOrder } from '@/modules/purchase-orders/lib/db'
+import { getOrder, getSupplier } from '@/modules/purchase-orders/lib/db'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
+import { sendProformaPaid, supplierRecipients } from '@/modules/purchase-orders/lib/email'
+import { formatMoney } from '@/modules/purchase-orders/lib/money'
+import { mintPortalLink } from '@/modules/purchase-orders/lib/portal'
 import {
   clearProformaPayment, markProformaPaid, setProformaRequired,
 } from '@/modules/purchase-orders/lib/proforma'
@@ -52,15 +55,57 @@ export async function POST(request: NextRequest, { params }: Params) {
     return NextResponse.json({ ok: true, alreadyPaid: true })
   }
 
+  // And the supplier is told, every time. On these terms they are waiting on
+  // this and nothing else - their own link will not let them confirm the order
+  // until the money has moved - so this is not an option on a checkbox. It is
+  // best-effort: the payment has already been recorded, and taking it back
+  // because a mail server was busy would be the worse of the two wrongs.
+  const supplier = await getSupplier(order.supplierId)
+  const recipients = supplierRecipients(supplier?.email ?? null, supplier?.emailCc ?? null)
+  let emailed = false
+  if (recipients) {
+    // A fresh link travels with it, so "you can confirm the order now" is
+    // something they can act on from the same email. Null where the site has the
+    // supplier link switched off, and the paragraph then renders as nothing.
+    const portalLink = await mintPortalLink(id, order.number, user.id)
+    emailed = await sendProformaPaid(
+      order.supplierName,
+      order.number,
+      recipients,
+      {
+        paymentRef: ref,
+        amount: formatMoney(order.proformaAmount ?? order.total, order.currency),
+        proformaRef: order.proformaRef,
+      },
+      portalLink,
+    )
+  }
+
   await recordAudit(
     'order',
     id,
     'order.proforma-paid',
-    { note: ref ? `Proforma paid, reference ${ref}` : 'Proforma paid', supplier: order.supplierName },
+    {
+      note: ref ? `Proforma paid, reference ${ref}` : 'Proforma paid',
+      supplier: order.supplierName,
+      emailed,
+      to: recipients?.to ?? null,
+    },
     user.id,
   )
   const after = await getOrder(id)
-  return NextResponse.json({ ok: true, order: after })
+  return NextResponse.json({
+    ok: true,
+    order: after,
+    emailed,
+    // Said plainly rather than left for somebody to notice: a supplier who was
+    // not told is a supplier still waiting.
+    emailProblem: emailed
+      ? null
+      : recipients
+        ? 'The payment is recorded, but the email telling them could not be sent. Check Settings, Emails.'
+        : 'The payment is recorded, but this supplier has no email address on file, so nobody has told them.',
+  })
 }
 
 // DELETE - taking that back, for the day somebody presses it on the wrong order.

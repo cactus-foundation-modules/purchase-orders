@@ -1,6 +1,6 @@
 import type { EmailTemplateDef } from '@/lib/email/registry'
 
-// The emails this module sends: five to a supplier, and one to you when a
+// The emails this module sends: six to a supplier, and one to you when a
 // supplier answers back through their own link. Declared for core's single email
 // editor (Settings > Emails), which owns the wording, the wrapper design and the
 // sending; this file is only the defaults.
@@ -93,6 +93,29 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     mergeTags: ['supplierName', 'orderNumber', 'dueDate', 'daysLate', 'lines', 'portalLink', 'siteName'],
     requiredTags: ['orderNumber'],
     rawTags: ['lines', 'portalLink'],
+    transactional: true,
+  },
+  {
+    // Sent the moment somebody marks a proforma paid, every time, because on
+    // these terms the supplier is sitting on their hands until they know the
+    // money has moved - and their own link will not let them confirm the order
+    // until it has. `payment` is the reference and the amount as a block built
+    // in code, so an order paid without a reference does not send "Payment
+    // reference:" followed by nothing.
+    key: 'purchase-orders.proforma-paid',
+    label: 'Proforma paid',
+    subject: 'Payment sent for purchase order {{orderNumber}}',
+    bodyHtml:
+      '<p>Hello {{supplierName}},</p>' +
+      '<p>We have paid your proforma against our purchase order <strong>{{orderNumber}}</strong>.</p>' +
+      '{{payment}}' +
+      '{{portalLink}}' +
+      '<p>Thank you,<br />{{siteName}}</p>',
+    mergeTags: [
+      'supplierName', 'orderNumber', 'payment', 'paymentRef', 'amount', 'proformaRef', 'portalLink', 'siteName',
+    ],
+    requiredTags: ['orderNumber'],
+    rawTags: ['payment', 'portalLink'],
     transactional: true,
   },
   {

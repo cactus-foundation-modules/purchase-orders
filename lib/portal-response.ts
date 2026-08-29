@@ -1,6 +1,6 @@
 import { getOrder, supplierPortalNote } from './db'
 import { getPoConfigCached } from './config'
-import { listPortalEvents } from './portal'
+import { listOursPortalEvents, listPortalEvents } from './portal'
 import { despatchedTotalsByLine, listShipmentsForOrder } from './shipments'
 import { portalView, type PoPortalShipment, type PoPortalView } from './portal-view'
 
@@ -27,9 +27,10 @@ export async function buildPortalView(orderId: string): Promise<PoPortalView | n
   const order = await getOrder(orderId)
   if (!order) return null
 
-  const [config, events, shipments, despatchedByLine, note] = await Promise.all([
+  const [config, events, ours, shipments, despatchedByLine, note] = await Promise.all([
     getPoConfigCached(),
     listPortalEvents(orderId, 20),
+    listOursPortalEvents(orderId, 20),
     listShipmentsForOrder(orderId),
     despatchedTotalsByLine(orderId),
     supplierPortalNote(orderId),
@@ -56,6 +57,7 @@ export async function buildPortalView(orderId: string): Promise<PoPortalView | n
     })),
     {
       note,
+      ours,
       shipments: theirs,
       despatchedByLine,
       uploadsEnabled: config.portalUploadsEnabled,

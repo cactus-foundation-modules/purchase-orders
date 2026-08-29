@@ -8,6 +8,7 @@ import {
   portalEventSummary,
   type PoPortalEvent,
   type PoPortalEventKind,
+  type PoPortalOursEvent,
   type PoPortalTokenSummary,
 } from './portal-view'
 
@@ -181,6 +182,87 @@ export async function listPortalEvents(orderId: string, limit = 50): Promise<PoP
       summary: portalEventSummary(kind, payload),
     }
   })
+}
+
+/**
+ * Our side of the history: what we sent them and what we booked in.
+ *
+ * An ALLOW-LIST of audit actions, and not one word of the audit detail. The log
+ * holds who approved what, at what level, against which internal note - the
+ * whole reason it exists - and none of that is the supplier's. What comes back
+ * is a sentence built here from the two facts a supplier needs: what we did and
+ * when. Everything else on our side of the story is worked out from the order
+ * row itself, in portalView.
+ */
+const SUPPLIER_VISIBLE_ACTIONS = ['order.sent', 'order.amendment-sent', 'order.chased'] as const
+
+export async function listOursPortalEvents(orderId: string, limit = 30): Promise<PoPortalOursEvent[]> {
+  const cap = Math.max(1, Math.min(100, Math.trunc(limit)))
+  const [sent, receipts] = await Promise.all([
+    prisma.$queryRaw<Record<string, unknown>[]>`
+      SELECT "id", "action", "detail", "created_at"
+        FROM "po_audit_log"
+       WHERE "entity_type" = 'order' AND "entity_id" = ${orderId}
+         AND "action" = ANY(${[...SUPPLIER_VISIBLE_ACTIONS]}::text[])
+       ORDER BY "created_at" DESC
+       LIMIT ${Prisma.raw(String(cap))}
+    `,
+    prisma.$queryRaw<Record<string, unknown>[]>`
+      SELECT r."id", r."number", r."received_date", r."created_at",
+             (SELECT count(*) FROM "po_receipt_lines" rl WHERE rl."receipt_id" = r."id") AS "line_count"
+        FROM "po_receipts" r
+       WHERE r."order_id" = ${orderId}
+       ORDER BY r."received_date" DESC, r."created_at" DESC
+       LIMIT ${Prisma.raw(String(cap))}
+    `,
+  ])
+
+  const out: PoPortalOursEvent[] = sent.map((row) => {
+    const action = row.action as string
+    const detail = (row.detail as Record<string, unknown> | null) ?? {}
+    const revision = Number(detail.revision ?? 0)
+    const at = stamp(row.created_at) ?? ''
+    if (action === 'order.chased') {
+      return {
+        id: row.id as string,
+        kind: 'CHASED' as const,
+        createdAt: at,
+        summary: 'We sent you a reminder about this order.',
+      }
+    }
+    if (action === 'order.amendment-sent') {
+      return {
+        id: row.id as string,
+        kind: 'AMENDMENT_SENT' as const,
+        createdAt: at,
+        summary: revision > 0 ? `We sent you revision ${revision} of the order.` : 'We sent you a changed order.',
+      }
+    }
+    return {
+      id: row.id as string,
+      kind: 'ORDER_SENT' as const,
+      createdAt: at,
+      summary: 'We sent you this order.',
+    }
+  })
+
+  for (const row of receipts) {
+    const lines = Number(row.line_count ?? 0)
+    const day = row.received_date ? String(stamp(row.received_date) ?? '').slice(0, 10) : ''
+    const number = (row.number as string | null) ?? ''
+    out.push({
+      id: row.id as string,
+      kind: 'GOODS_RECEIVED',
+      // The date it turned up, not the date somebody got round to typing it in:
+      // a delivery booked in on the Monday for the Friday reads as the Friday.
+      createdAt: stamp(row.received_date) ?? stamp(row.created_at) ?? '',
+      summary: `We booked in your delivery${number ? ` as ${number}` : ''}${day ? ` on ${day}` : ''}${
+        lines > 0 ? `, ${lines} ${lines === 1 ? 'line' : 'lines'}` : ''
+      }.`,
+    })
+  }
+
+  return out
 }
 
 // ---------------------------------------------------------------------------

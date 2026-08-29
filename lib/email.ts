@@ -243,6 +243,64 @@ export async function sendOrderChase(
 }
 
 /**
+ * Tells a supplier we have paid their proforma, with the payment reference.
+ *
+ * Sent EVERY time the button is pressed, not offered as a choice. On proforma
+ * terms the supplier is doing nothing at all until they know the money has left
+ * - their own link will not even let them confirm the order until it has - so a
+ * payment nobody told them about is a week of silence at both ends.
+ *
+ * Best-effort and never throws, for the same reason the cancellation note is:
+ * the money has already gone and the order already says so by the time this
+ * runs, and unpaying an order because a mail server was busy is the worst of
+ * the two outcomes. Returns whether it went, so the screen can say if it did
+ * not.
+ */
+export async function sendProformaPaid(
+  supplierName: string,
+  orderNumber: string,
+  recipients: SupplierRecipients,
+  vars: { paymentRef: string | null; amount: string; proformaRef: string | null },
+  portalLink: string | null,
+): Promise<boolean> {
+  if (!isEmailConfigured()) return false
+  try {
+    const ref = (vars.paymentRef ?? '').trim()
+    // The reference and the amount as one block built here, so a payment made
+    // without a reference simply says what was paid rather than trailing off.
+    const payment =
+      '<p>' +
+      (ref ? `Payment reference: <strong>${escapeHtml(ref)}</strong><br />` : '') +
+      `Amount paid: ${escapeHtml(vars.amount)}` +
+      (vars.proformaRef ? `<br />Against your proforma ${escapeHtml(vars.proformaRef)}` : '') +
+      '</p>'
+
+    const rendered = await renderEmailTemplate('purchase-orders.proforma-paid', {
+      supplierName: supplierName || 'there',
+      orderNumber,
+      payment,
+      paymentRef: ref,
+      amount: vars.amount,
+      proformaRef: vars.proformaRef ?? '',
+      portalLink: portalLinkHtml(portalLink),
+      siteName: await siteName(),
+    })
+    if (!rendered) return false
+    await sendEmail({
+      to: recipients.to,
+      ...(recipients.cc.length ? { cc: recipients.cc } : {}),
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+    })
+    return true
+  } catch (error) {
+    console.error('[purchase-orders] could not tell the supplier we paid their proforma for', orderNumber, error)
+    return false
+  }
+}
+
+/**
  * Tells a supplier an order they were sent is cancelled.
  *
  * Best-effort and never throws: the order has already been cancelled by the time
