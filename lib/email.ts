@@ -21,6 +21,12 @@ import type { PoRetDocContext } from '@/modules/purchase-orders/lib/return-doc-c
 // supplies the merge values, the attachment and the decision about whether a
 // failure is worth shouting about.
 //
+// Every send carries `moduleName`. It has always named the module in the email
+// log; it now also lets a site say, on this module's settings tab, which of its
+// own addresses purchasing writes from - so a supplier's reply lands with the
+// people chasing the order rather than in the site's general post. A site that
+// has not said anything sends exactly as it always did.
+//
 // Two different treatments, deliberately:
 //
 //  - "Send this order" is somebody pressing a button and being told it went. A
@@ -180,6 +186,7 @@ export async function sendOrderToSupplier(
 
   const attachment = await orderAttachment(order.number)
   await sendEmail({
+    moduleName: 'purchase-orders',
     to: recipients.to,
     ...(recipients.cc.length ? { cc: recipients.cc } : {}),
     subject: rendered.subject,
@@ -234,6 +241,7 @@ export async function sendOrderChase(
     throw new Error('The chase email is switched off in Settings, Emails, so nothing was sent.')
   }
   await sendEmail({
+    moduleName: 'purchase-orders',
     to: recipients.to,
     ...(recipients.cc.length ? { cc: recipients.cc } : {}),
     subject: rendered.subject,
@@ -287,6 +295,7 @@ export async function sendProformaPaid(
     })
     if (!rendered) return false
     await sendEmail({
+      moduleName: 'purchase-orders',
       to: recipients.to,
       ...(recipients.cc.length ? { cc: recipients.cc } : {}),
       subject: rendered.subject,
@@ -323,6 +332,7 @@ export async function sendOrderCancelled(
     })
     if (!rendered) return
     await sendEmail({
+      moduleName: 'purchase-orders',
       to: recipients.to,
       ...(recipients.cc.length ? { cc: recipients.cc } : {}),
       subject: rendered.subject,
@@ -361,7 +371,7 @@ export async function sendPortalReplyToBuyer(
       siteName: await siteName(),
     })
     if (!rendered) return
-    await sendEmail({ to, subject: rendered.subject, html: rendered.html, text: rendered.text })
+    await sendEmail({ moduleName: 'purchase-orders', to, subject: rendered.subject, html: rendered.html, text: rendered.text })
   } catch (error) {
     console.error('[purchase-orders] could not tell anybody about a portal reply to', orderNumber, error)
   }
@@ -394,7 +404,7 @@ export async function sendAutoDraftReport(to: string, report: AutoDraftReportEma
       siteName: await siteName(),
     })
     if (!rendered) return
-    await sendEmail({ to, subject: rendered.subject, html: rendered.html, text: rendered.text })
+    await sendEmail({ moduleName: 'purchase-orders', to, subject: rendered.subject, html: rendered.html, text: rendered.text })
   } catch (error) {
     console.error('[purchase-orders] could not send the automatic draft report for', report.orderNumber, error)
   }
@@ -476,6 +486,7 @@ export async function sendReturnToSupplier(
 
   const attachment = await returnAttachment(ret.number)
   await sendEmail({
+    moduleName: 'purchase-orders',
     to: recipients.to,
     ...(recipients.cc.length ? { cc: recipients.cc } : {}),
     subject: rendered.subject,

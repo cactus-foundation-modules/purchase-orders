@@ -1,16 +1,24 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import type { ModuleSettingsTabProps } from '@/lib/modules/hosted-settings'
 import type { PoConfig } from '@/modules/purchase-orders/lib/config'
 import type { PoCapabilities } from '@/modules/purchase-orders/lib/capabilities'
 import { card, Field, input, muted } from './ui'
 
 // Purchase Orders' own settings tab. Nothing here belongs on a core settings
 // page, and nothing core owns belongs here.
+//
+// One slot is published for other modules' settings panels (`host` on their
+// manifest settingsTabs entry - see lib/modules/hosted-settings.ts): anything
+// that has something to say about the emails this module sends. The Unified
+// Inbox uses it to ask which address purchasing writes from. Empty on a site
+// without one, and an empty slot renders nothing at all - no heading, no gap.
+const HOSTED_EMAIL_SLOT = 'purchase-orders.settings-emails'
 
 const rowGrid = { display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' } as const
 
-export function PurchaseOrdersSettingsTab() {
+export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSettingsTabProps = {}) {
   const [config, setConfig] = useState<PoConfig | null>(null)
   const [capabilities, setCapabilities] = useState<PoCapabilities | null>(null)
   const [saved, setSaved] = useState(false)
@@ -480,6 +488,11 @@ export function PurchaseOrdersSettingsTab() {
           only the once. Either way the Reports tab works out who is late, and you can send one from there yourself.
         </p>
       </div>
+
+      {/* Rendered by the core config page, so this tab hands it the space and
+          asks nothing else about it. Whatever the panel needs - its own fetch,
+          its own save, its own permission check - is its own module's business. */}
+      {hostedSettingsSlots?.[HOSTED_EMAIL_SLOT]}
 
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
         <button className="btn btn-primary btn-sm" onClick={save}>

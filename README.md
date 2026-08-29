@@ -70,6 +70,13 @@ and edit orders, `purchase-orders.approve` to approve them,
 `purchase-orders.bills` to enter and approve supplier invoices, and
 `purchase-orders.settings` to change the settings.
 
+## Extension points this module publishes
+
+| Point | What it is |
+|-------|------------|
+| `shop.order-detail-panels` (contributed, not published) | This module's own Purchasing panel on a shop order. |
+| `purchase-orders.settings-emails` | A settings slot for another module's panel, at the foot of Settings, Purchase Orders (`host` on its manifest `settingsTabs` entry). For anything with something to say about the emails this module sends - Unified Inbox uses it to ask which of the site's inboxes purchase orders go out as. Merged shape; the panel writes its own heading. |
+
 ## License
 
 MIT

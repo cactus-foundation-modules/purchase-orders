@@ -1,10 +1,10 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
-  "requiresCoreVersion": "0.5.1350",
+  "requiresCoreVersion": "0.5.1383",
   "permissions": [
     "purchase-orders.access",
     "purchase-orders.create",
