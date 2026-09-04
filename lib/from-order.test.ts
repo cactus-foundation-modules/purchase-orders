@@ -225,12 +225,25 @@ describe('the drop-ship address', () => {
       postcode: 'E14 5GT',
       country: 'GB',
     })
-    expect(shipTo.name).toBe('Deskwell Limited')
+    // The order carries `customerOrganisation: 'Deskwell Limited'` and the
+    // address names no company, so the PERSON heads the label.
+    expect(shipTo.name).toBe('Chris Taylor-Guest')
     expect(shipTo.contact).toBe('Chris Taylor-Guest')
     expect(shipTo.phone).toBe('07445 164570')
   })
 
-  it('heads the label with the company on the address where the shop kept it there', () => {
+  it('never heads the label with the order\'s contact-level organisation', () => {
+    const shipTo = shipToFromShopOrder(
+      order({
+        customerOrganisation: 'Deskwell Limited',
+        shippingAddress: { firstName: 'Chris', lastName: 'Taylor-Guest', line1: '1 The Yard' },
+      }),
+    )
+    expect(shipTo.name).toBe('Chris Taylor-Guest')
+    expect(shipTo.contact).toBe('Chris Taylor-Guest')
+  })
+
+  it('heads the label with the company the customer typed into the delivery address', () => {
     const shipTo = shipToFromShopOrder(
       order({
         customerOrganisation: null,

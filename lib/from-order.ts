@@ -68,9 +68,10 @@ export type ShopOrderFacts = {
   status: string
   customerName: string
   customerPhone: string | null
-  /** The company the goods are going to, as the checkout collected it. Shop
-   *  keeps it on the order rather than in the address bag, and a delivery to a
-   *  business without it on the label is a parcel a post room refuses. */
+  /** The organisation the checkout collected as a CONTACT detail, on its own
+   *  field, away from the address. Read and carried because the screen shows
+   *  it, and deliberately NOT used to head the delivery label - see
+   *  `shipToFromShopOrder`. */
   customerOrganisation: string | null
   currency: string
   shippingAddress: Record<string, unknown> | null
@@ -314,13 +315,13 @@ export function serviceCostFor(lineMeta: Record<string, unknown> | null): string
  * mapping it by hand is the only way it does not silently vanish off the address
  * printed for the supplier.
  *
- * The COMPANY heads the label wherever the customer gave one, with the person
- * underneath as the contact - which is the way a delivery to a business has to
- * be addressed, and the way a post room finds who it belongs to. Read off the
- * address bag first and the order second: an older shop kept it on the address,
- * a newer one keeps it on the order, and a purchase order raised off either has
- * to carry it. With no company at all the person heads the label exactly as
- * before.
+ * The COMPANY heads the label wherever the customer put one IN THE DELIVERY
+ * ADDRESS, with the person underneath as the contact - which is the way a
+ * delivery to a business has to be addressed, and the way a post room finds who
+ * it belongs to. The order's own `customerOrganisation` is NOT read here: the
+ * checkout collects that as a contact detail, on a field of its own away from
+ * the address, and someone who names their employer there has not asked for the
+ * parcel to go to it. With no company on the address the person heads the label.
  *
  * Copied verbatim and never tidied. People type a street into the town box and a
  * flat number into the street box; a purchase order that "corrects" the address
@@ -331,7 +332,7 @@ export function shipToFromShopOrder(order: ShopOrderFacts): PoShipTo {
   const first = textOrNull(address.firstName) ?? ''
   const last = textOrNull(address.lastName) ?? ''
   const person = `${first} ${last}`.trim() || order.customerName
-  const company = textOrNull(address.company)?.trim() || order.customerOrganisation?.trim() || ''
+  const company = textOrNull(address.company)?.trim() || ''
 
   return {
     name: company || person,
