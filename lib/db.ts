@@ -87,6 +87,10 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     phone: (r.phone as string | null) ?? null,
     email: (r.email as string | null) ?? null,
     emailCc: (r.email_cc as string | null) ?? null,
+    accountsEmail: (r.accounts_email as string | null) ?? null,
+    // A row written before 010 has no column to read, which is "send it to the
+    // ordering address as we always did" rather than a missing answer.
+    proformaPaidToAccounts: Boolean(r.proforma_paid_to_accounts),
     address: address(r.address),
     currency: r.currency as string,
     paymentTerms: (r.payment_terms as string | null) ?? null,
@@ -221,6 +225,8 @@ export type SupplierInput = {
   phone: string | null
   email: string | null
   emailCc: string | null
+  accountsEmail: string | null
+  proformaPaidToAccounts: boolean
   address: PoAddress
   currency: string
   paymentTerms: string | null
@@ -245,7 +251,8 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
   const rows = await prisma.$queryRaw<{ id: string }[]>`
     INSERT INTO "po_suppliers" (
       "name", "name_key", "shop_supplier_id", "shop_supplier_name", "account_number",
-      "contact_name", "phone", "email", "email_cc", "address", "currency",
+      "contact_name", "phone", "email", "email_cc", "accounts_email", "proforma_paid_to_accounts",
+      "address", "currency",
       "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
       "carriage_paid_over", "carriage_charge", "discount_percent", "default_category_id",
       "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
@@ -253,6 +260,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
     ) VALUES (
       ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
       ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
+      ${input.accountsEmail}, ${input.proformaPaidToAccounts},
       ${JSON.stringify(input.address)}::jsonb, ${input.currency},
       ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.accountTerms}, ${input.leadTimeDays},
       ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
@@ -276,6 +284,8 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
       "phone" = ${input.phone},
       "email" = ${input.email},
       "email_cc" = ${input.emailCc},
+      "accounts_email" = ${input.accountsEmail},
+      "proforma_paid_to_accounts" = ${input.proformaPaidToAccounts},
       "address" = ${JSON.stringify(input.address)}::jsonb,
       "currency" = ${input.currency},
       "payment_terms" = ${input.paymentTerms},
@@ -446,6 +456,9 @@ export async function listOrders(
     SELECT o."id", o."number", o."revision", o."status", o."supplier_id", s."name" AS "supplier_name",
            o."currency", o."total", o."raised_date", o."required_by_date", o."expected_date",
            o."created_at",
+           -- Where the proforma dance has got to. Three narrow columns rather
+           -- than a join, because the badge on every row of this list says it.
+           o."proforma_required", o."proforma_media_id", o."proforma_received_at", o."proforma_paid_at",
            (SELECT count(*) FROM "po_order_lines" l WHERE l."order_id" = o."id") AS "line_count"
       FROM "po_orders" o
       JOIN "po_suppliers" s ON s."id" = o."supplier_id"
@@ -475,8 +488,26 @@ export async function listOrders(
       expectedDate: day(r.expected_date),
       lineCount: Number(r.line_count ?? 0),
       createdAt: stamp(r.created_at) ?? '',
+      ...proformaFacts(r),
     })),
     total: Number(countRows[0]?.count ?? 0),
+  }
+}
+
+/** The three facts the status badge is made of, off a raw order row. In one
+ *  place so the list and the order itself can never disagree about whether a
+ *  proforma has arrived - "received" is a filed document OR a date somebody
+ *  recorded without one, and remembering only the first is how an order posted
+ *  in reads as still waiting. */
+function proformaFacts(r: Record<string, unknown>): {
+  proformaRequired: boolean
+  proformaReceived: boolean
+  proformaPaid: boolean
+} {
+  return {
+    proformaRequired: Boolean(r.proforma_required),
+    proformaReceived: Boolean(r.proforma_media_id) || Boolean(r.proforma_received_at),
+    proformaPaid: Boolean(r.proforma_paid_at),
   }
 }
 
@@ -533,7 +564,7 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     sentAt: stamp(r.sent_at),
     acknowledgedAt: stamp(r.acknowledged_at),
     acknowledgedNote: (r.acknowledged_note as string | null) ?? null,
-    proformaRequired: Boolean(r.proforma_required),
+    ...proformaFacts(r),
     proformaMediaId: (r.proforma_media_id as string | null) ?? null,
     proformaRef: (r.proforma_ref as string | null) ?? null,
     proformaAmount: decOrNull(r.proforma_amount),
@@ -541,6 +572,8 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     proformaPaidAt: stamp(r.proforma_paid_at),
     proformaPaidByUserId: (r.proforma_paid_by_user_id as string | null) ?? null,
     proformaPaymentRef: (r.proforma_payment_ref as string | null) ?? null,
+    proformaPaymentProofMediaId: (r.proforma_payment_proof_media_id as string | null) ?? null,
+    proformaProofSentAt: stamp(r.proforma_proof_sent_at),
     ackMediaId: (r.ack_media_id as string | null) ?? null,
     ackRef: (r.ack_ref as string | null) ?? null,
     cancelledAt: stamp(r.cancelled_at),

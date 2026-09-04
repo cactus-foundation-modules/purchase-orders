@@ -32,13 +32,20 @@ import {
 // only raster images and 3D models, so a PDF sent that way is refused outright -
 // and a proforma is nearly always a PDF.
 
-/** What a supplier may send us, and where it gets filed. */
+/** Every file that can end up filed against an order, and where each one goes.
+ *  A supplier may only send the first two - the proof of payment goes the other
+ *  way, out of this building to them. */
+export const PO_FILE_KINDS = ['proforma', 'acknowledgement', 'payment-proof'] as const
+export type PoFileKind = (typeof PO_FILE_KINDS)[number]
+
+/** The subset a supplier's own link accepts. */
 export const PORTAL_FILE_KINDS = ['proforma', 'acknowledgement'] as const
 export type PortalFileKind = (typeof PORTAL_FILE_KINDS)[number]
 
-const FOLDERS: Record<PortalFileKind, string[]> = {
+const FOLDERS: Record<PoFileKind, string[]> = {
   proforma: ['Purchasing', 'Proforma invoices'],
   acknowledgement: ['Purchasing', 'Order acknowledgements'],
+  'payment-proof': ['Purchasing', 'Proof of payment'],
 }
 
 /** Smaller than the bill attachment's cap. A proforma is a page or two of PDF;
@@ -96,6 +103,10 @@ export async function readPortalUpload(
 
 export type StoredPortalUpload = { ok: true; mediaId: string } | PortalUploadRefusal
 
+/** What both doors hand over once the bytes have been checked: the portal's, and
+ *  the admin screen's (which uses lib/bill-attachment.ts to read its form). */
+export type CheckedUpload = { buffer: Buffer; mimeType: AllowedMimeType; filename: string }
+
 /**
  * Put the bytes where the site keeps its media and record them in the library.
  *
@@ -106,14 +117,16 @@ export type StoredPortalUpload = { ok: true; mediaId: string } | PortalUploadRef
  * lib/media-usage-provider.ts stops the library ever offering one of these up as
  * clutter.
  *
- * `uploadedById` is deliberately left off: a supplier is not a user of this
- * site, and putting somebody else's id against their file would be a lie in the
- * one column that says who to ask about it.
+ * `uploadedById` is whoever pressed the button here, and null for anything that
+ * arrived through the supplier's link: a supplier is not a user of this site,
+ * and putting somebody else's id against their file would be a lie in the one
+ * column that says who to ask about it.
  */
-export async function storePortalUpload(
-  accepted: PortalUploadAccepted,
-  kind: PortalFileKind,
+export async function storeOrderDocument(
+  accepted: CheckedUpload,
+  kind: PoFileKind,
   orderNumber: string,
+  uploadedById: string | null,
 ): Promise<StoredPortalUpload> {
   const provider = await getActiveMediaProvider()
   if (!provider || !isMediaProviderConfigured(provider)) {
@@ -140,6 +153,7 @@ export async function storePortalUpload(
     provider,
     mimeType: result.mimeType,
     sizeBytes: result.sizeBytes,
+    ...(uploadedById ? { uploadedById } : {}),
     originalName: accepted.filename || undefined,
     folderId,
   })
@@ -152,4 +166,20 @@ export async function storePortalUpload(
     }
   }
   return { ok: true, mediaId: record.id }
+}
+
+/**
+ * The portal's own door, which is the same one with the supplier's hands tied:
+ * only the two kinds they may send, and never a user id against the file.
+ *
+ * `uploadedById` is deliberately null: a supplier is not a user of this site, and
+ * putting somebody else's id in the one column that says who to ask about a file
+ * would be a lie.
+ */
+export async function storePortalUpload(
+  accepted: PortalUploadAccepted,
+  kind: PortalFileKind,
+  orderNumber: string,
+): Promise<StoredPortalUpload> {
+  return storeOrderDocument(accepted, kind, orderNumber, null)
 }

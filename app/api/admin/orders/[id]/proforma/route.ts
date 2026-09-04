@@ -5,17 +5,21 @@ import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, getSupplier } from '@/modules/purchase-orders/lib/db'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
-import { sendProformaPaid, supplierRecipients } from '@/modules/purchase-orders/lib/email'
+import { proformaPaidRecipients, sendProformaPaid } from '@/modules/purchase-orders/lib/email'
 import { formatMoney } from '@/modules/purchase-orders/lib/money'
 import { mintPortalLink } from '@/modules/purchase-orders/lib/portal'
 import {
-  clearProformaPayment, markProformaPaid, setProformaRequired,
+  clearProformaPayment, markProformaPaid, markProofSent, mediaAttachment, setProformaRequired,
 } from '@/modules/purchase-orders/lib/proforma'
 
 type Params = { params: Promise<{ id: string }> }
 
 const PayBody = z.object({
   paymentRef: z.string().max(120).optional(),
+  /** Whether the proof of payment filed against the order travels with the
+   *  email. Off unless asked for: not every payment has one, and a supplier who
+   *  did not ask for one does not need it. */
+  sendProof: z.boolean().optional(),
 })
 
 const RequiredBody = z.object({
@@ -47,13 +51,20 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   const ref = (parsed.data.paymentRef ?? '').trim() || null
+  const wantsProof = parsed.data.sendProof === true
   const claimed = await markProformaPaid(id, ref, user.id)
-  if (!claimed) {
+  if (!claimed && !wantsProof) {
     // Somebody else got there first. The state the caller wanted is the state
     // that holds, so this is not an error - but it is worth saying rather than
     // silently re-dating their payment.
     return NextResponse.json({ ok: true, alreadyPaid: true })
   }
+
+  // The proof, where one is filed and somebody has asked for it to go. Fetched
+  // before the email rather than inside it, so a proof that cannot be read
+  // becomes a message the screen can make - the email still goes, saying the
+  // money has moved, which is the half that matters most.
+  const proof = wantsProof ? await mediaAttachment(order.proformaPaymentProofMediaId) : null
 
   // And the supplier is told, every time. On these terms they are waiting on
   // this and nothing else - their own link will not let them confirm the order
@@ -61,7 +72,9 @@ export async function POST(request: NextRequest, { params }: Params) {
   // best-effort: the payment has already been recorded, and taking it back
   // because a mail server was busy would be the worse of the two wrongs.
   const supplier = await getSupplier(order.supplierId)
-  const recipients = supplierRecipients(supplier?.email ?? null, supplier?.emailCc ?? null)
+  // Their accounts department where the supplier says so, and the ordering desk
+  // otherwise. This is the only email in the module that asks.
+  const recipients = proformaPaidRecipients(supplier)
   let emailed = false
   if (recipients) {
     // A fresh link travels with it, so "you can confirm the order now" is
@@ -78,17 +91,24 @@ export async function POST(request: NextRequest, { params }: Params) {
         proformaRef: order.proformaRef,
       },
       portalLink,
+      proof,
     )
   }
+  // Stamped only where it actually travelled. A proof recorded as sent that
+  // never left is the one lie this screen must not tell.
+  if (emailed && proof) await markProofSent(id)
 
   await recordAudit(
     'order',
     id,
-    'order.proforma-paid',
+    claimed ? 'order.proforma-paid' : 'order.proforma-proof-resent',
     {
-      note: ref ? `Proforma paid, reference ${ref}` : 'Proforma paid',
+      note:
+        (claimed ? (ref ? `Proforma paid, reference ${ref}` : 'Proforma paid') : 'Proof of payment sent again') +
+        (emailed && proof ? ', with the proof of payment attached' : ''),
       supplier: order.supplierName,
       emailed,
+      proofAttached: Boolean(emailed && proof),
       to: recipients?.to ?? null,
     },
     user.id,
@@ -97,7 +117,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   return NextResponse.json({
     ok: true,
     order: after,
+    alreadyPaid: !claimed,
     emailed,
+    // Said apart from `emailed`: an email that went without the attachment
+    // somebody asked for is not the thing they pressed the button for.
+    proofSent: Boolean(emailed && proof),
+    proofProblem:
+      wantsProof && !proof
+        ? 'The email went, but the proof of payment could not be read, so it did not travel with it. Upload it again.'
+        : null,
     // Said plainly rather than left for somebody to notice: a supplier who was
     // not told is a supplier still waiting.
     emailProblem: emailed
@@ -105,6 +133,9 @@ export async function POST(request: NextRequest, { params }: Params) {
       : recipients
         ? 'The payment is recorded, but the email telling them could not be sent. Check Settings, Emails.'
         : 'The payment is recorded, but this supplier has no email address on file, so nobody has told them.',
+    // Which desk it went to, so the screen can say "their accounts department"
+    // rather than leaving somebody to guess whether the switch did anything.
+    emailedTo: recipients?.to ?? null,
   })
 }
 

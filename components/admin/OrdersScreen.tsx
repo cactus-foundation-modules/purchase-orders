@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
 import { PO_STATUSES, PO_STATUS_LABELS, type PoOrderSummary, type PoStatus } from '@/modules/purchase-orders/lib/types'
-import { formatDay, input, Money, StatusBadge, table, td, tdRight, th, thRight } from './ui'
+import { formatDay, input, Money, OrderStatusBadge, table, td, tdRight, th, thRight } from './ui'
 
 type StatusFilter = PoStatus | 'ALL' | 'OPEN'
 
@@ -107,7 +107,7 @@ export function OrdersScreen({ canCreate }: { canCreate: boolean }) {
                   </td>
                   <td style={td}>{o.supplierName}</td>
                   <td style={td}>
-                    <StatusBadge status={o.status} />
+                    <OrderStatusBadge order={o} />
                   </td>
                   <td style={td}>{formatDay(o.raisedDate)}</td>
                   <td style={td}>{formatDay(o.requiredByDate)}</td>

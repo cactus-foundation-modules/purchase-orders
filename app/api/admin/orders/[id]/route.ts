@@ -9,7 +9,7 @@ import { orderRevisionSnapshot } from '@/modules/purchase-orders/lib/document'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { OrderBody, toOrderInput } from '@/modules/purchase-orders/lib/order-body'
 import { listAudit, recordAudit } from '@/modules/purchase-orders/lib/audit'
-import { mediaLink } from '@/modules/purchase-orders/lib/proforma'
+import { orderDocuments } from '@/modules/purchase-orders/lib/proforma'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -23,17 +23,16 @@ export async function GET(_request: NextRequest, { params }: Params) {
   const order = await getOrder(id)
   if (!order) return errorResponse('That purchase order is not here any more.', 404)
 
-  // The two documents the supplier sends us, resolved to something clickable.
-  // The order row carries a Media id and nothing else - core owns that table -
-  // so the link is looked up here rather than being a column somebody could let
+  // The documents filed against the order, resolved to something clickable. The
+  // order row carries a Media id and nothing else - core owns that table - so
+  // the link is looked up here rather than being a column somebody could let
   // drift out of step with the library.
-  const [history, revisions, proforma, acknowledgement] = await Promise.all([
+  const [history, revisions, documents] = await Promise.all([
     listAudit('order', id),
     listOrderRevisions(id),
-    mediaLink(order.proformaMediaId),
-    mediaLink(order.ackMediaId),
+    orderDocuments(order),
   ])
-  return NextResponse.json({ order, history, revisions, documents: { proforma, acknowledgement } })
+  return NextResponse.json({ order, history, revisions, documents })
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {

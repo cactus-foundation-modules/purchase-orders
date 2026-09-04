@@ -34,6 +34,11 @@ export const SupplierBody = z.object({
   phone: z.string().max(60).nullable().default(null),
   email: z.string().email('That email address does not look right').nullable().default(null),
   emailCc: z.string().email('That copy-to address does not look right').nullable().default(null),
+  // Their accounts department. Defaulted rather than required, so a form written
+  // before these existed still saves - and a supplier nobody has thought about
+  // behaves exactly as every existing row does.
+  accountsEmail: z.string().email('That accounts address does not look right').nullable().default(null),
+  proformaPaidToAccounts: z.boolean().default(false),
   address: AddressBody.default({}),
   currency: z.string().trim().length(3, 'Currency is a three-letter code').default('GBP'),
   paymentTerms: z.string().max(200).nullable().default(null),
@@ -78,6 +83,12 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     phone: orNull(body.phone),
     email: orNull(body.email),
     emailCc: orNull(body.emailCc),
+    accountsEmail: orNull(body.accountsEmail),
+    // An address that is not there cannot be sent to, and a switch left on
+    // against an empty box would quietly send the payment note nowhere. The form
+    // says the same thing; this is the half that holds when the form is not the
+    // thing calling.
+    proformaPaidToAccounts: body.proformaPaidToAccounts && orNull(body.accountsEmail) !== null,
     address: body.address,
     currency: body.currency.trim().toUpperCase(),
     paymentTerms: orNull(body.paymentTerms),

@@ -7,6 +7,7 @@ import { sendPortalReplyToBuyer } from '@/modules/purchase-orders/lib/email'
 import { PortalUploadFields } from '@/modules/purchase-orders/lib/portal-body'
 import { buildPortalView } from '@/modules/purchase-orders/lib/portal-response'
 import { readPortalUpload, storePortalUpload } from '@/modules/purchase-orders/lib/portal-upload'
+import { guessDocumentReference } from '@/modules/purchase-orders/lib/document-reference'
 import { setAcknowledgementDocument, setProformaDocument } from '@/modules/purchase-orders/lib/proforma'
 import {
   acknowledgeFromPortal, portalNoticeRecipient, recordPortalEvent, resolvePortalToken,
@@ -85,7 +86,20 @@ export async function POST(request: NextRequest) {
   if (!stored.ok) return errorResponse(stored.reason, stored.status)
 
   const note = (fields.note ?? '').trim()
-  const ref = (fields.ref ?? '').trim()
+  const typed = (fields.ref ?? '').trim()
+  // Their own number, read off the document where they did not type it in.
+  //
+  // Most suppliers upload the file and leave the reference box alone - it is one
+  // more thing to copy out of a PDF they have already sent - and the number then
+  // gets typed in at this end instead, off the screen, by somebody who has to
+  // open the file to find it. It is a guess, it never overwrites a number
+  // already on the order, and it shows on their own page where they can correct
+  // it.
+  const existing = fields.kind === 'proforma' ? order.proformaRef : order.ackRef
+  const ref =
+    typed || existing
+      ? typed
+      : guessDocumentReference(fields.kind, upload.filename, upload.buffer, order.number) ?? ''
 
   if (fields.kind === 'proforma') {
     await setProformaDocument(order.id, stored.mediaId, ref || null, fields.amount ?? null)

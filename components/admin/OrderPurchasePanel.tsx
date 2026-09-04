@@ -10,7 +10,7 @@ import {
 import { formatMoney } from '@/modules/purchase-orders/lib/money'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
-import { PO_STATUS_LABELS } from '@/modules/purchase-orders/lib/types'
+import { orderStatusLabel } from '@/modules/purchase-orders/lib/proforma-stage'
 import { RaisePurchaseOrders } from './RaisePurchaseOrders'
 
 // Contributed to shop's `shop.order-detail-panels` point, which hands us
@@ -65,7 +65,7 @@ export async function OrderPurchasePanel({
                 <a href={`/${adminPath}/m/purchase-orders/orders/${po.id}`} style={{ fontWeight: 600 }}>{po.number}</a>
                 <span>{po.supplierName}</span>
                 <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8125rem' }}>
-                  {PO_STATUS_LABELS[po.status]} · {formatMoney(po.total, po.currency)}
+                  {orderStatusLabel(po)} · {formatMoney(po.total, po.currency)}
                   {po.raisedAutomatically && ' · drafted automatically when this order was paid'}
                 </span>
               </div>

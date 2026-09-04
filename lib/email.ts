@@ -138,6 +138,37 @@ export function supplierRecipients(email: string | null, emailCc: string | null)
 }
 
 /**
+ * Who the "we have paid your proforma" note goes to.
+ *
+ * The ordering desk and the accounts desk are rarely the same inbox, and on a
+ * proforma they are often not even the same domain - the invoice itself says
+ * where to send the payment. So this ONE email can be pointed at the accounts
+ * address instead, per supplier. Everything else in this file still goes to the
+ * people who take orders, which is where an order, an amendment, a chase and a
+ * cancellation belong.
+ *
+ * The copy-to list travels either way: it is the site's own list of who sees
+ * what goes out, not the supplier's ordering address, and taking it off would be
+ * answering a question nobody asked.
+ *
+ * Falls back to the ordinary recipients wherever the switch is on but the
+ * address is missing - a payment note nobody receives is worse than one that
+ * reaches the wrong desk in the right building.
+ */
+export function proformaPaidRecipients(supplier: {
+  email: string | null
+  emailCc: string | null
+  accountsEmail: string | null
+  proformaPaidToAccounts: boolean
+} | null): SupplierRecipients | null {
+  const accounts = (supplier?.accountsEmail ?? '').trim()
+  if (supplier?.proformaPaidToAccounts && accounts.includes('@')) {
+    return supplierRecipients(accounts, supplier.emailCc ?? null)
+  }
+  return supplierRecipients(supplier?.email ?? null, supplier?.emailCc ?? null)
+}
+
+/**
  * Sends one purchase order to its supplier, with the document attached.
  *
  * `kind` picks the template: the first time it goes out, and the amended one that
@@ -263,6 +294,12 @@ export async function sendOrderChase(
  * runs, and unpaying an order because a mail server was busy is the worst of
  * the two outcomes. Returns whether it went, so the screen can say if it did
  * not.
+ *
+ * `proof` is the screenshot or remittance filed against the order, where
+ * somebody has asked for it to travel with the email. It is what a supplier
+ * actually wants: "we have paid it" is a sentence, and the picture of the
+ * payment is the thing that gets an order released. Attached rather than linked,
+ * because a link into this site is a link they cannot open.
  */
 export async function sendProformaPaid(
   supplierName: string,
@@ -270,6 +307,7 @@ export async function sendProformaPaid(
   recipients: SupplierRecipients,
   vars: { paymentRef: string | null; amount: string; proformaRef: string | null },
   portalLink: string | null,
+  proof: EmailAttachment | null = null,
 ): Promise<boolean> {
   if (!isEmailConfigured()) return false
   try {
@@ -281,7 +319,10 @@ export async function sendProformaPaid(
       (ref ? `Payment reference: <strong>${escapeHtml(ref)}</strong><br />` : '') +
       `Amount paid: ${escapeHtml(vars.amount)}` +
       (vars.proformaRef ? `<br />Against your proforma ${escapeHtml(vars.proformaRef)}` : '') +
-      '</p>'
+      '</p>' +
+      // Only said where it is true. A message promising an attachment that is not
+      // on it is a message that gets replied to rather than acted on.
+      (proof ? '<p>Our proof of payment is attached.</p>' : '')
 
     const rendered = await renderEmailTemplate('purchase-orders.proforma-paid', {
       supplierName: supplierName || 'there',
@@ -301,6 +342,7 @@ export async function sendProformaPaid(
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
+      ...(proof ? { attachments: [proof] } : {}),
     })
     return true
   } catch (error) {

@@ -37,6 +37,19 @@ things.
 - Proforma terms: an order to a supplier who invoices first waits for their
   proforma, waits again while somebody here marks it paid, and only then can
   they confirm it. Frozen onto the order, and overridable per order.
+- Their paperwork, filed from either end: the proforma and the order
+  acknowledgement can arrive through the supplier's own link or be uploaded here
+  for the suppliers who email or post them. Their own reference number - the
+  proforma invoice number, the sales order number - is read off the file where
+  the box is left empty, and is always yours to correct.
+- Proof of payment: file the screenshot or the remittance against the order and
+  send it to the supplier as an attachment on the payment email, which marks the
+  proforma paid at the same time.
+- An accounts department address per supplier, and a switch that sends the
+  payment note there instead of to the people who take the orders - which is
+  where a proforma tells you to send it.
+- The status of an order on proforma terms says where it has actually got to:
+  waiting for their proforma, proforma received, proforma paid.
 - A link for the supplier: their own view of their own order, where they can
   download it as a PDF, send their proforma, confirm it with their own
   acknowledgement attached, offer a date line by line, report a shortage, and

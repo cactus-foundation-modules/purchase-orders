@@ -1,0 +1,22 @@
+-- Purchase Orders - proof that the money left
+--
+-- A supplier on proforma terms does nothing at all until they believe they have
+-- been paid, and "we have paid it" in an email is not what convinces them: the
+-- screenshot of the payment is. Every one of these was previously sent by hand,
+-- out of somebody's own mail client, which is also where the record of it lived.
+--
+-- One more file against the order, in the same shape as the other two: a plain
+-- Media id and never a foreign key, because core owns that table and a module
+-- holds no key into a table it does not own. lib/media-usage-provider.ts is what
+-- stops the library offering it up as clutter - and a proof of payment is
+-- evidence behind money that left the building before any goods did, so the
+-- media clean-up is not allowed to be the thing that loses it.
+--
+-- proforma_proof_sent_at is the stamp on the email that carried it, kept apart
+-- from proforma_paid_at: a payment marked here and a proof the supplier actually
+-- received are two different facts, and the screen says which of them has
+-- happened rather than implying the second from the first.
+--
+-- Idempotent, and 001 carries the same columns for a fresh install.
+ALTER TABLE "po_orders" ADD COLUMN IF NOT EXISTS "proforma_payment_proof_media_id" TEXT;
+ALTER TABLE "po_orders" ADD COLUMN IF NOT EXISTS "proforma_proof_sent_at" TIMESTAMPTZ;

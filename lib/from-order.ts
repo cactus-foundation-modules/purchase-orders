@@ -180,6 +180,12 @@ export type PoRaisedFromShopOrder = {
   id: string
   number: string
   status: PoStatus
+  /** Where the proforma dance has got to, for the badge. An order on these
+   *  terms sits at SENT throughout, and "Sent" on the customer order's panel
+   *  hides the fact that nobody has paid the supplier yet. */
+  proformaRequired: boolean
+  proformaReceived: boolean
+  proformaPaid: boolean
   supplierId: string
   supplierName: string
   currency: string
@@ -200,7 +206,8 @@ export type PoRaisedFromShopOrder = {
 export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFromShopOrder[]> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT o."id", o."number", o."status", o."supplier_id", o."currency", o."total", o."created_at",
-           o."created_by_user_id", s."name" AS "supplier_name"
+           o."created_by_user_id", s."name" AS "supplier_name",
+           o."proforma_required", o."proforma_media_id", o."proforma_received_at", o."proforma_paid_at"
       FROM "po_orders" o
       LEFT JOIN "po_suppliers" s ON s."id" = o."supplier_id"
      WHERE o."source_kind" = 'FROM_ORDER'
@@ -211,6 +218,9 @@ export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFrom
     id: r.id as string,
     number: r.number as string,
     status: r.status as PoStatus,
+    proformaRequired: Boolean(r.proforma_required),
+    proformaReceived: Boolean(r.proforma_media_id) || Boolean(r.proforma_received_at),
+    proformaPaid: Boolean(r.proforma_paid_at),
     supplierId: r.supplier_id as string,
     supplierName: (r.supplier_name as string | null) ?? 'A supplier no longer on your list',
     currency: r.currency as string,

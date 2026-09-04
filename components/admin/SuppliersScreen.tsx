@@ -15,6 +15,8 @@ type Form = {
   phone: string
   email: string
   emailCc: string
+  accountsEmail: string
+  proformaPaidToAccounts: boolean
   address: PoAddress
   currency: string
   paymentTerms: string
@@ -42,6 +44,8 @@ const EMPTY_FORM: Form = {
   phone: '',
   email: '',
   emailCc: '',
+  accountsEmail: '',
+  proformaPaidToAccounts: false,
   address: EMPTY_ADDRESS,
   currency: 'GBP',
   paymentTerms: '',
@@ -124,6 +128,8 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       phone: supplier.phone ?? '',
       email: supplier.email ?? '',
       emailCc: supplier.emailCc ?? '',
+      accountsEmail: supplier.accountsEmail ?? '',
+      proformaPaidToAccounts: supplier.proformaPaidToAccounts,
       address: supplier.address,
       currency: supplier.currency,
       paymentTerms: supplier.paymentTerms ?? '',
@@ -163,6 +169,11 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         phone: textOrNull(form.phone),
         email: textOrNull(form.email),
         emailCc: textOrNull(form.emailCc),
+        accountsEmail: textOrNull(form.accountsEmail),
+        // Meaningless without an address to send to, and the route holds the
+        // same rule - a switch on against an empty box would send the payment
+        // note nowhere at all.
+        proformaPaidToAccounts: form.proformaPaidToAccounts && textOrNull(form.accountsEmail) !== null,
         address: form.address,
         currency: form.currency,
         paymentTerms: textOrNull(form.paymentTerms),
@@ -358,6 +369,33 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
             </Field>
             <Field label="Copy to">
               <input type="email" style={input} value={form.emailCc} onChange={(e) => setForm({ ...form, emailCc: e.target.value })} />
+            </Field>
+            <Field
+              label="Accounts department"
+              hint="Their finance desk, where that is a different inbox from the one that takes orders. On proforma terms it usually is - the address is printed on the invoice."
+            >
+              <input
+                type="email"
+                style={input}
+                value={form.accountsEmail}
+                onChange={(e) => setForm({ ...form, accountsEmail: e.target.value })}
+              />
+            </Field>
+            <Field label="Send the payment note to accounts">
+              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={form.proformaPaidToAccounts}
+                  disabled={!form.accountsEmail.trim()}
+                  onChange={(e) => setForm({ ...form, proformaPaidToAccounts: e.target.checked })}
+                  style={{ marginTop: '0.25rem' }}
+                />
+                <span style={muted}>
+                  The &ldquo;we have paid your proforma&rdquo; note, and the proof of payment with it, go to the
+                  accounts address instead of the ordering one. Everything else - the order, an amendment, a chase, a
+                  cancellation - still goes to the people who take orders. Needs an accounts address above.
+                </span>
+              </label>
             </Field>
             <Field label="Currency">
               <input style={input} maxLength={3} value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />

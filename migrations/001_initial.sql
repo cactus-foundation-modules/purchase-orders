@@ -60,6 +60,11 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "phone"                   TEXT,
     "email"                   TEXT,
     "email_cc"                TEXT,
+    -- Their accounts department, and whether the "we have paid your proforma"
+    -- note goes there instead of to the people who take the orders. Everything
+    -- else still goes to the ordering address. (Also in 010.)
+    "accounts_email"          TEXT,
+    "proforma_paid_to_accounts" BOOLEAN   NOT NULL DEFAULT false,
     "address"                 JSONB       NOT NULL DEFAULT '{}',
     "currency"                TEXT        NOT NULL DEFAULT 'GBP',
     "payment_terms"           TEXT,
@@ -158,6 +163,10 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     "proforma_paid_at"    TIMESTAMPTZ,
     "proforma_paid_by_user_id" TEXT,
     "proforma_payment_ref" TEXT,
+    -- The screenshot or remittance we send them to prove the money left, and
+    -- when it went with the payment email. (Also in 009.)
+    "proforma_payment_proof_media_id" TEXT,
+    "proforma_proof_sent_at" TIMESTAMPTZ,
     -- The supplier's own order acknowledgement, attached when they confirm.
     "ack_media_id"        TEXT,
     "ack_ref"             TEXT,

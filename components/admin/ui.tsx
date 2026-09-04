@@ -5,6 +5,9 @@ import {
   PO_BILL_STATUS_LABELS, PO_MATCH_STATUS_LABELS, PO_RETURN_STATUS_LABELS, PO_STATUS_LABELS,
   type PoBillStatus, type PoMatchStatus, type PoReturnStatus, type PoStatus,
 } from '@/modules/purchase-orders/lib/types'
+import {
+  orderStatusLabel, proformaWaitsOnUs, type PoStageFacts,
+} from '@/modules/purchase-orders/lib/proforma-stage'
 
 // The chrome every purchasing screen shares. Colours are semantic tokens
 // throughout: a hardcoded hex in module chrome is a defect on this platform, and
@@ -101,11 +104,28 @@ const TONE_STYLE: Record<string, CSSProperties> = {
   error: { background: 'var(--color-error-bg)', color: 'var(--color-error)' },
 }
 
-export function StatusBadge({ status }: { status: PoStatus }) {
+/**
+ * An order's status, as a badge.
+ *
+ * `label` and `tone` are overrides for the one case where the status column is
+ * true but unhelpful: an order on proforma terms sits at SENT through the whole
+ * dance, and "Sent" tells nobody whether their invoice has turned up or whether
+ * it is us holding things up. `OrderStatusBadge` below is what fills them in;
+ * every other screen passes a status and gets what it always got.
+ */
+export function StatusBadge({
+  status,
+  label,
+  tone,
+}: {
+  status: PoStatus
+  label?: string
+  tone?: 'default' | 'primary' | 'success' | 'warning' | 'error'
+}) {
   return (
     <span
       style={{
-        ...TONE_STYLE[STATUS_TONE[status]],
+        ...TONE_STYLE[tone ?? STATUS_TONE[status]],
         display: 'inline-block',
         borderRadius: 999,
         padding: '2px 8px',
@@ -114,8 +134,26 @@ export function StatusBadge({ status }: { status: PoStatus }) {
         whiteSpace: 'nowrap',
       }}
     >
-      {PO_STATUS_LABELS[status]}
+      {label ?? PO_STATUS_LABELS[status]}
     </span>
+  )
+}
+
+/**
+ * The same badge, told where an order on proforma terms has actually got to.
+ *
+ * The one stage that gets a colour of its own is the one that is OURS: their
+ * invoice is here and nobody has paid it. A list of forty orders is where that
+ * matters, and a warning is what the module already uses for "somebody here has
+ * to do something".
+ */
+export function OrderStatusBadge({ order }: { order: PoStageFacts }) {
+  return (
+    <StatusBadge
+      status={order.status}
+      label={orderStatusLabel(order)}
+      {...(proformaWaitsOnUs(order) ? { tone: 'warning' as const } : {})}
+    />
   )
 }
 

@@ -9,6 +9,7 @@ import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { PO_PORTAL_EVENT_LABELS } from '@/modules/purchase-orders/lib/portal-view'
 import type { PoPortalAdminEvent, PoPortalTokenSummary } from '@/modules/purchase-orders/lib/portal-view'
+import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
 import { withUnit } from '@/modules/purchase-orders/lib/money'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receiving'
@@ -38,7 +39,7 @@ import {
   Money,
   muted,
   ReturnStatusBadge,
-  StatusBadge,
+  OrderStatusBadge,
   table,
   td,
   tdRight,
@@ -200,12 +201,19 @@ function formFromOrder(order: PoOrder): Form {
   }
 }
 
-/** The two documents the supplier sends us, resolved to something clickable.
+/** The documents filed against an order, resolved to something clickable: the
+ *  two the supplier sends us, and the proof of payment that goes the other way.
  *  The order row holds a Media id and nothing else - core owns that table - so
  *  the link is looked up on the server rather than being a column here that
  *  could drift out of step with the library. */
 type SupplierDocument = { url: string; originalName: string | null; mimeType: string | null }
-type SupplierDocuments = { proforma: SupplierDocument | null; acknowledgement: SupplierDocument | null }
+type SupplierDocuments = {
+  proforma: SupplierDocument | null
+  acknowledgement: SupplierDocument | null
+  paymentProof: SupplierDocument | null
+}
+
+const NO_DOCUMENTS: SupplierDocuments = { proforma: null, acknowledgement: null, paymentProof: null }
 
 /** What the supplier link endpoint hands back for one order. */
 type PortalState = {
@@ -259,7 +267,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   // the save is clamped against - rather than by this screen doing the same
   // arithmetic and getting a different answer on a stale page.
   const [despatchable, setDespatchable] = useState<PoDespatchableLine[]>([])
-  const [documents, setDocuments] = useState<SupplierDocuments>({ proforma: null, acknowledgement: null })
+  const [documents, setDocuments] = useState<SupplierDocuments>(NO_DOCUMENTS)
   // The supplier's link, and what they have said through it. Its own request
   // again: most orders never have a link at all, and the join would be earning
   // its keep on a minority of order screens.
@@ -317,7 +325,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
             setOrder(data.order)
             setHistory(data.history ?? [])
             setRevisions(data.revisions ?? [])
-            setDocuments(data.documents ?? { proforma: null, acknowledgement: null })
+            setDocuments(data.documents ?? NO_DOCUMENTS)
             setForm(formFromOrder(data.order))
           }
           setReceipts(deliveries?.receipts ?? [])
@@ -570,12 +578,12 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   // The proforma. Marking it paid is what releases the supplier's own confirm
   // button, so it is a decision somebody makes rather than something inferred
   // from a bank feed nobody has connected.
-  async function payProforma(paymentRef: string) {
+  async function payProforma(paymentRef: string, sendProof: boolean) {
     setError(null)
     const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/proforma`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentRef: paymentRef.trim() || undefined }),
+      body: JSON.stringify({ paymentRef: paymentRef.trim() || undefined, sendProof }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -583,9 +591,52 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       return
     }
     // The payment is in either way. If the supplier could not be told, say so
-    // here rather than leaving somebody to find out when they ring up asking.
-    if (data.emailProblem) setError(data.emailProblem)
+    // here rather than leaving somebody to find out when they ring up asking -
+    // and the same for a proof that was asked for and did not travel.
+    if (data.emailProblem || data.proofProblem) setError(data.emailProblem ?? data.proofProblem)
     await loadOrder()
+  }
+
+  /**
+   * Filing a document that arrived some other way - by email, or in the post.
+   *
+   * Multipart rather than JSON because a PDF cannot ride on JSON. Where the
+   * reference box is empty the server reads the file for their own number; it
+   * comes back on the reloaded order, and is said out loud rather than quietly
+   * appearing, because a number nobody typed is worth a glance.
+   */
+  async function fileDocument(kind: 'proforma' | 'acknowledgement' | 'payment-proof', chosen: File) {
+    setError(null)
+    const body = new FormData()
+    body.set('kind', kind)
+    body.set('file', chosen)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/documents`, { method: 'POST', body })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      setError(data.error ?? 'That file was not saved.')
+      return false
+    }
+    if (data.readOffTheFile) {
+      setSent(`Filed. We read ${data.readOffTheFile} off the file as their number - change it if that is not right.`)
+    }
+    await loadOrder()
+    return true
+  }
+
+  /** Their own numbers, typed in or corrected. An empty box clears one. */
+  async function saveSupplierRefs(body: Record<string, string>) {
+    setError(null)
+    const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/documents`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      setError((await res.json().catch(() => ({}))).error ?? 'Could not save that.')
+      return false
+    }
+    await loadOrder()
+    return true
   }
 
   async function unpayProforma() {
@@ -683,7 +734,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
             {isNew ? 'New purchase order' : order!.number}
             {!isNew && order!.revision > 1 && <span style={{ marginLeft: '0.5rem', fontSize: 'var(--text-sm)' }}>Rev {order!.revision}</span>}
           </h1>
-          {!isNew && <StatusBadge status={status} />}
+          {!isNew && order && <OrderStatusBadge order={order} />}
         </div>
         <Link href={base} style={linkButton}>
           Back to orders
@@ -912,6 +963,9 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           onPayProforma={access.canApprove || access.canBills ? payProforma : null}
           onUnpayProforma={access.canApprove || access.canBills ? unpayProforma : null}
           onSetProformaTerms={access.canCreate ? setProformaTerms : null}
+          onFileDocument={access.canCreate ? fileDocument : null}
+          onFileProof={access.canApprove || access.canBills ? fileDocument : null}
+          onSaveSupplierRefs={access.canCreate ? saveSupplierRefs : null}
         />
       )}
     </div>
@@ -1221,9 +1275,14 @@ type ViewProps = {
   /** Their proforma and their acknowledgement, where either has arrived. */
   documents: SupplierDocuments
   /** Null for anybody without the permission to say money has moved. */
-  onPayProforma: ((paymentRef: string) => void) | null
+  onPayProforma: ((paymentRef: string, sendProof: boolean) => void) | null
   onUnpayProforma: (() => void) | null
   onSetProformaTerms: ((required: boolean) => void) | null
+  /** Filing what arrived by email or in the post. Buying for the supplier's own
+   *  paperwork, paying for the proof that the money left. */
+  onFileDocument: ((kind: 'proforma' | 'acknowledgement' | 'payment-proof', file: File) => Promise<boolean>) | null
+  onFileProof: ((kind: 'proforma' | 'acknowledgement' | 'payment-proof', file: File) => Promise<boolean>) | null
+  onSaveSupplierRefs: ((body: Record<string, string>) => Promise<boolean>) | null
   onRevokeLink: ((tokenId: string) => void) | null
   onRevokeAllLinks: (() => void) | null
   onApplyDate: ((eventId: string) => void) | null
@@ -1235,6 +1294,7 @@ function OrderView({
   onCancelLine, portal, newLink, onMakeLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
   shipments, despatchable, onRecordDespatch, onDeleteDespatch,
   documents, onPayProforma, onUnpayProforma, onSetProformaTerms,
+  onFileDocument, onFileProof, onSaveSupplierRefs,
 }: ViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -1542,6 +1602,9 @@ function OrderView({
         onPay={onPayProforma}
         onUnpay={onUnpayProforma}
         onSetTerms={onSetProformaTerms}
+        onFile={onFileDocument}
+        onFileProof={onFileProof ? (chosen) => onFileProof('payment-proof', chosen) : null}
+        onSaveRefs={onSaveSupplierRefs}
       />
 
       <DespatchesCard
@@ -1643,16 +1706,130 @@ function OrderView({
 
 // ---------------------------------------------------------------------------
 
+type FiledDocumentKind = 'proforma' | 'acknowledgement' | 'payment-proof'
+
 type ProformaCardProps = {
   order: PoOrder
   documents: SupplierDocuments
-  onPay: ((paymentRef: string) => void) | null
+  onPay: ((paymentRef: string, sendProof: boolean) => void) | null
   onUnpay: (() => void) | null
   onSetTerms: ((required: boolean) => void) | null
+  /** Filing what the supplier sent. Null for anybody who may not buy. */
+  onFile: ((kind: 'proforma' | 'acknowledgement', file: File) => Promise<boolean>) | null
+  /** Filing what we sent THEM. Null for anybody without the permission to say
+   *  money has moved - it is part of paying, not of buying. */
+  onFileProof: ((file: File) => Promise<boolean>) | null
+  /** Their own numbers, typed in or corrected. Null for anybody who may not buy. */
+  onSaveRefs: ((body: Record<string, string>) => Promise<boolean>) | null
+}
+
+/** One filed document, as a link or as a sentence saying there is not one. */
+function FiledDocument({ doc, missing }: { doc: SupplierDocument | null; missing: string }) {
+  if (!doc) return <span style={{ color: 'var(--color-text-secondary)' }}>{missing}</span>
+  return (
+    <a href={doc.url} target="_blank" rel="noreferrer">
+      {doc.originalName ?? 'Open it'}
+    </a>
+  )
 }
 
 /**
- * The proforma, and the two documents the supplier sends us.
+ * Choosing a file, with the same checks the route runs done here first so an
+ * obvious refusal costs nobody an upload.
+ *
+ * The input is cleared after every attempt, successful or not. Without that,
+ * picking the same file twice - which is exactly what somebody does after a
+ * failure - fires no change event at all and looks like the screen ignoring
+ * them.
+ */
+function FilePicker({
+  label,
+  busy,
+  onPick,
+}: {
+  label: string
+  busy: boolean
+  onPick: (file: File) => void
+}) {
+  const [problem, setProblem] = useState<string | null>(null)
+  return (
+    <div style={{ marginTop: '0.375rem' }}>
+      <input
+        type="file"
+        accept=".pdf,.jpg,.jpeg,.png,.webp"
+        aria-label={label}
+        disabled={busy}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (!file) return
+          const refusal = preflightFileError(file)
+          setProblem(refusal)
+          if (!refusal) onPick(file)
+        }}
+      />
+      {problem && <div style={{ ...muted, color: 'var(--color-danger)' }}>{problem}</div>}
+    </div>
+  )
+}
+
+/**
+ * One of their reference numbers, typed in or corrected.
+ *
+ * Held in its own state and saved on a button rather than on every keystroke:
+ * these are numbers copied off a PDF by somebody looking from one window to
+ * another, and a field that saves halfway through is a field that saves a wrong
+ * number.
+ *
+ * What the server holds wins whenever it changes - including a number read off
+ * an uploaded file that nobody typed - and that is done by KEYING this component
+ * on the value at both call sites rather than by an effect writing state back
+ * into itself, which is the same reset with a render's delay and a lint rule
+ * against it.
+ */
+function ReferenceField({
+  label,
+  field,
+  value,
+  onSave,
+}: {
+  label: string
+  field: string
+  value: string | null
+  onSave: (body: Record<string, string>) => Promise<boolean>
+}) {
+  const [typed, setTyped] = useState(value ?? '')
+  const [saving, setSaving] = useState(false)
+
+  const dirty = typed.trim() !== (value ?? '')
+  return (
+    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '0.375rem' }}>
+      <input
+        style={{ ...input, maxWidth: 220 }}
+        placeholder={label}
+        aria-label={label}
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
+        maxLength={120}
+      />
+      {dirty && (
+        <button
+          className="btn btn-secondary btn-sm"
+          disabled={saving}
+          onClick={() => {
+            setSaving(true)
+            void onSave({ [field]: typed.trim() }).finally(() => setSaving(false))
+          }}
+        >
+          {saving ? 'Saving' : 'Save'}
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * The proforma, and the three documents an order on these terms collects.
  *
  * On proforma terms nothing about this order is agreed until the money has
  * moved: the supplier's own page will not let them confirm it, and the button
@@ -1660,19 +1837,79 @@ type ProformaCardProps = {
  * with their name against it - not something inferred from a bank feed nobody
  * has connected.
  *
+ * Their paperwork can arrive either way round. The supplier's own link is the
+ * tidy route, and plenty of suppliers will never touch it: they email the
+ * proforma, or post it, and somebody here files it. Both doors write the same
+ * columns, and the reference is read off the file where the box was left empty.
+ *
+ * The proof of payment goes the other way - out of this building to them - and
+ * is the thing that actually releases an order in practice. A supplier who has
+ * been told "we have paid it" waits; a supplier holding a screenshot of the
+ * payment ships.
+ *
  * Whether an order waits for a proforma at all is frozen onto it when it is
  * raised, off the supplier's account terms. The switch at the foot is for the
  * exception: a one-off from a supplier we have an account with who wants the
  * money up front, or the other way about.
  */
-function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: ProformaCardProps) {
+function ProformaCard({
+  order, documents, onPay, onUnpay, onSetTerms, onFile, onFileProof, onSaveRefs,
+}: ProformaCardProps) {
   const [paymentRef, setPaymentRef] = useState('')
+  const [busy, setBusy] = useState<FiledDocumentKind | null>(null)
+  // Ticked by default the moment there is something to send, because a supplier
+  // who gets the proof is a supplier who stops asking for it.
+  const [attachProof, setAttachProof] = useState(true)
 
   // A draft nobody has sent has no supplier documents and no proforma to chase.
   if (order.status === 'DRAFT' && !order.proformaRequired) return null
 
   const received = Boolean(order.proformaMediaId) || Boolean(order.proformaReceivedAt)
   const paid = Boolean(order.proformaPaidAt)
+  const hasProof = Boolean(documents.paymentProof)
+
+  function file(kind: 'proforma' | 'acknowledgement', chosen: File) {
+    if (!onFile) return
+    setBusy(kind)
+    void onFile(kind, chosen).finally(() => setBusy(null))
+  }
+
+  function fileProof(chosen: File) {
+    if (!onFileProof) return
+    setBusy('payment-proof')
+    void onFileProof(chosen).finally(() => setBusy(null))
+  }
+
+  /** Their acknowledgement, which an order collects whether it is on proforma
+   *  terms or on the account - so it is drawn once and used in both branches. */
+  const acknowledgementRow = (
+    <tr>
+      <td style={td}>Their acknowledgement</td>
+      <td style={td}>
+        <FiledDocument
+          doc={documents.acknowledgement}
+          missing={order.acknowledgedAt ? 'Confirmed without one.' : 'Not confirmed yet.'}
+        />
+        {order.ackRef && !onSaveRefs && <div style={muted}>Their reference {order.ackRef}</div>}
+        {onSaveRefs && (
+          <ReferenceField
+            key={order.ackRef ?? ''}
+            label="Their sales order number"
+            field="ackRef"
+            value={order.ackRef}
+            onSave={onSaveRefs}
+          />
+        )}
+        {onFile && (
+          <FilePicker
+            label="File their acknowledgement"
+            busy={busy === 'acknowledgement'}
+            onPick={(chosen) => file('acknowledgement', chosen)}
+          />
+        )}
+      </td>
+    </tr>
+  )
 
   return (
     <div style={card}>
@@ -1692,14 +1929,7 @@ function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: Proforma
                 <td style={td}>
                   {received ? (
                     <>
-                      {documents.proforma ? (
-                        <a href={documents.proforma.url} target="_blank" rel="noreferrer">
-                          {documents.proforma.originalName ?? 'Open it'}
-                        </a>
-                      ) : (
-                        'Recorded'
-                      )}
-                      {order.proformaRef && <div style={muted}>Their reference {order.proformaRef}</div>}
+                      <FiledDocument doc={documents.proforma} missing="Recorded" />
                       {order.proformaAmount && (
                         <div style={muted}>
                           For <Money value={order.proformaAmount} currency={order.currency} />
@@ -1709,8 +1939,53 @@ function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: Proforma
                     </>
                   ) : (
                     <span style={{ color: 'var(--color-text-secondary)' }}>
-                      Not here yet. It arrives through the supplier&apos;s own link, or by email for you to file.
+                      Not here yet. It arrives through the supplier&apos;s own link, or by email for you to file below.
                     </span>
+                  )}
+                  {order.proformaRef && !onSaveRefs && <div style={muted}>Their reference {order.proformaRef}</div>}
+                  {onSaveRefs && (
+                    <>
+                      <ReferenceField
+                        key={order.proformaRef ?? ''}
+                        label="Their invoice number"
+                        field="proformaRef"
+                        value={order.proformaRef}
+                        onSave={onSaveRefs}
+                      />
+                      <ReferenceField
+                        key={`amount:${order.proformaAmount ?? ''}`}
+                        label="What they are invoicing"
+                        field="proformaAmount"
+                        value={order.proformaAmount}
+                        onSave={onSaveRefs}
+                      />
+                    </>
+                  )}
+                  {onFile && (
+                    <FilePicker
+                      label="File their proforma"
+                      busy={busy === 'proforma'}
+                      onPick={(chosen) => file('proforma', chosen)}
+                    />
+                  )}
+                </td>
+              </tr>
+              <tr>
+                <td style={td}>Proof of payment</td>
+                <td style={td}>
+                  <FiledDocument
+                    doc={documents.paymentProof}
+                    missing="None filed. A screenshot of the payment, or a remittance."
+                  />
+                  {order.proformaProofSentAt && (
+                    <div style={muted}>Sent to them {formatWhen(order.proformaProofSentAt)}</div>
+                  )}
+                  {onFileProof && (
+                    <FilePicker
+                      label="File the proof of payment"
+                      busy={busy === 'payment-proof'}
+                      onPick={fileProof}
+                    />
                   )}
                 </td>
               </tr>
@@ -1721,6 +1996,13 @@ function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: Proforma
                     <>
                       {formatWhen(order.proformaPaidAt)}
                       {order.proformaPaymentRef && <div style={muted}>Reference {order.proformaPaymentRef}</div>}
+                      {onPay && hasProof && (
+                        <div style={{ marginTop: '0.375rem' }}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => onPay('', true)}>
+                            {order.proformaProofSentAt ? 'Send the proof again' : 'Email them the proof'}
+                          </button>
+                        </div>
+                      )}
                       {onUnpay && (
                         <div style={{ marginTop: '0.375rem' }}>
                           <button style={{ ...linkButton, color: 'var(--color-danger)' }} onClick={onUnpay}>
@@ -1730,42 +2012,51 @@ function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: Proforma
                       )}
                     </>
                   ) : onPay ? (
-                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                      <input
-                        style={{ ...input, maxWidth: 220 }}
-                        placeholder="Your payment reference (optional)"
-                        value={paymentRef}
-                        onChange={(e) => setPaymentRef(e.target.value)}
-                        maxLength={120}
-                      />
-                      <button className="btn btn-primary btn-sm" onClick={() => onPay(paymentRef)}>
-                        Mark the proforma as paid
-                      </button>
-                    </div>
+                    <>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                        <input
+                          style={{ ...input, maxWidth: 220 }}
+                          placeholder="Your payment reference (optional)"
+                          value={paymentRef}
+                          onChange={(e) => setPaymentRef(e.target.value)}
+                          maxLength={120}
+                        />
+                        <button className="btn btn-primary btn-sm" onClick={() => onPay(paymentRef, hasProof && attachProof)}>
+                          {hasProof && attachProof ? 'Mark it paid and send the proof' : 'Mark the proforma as paid'}
+                        </button>
+                      </div>
+                      {hasProof && (
+                        <label style={{ ...muted, display: 'block', marginTop: '0.375rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={attachProof}
+                            onChange={(e) => setAttachProof(e.target.checked)}
+                            style={{ marginRight: '0.375rem' }}
+                          />
+                          Attach the proof of payment to the email
+                        </label>
+                      )}
+                      <div style={{ ...muted, marginTop: '0.375rem' }}>
+                        They are emailed either way - on these terms they are waiting on nothing else.
+                      </div>
+                    </>
                   ) : (
                     <span style={{ color: 'var(--color-text-secondary)' }}>Not yet.</span>
                   )}
                 </td>
               </tr>
-              <tr>
-                <td style={td}>Their acknowledgement</td>
-                <td style={td}>
-                  {documents.acknowledgement ? (
-                    <>
-                      <a href={documents.acknowledgement.url} target="_blank" rel="noreferrer">
-                        {documents.acknowledgement.originalName ?? 'Open it'}
-                      </a>
-                      {order.ackRef && <div style={muted}>Their reference {order.ackRef}</div>}
-                    </>
-                  ) : (
-                    <span style={{ color: 'var(--color-text-secondary)' }}>
-                      {order.acknowledgedAt ? 'Confirmed without one.' : 'Not confirmed yet.'}
-                    </span>
-                  )}
-                </td>
-              </tr>
+              {acknowledgementRow}
             </tbody>
           </table>
+
+          {(onFile || onFileProof) && (
+            <p style={{ ...muted, marginTop: '0.75rem', marginBottom: 0 }}>
+              A PDF, JPEG, PNG or WebP up to 15 MB. Where a file carries their own number, it is read off it and
+              filled in above - always worth a glance, and always yours to correct. Files are stored and checked for
+              what they claim to be. They are not scanned for viruses - nothing on this platform is, and pretending
+              otherwise would be worse than saying so.
+            </p>
+          )}
 
           {onSetTerms && !paid && (
             <p style={{ ...muted, marginBottom: 0, marginTop: '0.75rem' }}>
@@ -1778,26 +2069,14 @@ function ProformaCard({ order, documents, onPay, onUnpay, onSetTerms }: Proforma
       ) : (
         <>
           <table style={table}>
-            <tbody>
-              <tr>
-                <td style={td}>Their acknowledgement</td>
-                <td style={td}>
-                  {documents.acknowledgement ? (
-                    <>
-                      <a href={documents.acknowledgement.url} target="_blank" rel="noreferrer">
-                        {documents.acknowledgement.originalName ?? 'Open it'}
-                      </a>
-                      {order.ackRef && <div style={muted}>Their reference {order.ackRef}</div>}
-                    </>
-                  ) : (
-                    <span style={{ color: 'var(--color-text-secondary)' }}>
-                      {order.acknowledgedAt ? 'Confirmed without one.' : 'Not confirmed yet.'}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            </tbody>
+            <tbody>{acknowledgementRow}</tbody>
           </table>
+          {onFile && (
+            <p style={{ ...muted, marginTop: '0.75rem', marginBottom: 0 }}>
+              A PDF, JPEG, PNG or WebP up to 15 MB. Where it carries their own sales order number, it is read off the
+              file and filled in above.
+            </p>
+          )}
           {onSetTerms && (
             <p style={{ ...muted, marginBottom: 0, marginTop: '0.75rem' }}>
               This order is on the supplier&apos;s account, so no proforma is expected.{' '}

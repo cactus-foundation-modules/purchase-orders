@@ -62,6 +62,12 @@ export type PoSupplier = {
   phone: string | null
   email: string | null
   emailCc: string | null
+  /** Their accounts department, where that is a different desk from the one
+   *  that takes orders - which on proforma terms it nearly always is. */
+  accountsEmail: string | null
+  /** Whether the "we have paid your proforma" note goes to that address instead
+   *  of the ordering one. It governs that ONE email and nothing else. */
+  proformaPaidToAccounts: boolean
   address: PoAddress
   currency: string
   paymentTerms: string | null
@@ -152,6 +158,14 @@ export type PoOrderSummary = {
   expectedDate: string | null
   lineCount: number
   createdAt: string
+  /** Frozen off the supplier when the order was raised. A supplier moved onto
+   *  credit next year does not rewrite what this order was waiting for. */
+  proformaRequired: boolean
+  /** Their invoice is with us: a filed document, or a date somebody recorded
+   *  without one. Decided in lib/db.ts so no screen has to remember it is two
+   *  columns. */
+  proformaReceived: boolean
+  proformaPaid: boolean
 }
 
 export type PoOrder = PoOrderSummary & {
@@ -178,10 +192,8 @@ export type PoOrder = PoOrderSummary & {
   sentAt: string | null
   acknowledgedAt: string | null
   acknowledgedNote: string | null
-  /** Frozen off the supplier when the order was raised. A supplier moved onto
-   *  credit next year does not rewrite what this order was waiting for. */
-  proformaRequired: boolean
-  /** Their proforma invoice, in core Media. Uploaded through the supplier link. */
+  /** Their proforma invoice, in core Media. Filed through the supplier's own
+   *  link, or from the order screen. */
   proformaMediaId: string | null
   proformaRef: string | null
   proformaAmount: string | null
@@ -189,6 +201,12 @@ export type PoOrder = PoOrderSummary & {
   proformaPaidAt: string | null
   proformaPaidByUserId: string | null
   proformaPaymentRef: string | null
+  /** What we sent them to prove the money left - a screenshot of the payment, or
+   *  a remittance. In core Media, like the other two. */
+  proformaPaymentProofMediaId: string | null
+  /** When that proof travelled with the payment email. Apart from
+   *  `proformaPaidAt` on purpose: paid here and proved to them are two facts. */
+  proformaProofSentAt: string | null
   /** Their order acknowledgement, attached when they confirmed. */
   ackMediaId: string | null
   ackRef: string | null
