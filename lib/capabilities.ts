@@ -1,6 +1,5 @@
 import { prisma } from '@/lib/db/prisma'
 import { getInstalledManifests } from '@/lib/modules/live-status'
-import { modulePublicExtensionPointComponents } from '@/lib/modules/extension-points.public'
 
 // The ONE place that answers "what else is on this site?".
 //
@@ -44,6 +43,12 @@ async function hasTables(names: string[]): Promise<boolean> {
 // Two halves, and both are needed: the generated registry says whose code is in
 // this build, and the manifests say who is actually installed.
 async function hasInventoryProvider(): Promise<boolean> {
+  // Dynamic on purpose: the registry imports this module's own contributed
+  // components, which reach back here, and a static edge closes an import
+  // cycle that can fail a production build. See
+  // scripts/check-import-cycles.mjs.
+  const { modulePublicExtensionPointComponents } =
+    await import('@/lib/modules/extension-points.public')
   const registered = modulePublicExtensionPointComponents[INVENTORY_POINT] ?? {}
   if (Object.keys(registered).length === 0) return false
 
