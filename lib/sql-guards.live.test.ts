@@ -127,6 +127,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
     proforma: typeof import('@/modules/purchase-orders/lib/proforma')
     fromOrder: typeof import('@/modules/purchase-orders/lib/from-order')
     mediaUsage: typeof import('@/modules/purchase-orders/lib/media-usage-provider')
+    bills: typeof import('@/modules/purchase-orders/lib/bills')
   }
   let mod: Loaded
   let vps: typeof import('@/lib/backup/vps-database')
@@ -148,6 +149,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
       proforma: await import('@/modules/purchase-orders/lib/proforma'),
       fromOrder: await import('@/modules/purchase-orders/lib/from-order'),
       mediaUsage: await import('@/modules/purchase-orders/lib/media-usage-provider'),
+      bills: await import('@/modules/purchase-orders/lib/bills'),
     }
 
     // A freshly-created database takes a moment to accept connections.
@@ -312,5 +314,120 @@ suite('purchase-orders SQL, against a real Postgres', () => {
     expect(used).toContain('media-proforma-2')
     expect(used).toContain('media-ack')
     expect(used).toContain('media-proof')
+  })
+
+  // -------------------------------------------------------------------------
+  // Supplier invoices, and the order status that waits on them
+  // -------------------------------------------------------------------------
+
+  it('writes a bill with what their document says on it, and reads it back', async () => {
+    const lineRows = await mod.prisma.prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO "po_order_lines" ("order_id", "description", "qty", "unit_cost")
+      VALUES (${orderId}, 'Oak desk 1600mm', 4, 120.5000)
+      RETURNING "id"
+    `
+    const orderLineId = lineRows[0]!.id
+
+    const billId = await mod.bills.createBill(
+      {
+        supplierId,
+        orderId,
+        supplierInvoiceNumber: 'INV-4471',
+        invoiceDate: '2026-09-01',
+        dueDate: '2026-10-01',
+        currency: 'GBP',
+        fxRate: '1',
+        subtotal: '482.00',
+        carriageAmount: '0.00',
+        taxAmount: '96.40',
+        total: '578.40',
+        statedTotal: '590.00',
+        lines: [
+          {
+            orderLineId,
+            description: 'Oak desk 1600mm',
+            qty: '4',
+            unitCost: '120.5000',
+            taxRatePercent: '20.00',
+            taxRateCode: 'STANDARD',
+            vatTreatment: 'UK_GOODS',
+            categoryId: null,
+            lineTotal: '482.00',
+          },
+        ],
+      },
+      // No user id and no login behind it, exactly as a supplier's own link
+      // files one. A NOT NULL on that column would fail here and nowhere else.
+      null,
+      'PORTAL',
+    )
+
+    const bill = await mod.bills.getBill(billId)
+    // '590', not '590.00': a numeric column comes back as a Prisma.Decimal and
+    // stringifies without its trailing zeros, exactly as every other money field
+    // in this module does. Anything that shows one to a person puts it through
+    // <Money>, and anything that compares one puts it through scaled().
+    expect(bill?.statedTotal).toBe('590')
+    expect(bill?.source).toBe('PORTAL')
+    expect(bill?.createdByUserId).toBeNull()
+    expect(bill?.lines).toHaveLength(1)
+
+    // The list query selects its own column list and maps by hand, so a column
+    // added to one and not the other is a field that reads back empty.
+    const listed = await mod.bills.listBillsForOrder(orderId)
+    expect(listed[0]?.statedTotal).toBe('590')
+    expect(listed[0]?.source).toBe('PORTAL')
+
+    // And the UPDATE, which is a third list of columns again.
+    await mod.bills.updateBill(billId, {
+      supplierId,
+      orderId,
+      supplierInvoiceNumber: 'INV-4471',
+      invoiceDate: '2026-09-01',
+      dueDate: '2026-10-01',
+      currency: 'GBP',
+      fxRate: '1',
+      subtotal: '482.00',
+      carriageAmount: '0.00',
+      taxAmount: '96.40',
+      total: '578.40',
+      statedTotal: null,
+      lines: [],
+    })
+    expect((await mod.bills.getBill(billId))?.statedTotal).toBeNull()
+
+    // What the close gate counts.
+    expect(await mod.bills.unsettledBillCount(orderId)).toBe(1)
+    await mod.prisma.prisma.$executeRaw`UPDATE "po_bills" SET "status" = 'APPROVED' WHERE "id" = ${billId}`
+    expect(await mod.bills.unsettledBillCount(orderId)).toBe(0)
+  })
+
+  it('accepts the pending-close status the CHECK constraint had never heard of', async () => {
+    // 011 drops and recreates po_orders_status_check. A migration that added the
+    // status to the application and not to the constraint would pass every gate
+    // there is and fail on the first supplier invoice.
+    await mod.db.setOrderStatus(orderId, 'PENDING_CLOSE', {}, null)
+    expect((await mod.db.getOrder(orderId))?.status).toBe('PENDING_CLOSE')
+
+    // And back out again, which clears the closure stamps.
+    await mod.db.setOrderStatus(orderId, 'RECEIVED', {}, null)
+    expect((await mod.db.getOrder(orderId))?.status).toBe('RECEIVED')
+  })
+
+  it('accepts the sixth thing a supplier can tell us', async () => {
+    const tokenRows = await mod.prisma.prisma.$queryRaw<{ id: string }[]>`
+      INSERT INTO "po_portal_tokens" ("order_id", "token_hash", "expires_at")
+      VALUES (${orderId}, 'hash-for-the-sql-guard', now() + interval '1 day')
+      RETURNING "id"
+    `
+    // po_portal_events has a CHECK on its kind, and 011 widens it.
+    await mod.prisma.prisma.$executeRaw`
+      INSERT INTO "po_portal_events" ("token_id", "order_id", "kind", "payload")
+      VALUES (${tokenRows[0]!.id}, ${orderId}, 'INVOICED', '{"ref":"INV-4471"}'::jsonb)
+    `
+    const rows = await mod.prisma.prisma.$queryRaw<{ count: bigint }[]>`
+      SELECT count(*) AS "count" FROM "po_portal_events" WHERE "kind" = 'INVOICED'
+    `
+    expect(Number(rows[0]!.count)).toBe(1)
   })
 })

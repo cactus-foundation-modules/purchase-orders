@@ -162,6 +162,19 @@ export const PoConfigSchema = z.object({
   // in three lorries is an ordinary order, and the alternative is three emails.
   portalDespatchEnabled: z.boolean().default(true),
 
+  // Whether a supplier may send their VAT invoice through their own link,
+  // ticking off what it covers.
+  //
+  // OFF by default, unlike the other two portal switches, and the difference is
+  // worth saying out loud: this one WRITES A BILL and can move an order to
+  // "pending close". Everything else a supplier can do through that link is a
+  // proposal or a document; this creates the record of what we owe somebody,
+  // and an update that quietly starts doing that on a live site is not an
+  // update anybody would thank us for. Nothing is ever approved and nothing
+  // reaches the books - what arrives is a draft with their invoice attached,
+  // for somebody here to read.
+  portalInvoicesEnabled: z.boolean().default(false),
+
   // Chasing overdue orders.
   chaseEnabled: z.boolean().default(false),
   chaseAfterDays: z.number().int().min(0).max(365).default(3),

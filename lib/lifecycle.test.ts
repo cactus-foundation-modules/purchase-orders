@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { availableTransitions, canSend, checkTransition, editMode, isAmendable, isFreelyEditable, needsApproval } from './lifecycle'
+import { availableTransitions, canSend, checkTransition, closeBlockedReason, editMode, isAmendable, isFreelyEditable, needsApproval } from './lifecycle'
 import { receiptStatus } from './progress'
 import type { PoAccess } from './permissions'
 
@@ -152,5 +152,29 @@ describe('canSend', () => {
     for (const status of ['CANCELLED', 'CLOSED', 'RECEIVED'] as const) {
       expect(canSend(status, false).ok).toBe(false)
     }
+  })
+})
+
+describe('closing an order that is waiting to be checked', () => {
+  it('refuses while a supplier invoice is still unread', () => {
+    expect(closeBlockedReason('PENDING_CLOSE', 1)).toContain('nobody has approved')
+    expect(closeBlockedReason('PENDING_CLOSE', 3)).toContain('3 invoices')
+  })
+
+  it('allows it once every invoice has been settled', () => {
+    expect(closeBlockedReason('PENDING_CLOSE', 0)).toBeNull()
+  })
+
+  it('gates nothing else on the way to closed', () => {
+    // Every other route to CLOSED is somebody in this building deciding, which
+    // is theirs to decide - draft invoices on the order or not.
+    for (const status of ['SENT', 'ACKNOWLEDGED', 'PART_RECEIVED', 'RECEIVED'] as const) {
+      expect(closeBlockedReason(status, 2)).toBeNull()
+    }
+  })
+
+  it('lets a pending order be reopened rather than only closed', () => {
+    expect(checkTransition('reopen', 'PENDING_CLOSE', buyer).ok).toBe(true)
+    expect(checkTransition('close', 'PENDING_CLOSE', buyer).ok).toBe(true)
   })
 })

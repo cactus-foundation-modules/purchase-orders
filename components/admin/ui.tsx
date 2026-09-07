@@ -91,6 +91,9 @@ const STATUS_TONE: Record<PoStatus, 'default' | 'primary' | 'success' | 'warning
   ACKNOWLEDGED: 'primary',
   PART_RECEIVED: 'warning',
   RECEIVED: 'success',
+  // A warning, like every other state where somebody in this building has to do
+  // something: an order sits here until the supplier's invoices have been read.
+  PENDING_CLOSE: 'warning',
   CLOSED: 'default',
   CANCELLED: 'error',
   ON_HOLD: 'warning',

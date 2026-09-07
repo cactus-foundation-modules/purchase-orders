@@ -391,3 +391,39 @@ describe('qtyThousandths', () => {
     expect(Number.isNaN(qtyThousandths('lots'))).toBe(true)
   })
 })
+
+describe('what is left to invoice', () => {
+  it('is the whole line until something has been billed against it', () => {
+    const view = portalView(order(), [])
+    expect(view.lines[0]!.qtyToInvoice).toBe('12')
+  })
+
+  it('comes off every bill on the order, ours and theirs alike', () => {
+    const view = portalView(order(), [], { invoicedByLine: { 'line-1': '5' } })
+    expect(view.lines[0]!.qtyToInvoice).toBe('7')
+  })
+
+  it('is a different sum from what is left to send', () => {
+    // Delivered in full and billed for half: nothing left to send, half an
+    // order left to invoice.
+    const view = portalView(order(), [], {
+      despatchedByLine: { 'line-1': '12' },
+      invoicedByLine: { 'line-1': '6' },
+    })
+    expect(view.lines[0]!.qtyToSend).toBe('0')
+    expect(view.lines[0]!.qtyToInvoice).toBe('6')
+  })
+
+  it('never goes below nothing on a line that has been over-billed', () => {
+    const view = portalView(order(), [], { invoicedByLine: { 'line-1': '20' } })
+    expect(view.lines[0]!.qtyToInvoice).toBe('0')
+  })
+
+  it('will not let a supplier send an invoice unless somebody has turned it on', () => {
+    // The opposite default to the other two switches, and deliberately: this is
+    // the one thing on that page that writes down what we owe somebody.
+    expect(portalView(order(), []).canInvoice).toBe(false)
+    expect(portalView(order(), [], { invoicesEnabled: false }).canInvoice).toBe(false)
+    expect(portalView(order(), [], { invoicesEnabled: true }).canInvoice).toBe(true)
+  })
+})

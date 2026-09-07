@@ -142,9 +142,48 @@ export type MatchTolerances = {
   quantityPercent: number
 }
 
+/** What the document says it comes to, and what these lines come to. Both
+ *  optional: a bill typed in off a phone call has no document to read. */
+export type MatchTotals = {
+  stated: string | null
+  computed: string
+}
+
 export type BillMatch = {
   status: PoMatchStatus
   flags: PoBillVariance[]
+}
+
+/**
+ * How far a stated total may sit from a computed one before it means anything.
+ *
+ * Five pence, and deliberately a flat figure rather than a percentage. A
+ * supplier who rounds VAT line by line where we round once lands a penny or two
+ * out on a long invoice, whatever the invoice is worth; a percentage of a five
+ * thousand pound order would wave a hundred pounds through, which is the exact
+ * disagreement somebody wants telling about.
+ */
+const TOTAL_TOLERANCE_PENCE = 5
+
+/**
+ * What the supplier's document says it comes to, against what these lines at
+ * these prices come to - or null where the two agree, or where nobody has said
+ * what the document says.
+ *
+ * Exported because the bill screen shows the same sentence beside the totals
+ * while somebody is still typing, and two renderings of "these do not agree"
+ * that were written twice are two renderings that disagree by Christmas.
+ */
+export function totalMismatch(
+  stated: string | number | null | undefined,
+  computed: string | number,
+): { statedPence: number; computedPence: number; differencePence: number } | null {
+  if (stated === null || stated === undefined || String(stated).trim() === '') return null
+  const statedPence = scaled(stated, 2)
+  const computedPence = scaled(computed, 2)
+  const difference = statedPence - computedPence
+  if (Math.abs(difference) <= TOTAL_TOLERANCE_PENCE) return null
+  return { statedPence, computedPence, differencePence: difference }
 }
 
 function round3(value: number): number {
@@ -173,6 +212,7 @@ export function matchBill(
   orderLines: MatchOrderLine[],
   billLines: MatchBillLine[],
   tolerances: MatchTolerances,
+  totals: MatchTotals | null = null,
 ): BillMatch {
   if (!hasOrder) return { status: 'NOT_MATCHED', flags: [] }
 
@@ -267,6 +307,24 @@ export function matchBill(
       message:
         `${orderLine.description}: invoiced for ${qtyWords(invoiced)}, ` +
         `but only ${qtyWords(received)} turned up.`,
+    })
+  }
+
+  // Last, and about the document rather than any line of it: what they say the
+  // invoice comes to, against what these lines at these prices come to. A
+  // supplier whose lines all check out and whose total does not has added
+  // something nobody has itemised, and that is worth one sentence rather than
+  // somebody finding it a fortnight later on a statement.
+  const totalFlag = totals ? totalMismatch(totals.stated, totals.computed) : null
+  if (totalFlag) {
+    flags.push({
+      kind: 'TOTAL',
+      orderLineId: null,
+      description: 'Invoice total',
+      amount: money(totalFlag.differencePence),
+      message:
+        `Their invoice says it comes to ${fromPence(totalFlag.statedPence)}, ` +
+        `but these lines come to ${fromPence(totalFlag.computedPence)}.`,
     })
   }
 
@@ -448,20 +506,33 @@ export function fullyInvoiced(lines: InvoicedLine[]): boolean {
   return live.every((l) => round3(Number(l.qtyInvoiced)) >= round3(Number(l.qty) - Number(l.qtyCancelled)))
 }
 
+/** Where an order that has nothing left to happen to it should end up, or null
+ *  where something is still outstanding. */
+export type CloseOutcome = 'CLOSED' | 'PENDING_CLOSE' | null
+
 /**
- * Whether an order can now be put to bed on its own.
+ * Whether an order can now be put to bed on its own, and how far.
  *
  * Only from RECEIVED, only when every line has been invoiced in full, and only
  * when nobody is still waiting on a credit. Closing an order with an open return
  * on it would file away the one screen showing that a supplier owes money -
  * which is exactly the thing the returns tab exists to stop happening quietly.
+ *
+ * The last argument is what splits the two answers. Every invoice on the order
+ * settled - approved, in the books or voided - and there is nothing left for
+ * anybody to read, so it closes. An invoice still sitting in draft, which is
+ * what a supplier filing their own through the portal leaves behind, and it goes
+ * to PENDING_CLOSE instead: everything has happened, and somebody here still has
+ * to agree that what the supplier says we owe is what we owe.
  */
-export function shouldAutoClose(
+export function closeOutcome(
   status: string,
   lines: InvoicedLine[],
   openReturns: number,
-): boolean {
-  if (status !== 'RECEIVED') return false
-  if (openReturns > 0) return false
-  return fullyInvoiced(lines)
+  unsettledBills: number,
+): CloseOutcome {
+  if (status !== 'RECEIVED') return null
+  if (openReturns > 0) return null
+  if (!fullyInvoiced(lines)) return null
+  return unsettledBills > 0 ? 'PENDING_CLOSE' : 'CLOSED'
 }

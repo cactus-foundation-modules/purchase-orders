@@ -779,17 +779,23 @@ export type StatusPatch = {
 }
 
 /** The single write behind every lifecycle transition. Callers log the audit line. */
+/**
+ * The one write behind every status change on an order.
+ *
+ * `userId` is null for a move nobody here made - an order going to PENDING_CLOSE
+ * because a supplier filed their invoice through their own link. The column that
+ * says who last touched it is then left exactly as it was rather than being
+ * overwritten with a null or, worse, with whoever happened to touch it last: a
+ * supplier is not a user of this site, and neither answer would be true.
+ */
 export async function setOrderStatus(
   id: string,
   to: PoStatus,
   patch: StatusPatch,
-  userId: string,
+  userId: string | null,
 ): Promise<void> {
-  const sets: Prisma.Sql[] = [
-    Prisma.sql`"status" = ${to}`,
-    Prisma.sql`"updated_by_user_id" = ${userId}`,
-    Prisma.sql`"updated_at" = now()`,
-  ]
+  const sets: Prisma.Sql[] = [Prisma.sql`"status" = ${to}`, Prisma.sql`"updated_at" = now()`]
+  if (userId) sets.push(Prisma.sql`"updated_by_user_id" = ${userId}`)
 
   if (to === 'APPROVED') {
     sets.push(Prisma.sql`"approved_by_user_id" = ${userId}`, Prisma.sql`"approved_at" = now()`)

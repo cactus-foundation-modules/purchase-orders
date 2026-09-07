@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
         carriageAmount: totals.carriageAmount,
         taxAmount: totals.taxAmount,
         total: totals.total,
+        statedTotal: orNull(body.statedTotal),
         lines: check.lines.map((line, index) => ({
           ...line,
           lineTotal: totals.lineTotals[index] ?? '0',

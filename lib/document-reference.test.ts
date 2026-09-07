@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  dateFromText,
+  dateInText,
   referenceFromFilename,
   referenceFromText,
+  totalFromText,
 } from '@/modules/purchase-orders/lib/document-reference'
 
 // The two documents these rules were written against are a real supplier's, so
@@ -95,5 +98,94 @@ describe('referenceFromFilename', () => {
 
   it('will not hand our own order number back to us', () => {
     expect(referenceFromFilename('acknowledgement PO-00012.pdf', 'PO-00012')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// The other two things worth reading off an invoice
+// ---------------------------------------------------------------------------
+
+describe('dateInText', () => {
+  const now = new Date('2026-09-07T00:00:00.000Z')
+
+  it('reads the British order first', () => {
+    expect(dateInText('08/09/2026', now)).toBe('2026-09-08')
+    expect(dateInText('12.08.2026', now)).toBe('2026-08-12')
+    expect(dateInText('12-08-26', now)).toBe('2026-08-12')
+  })
+
+  it('reads an ISO date as itself', () => {
+    expect(dateInText('2026-08-12', now)).toBe('2026-08-12')
+  })
+
+  it('falls back to the American order only when day-first cannot be read', () => {
+    // 09/25 cannot be the ninth of the twenty-fifth month.
+    expect(dateInText('09/25/2026', now)).toBe('2026-09-25')
+  })
+
+  it('reads a written month either way round', () => {
+    expect(dateInText('12 August 2026', now)).toBe('2026-08-12')
+    expect(dateInText('3rd Sept 2026', now)).toBe('2026-09-03')
+    expect(dateInText('August 12, 2026', now)).toBe('2026-08-12')
+  })
+
+  it('refuses a date that is not one', () => {
+    expect(dateInText('31/02/2026', now)).toBeNull()
+    expect(dateInText('12/08/1994', now)).toBeNull()
+    expect(dateInText('nothing here', now)).toBeNull()
+  })
+})
+
+describe('dateFromText', () => {
+  const now = new Date('2026-09-07T00:00:00.000Z')
+
+  it('takes the tax point ahead of anything else on the page', () => {
+    const text = ['Date 01/01/2026', 'Tax point 12/08/2026'].join('\n')
+    expect(dateFromText(text, now)).toBe('2026-08-12')
+  })
+
+  it('reads a value on the line below its label', () => {
+    expect(dateFromText('Invoice Date\n12/08/2026', now)).toBe('2026-08-12')
+  })
+
+  it('will not read a due date as an invoice date', () => {
+    expect(dateFromText('Due date 30/09/2026', now)).toBeNull()
+    expect(dateFromText('Date due 30/09/2026', now)).toBeNull()
+    expect(dateFromText('Delivery date 30/09/2026', now)).toBeNull()
+  })
+
+  it('prefers the invoice date to a delivery date further up the page', () => {
+    const text = ['Delivery date 01/09/2026', 'Invoice date 12/08/2026'].join('\n')
+    expect(dateFromText(text, now)).toBe('2026-08-12')
+  })
+})
+
+describe('totalFromText', () => {
+  it('takes the figure at the end of the label line', () => {
+    expect(totalFromText('Total due £1,234.56')).toBe('1234.56')
+    expect(totalFromText('Invoice total   987.00')).toBe('987.00')
+  })
+
+  it('reads the figure on the line below', () => {
+    expect(totalFromText('Amount due\n£450.00')).toBe('450.00')
+  })
+
+  it('prefers the total due to the subtotal and the VAT', () => {
+    const text = ['Subtotal 1,000.00', 'VAT 200.00', 'Total due 1,200.00'].join('\n')
+    expect(totalFromText(text)).toBe('1200.00')
+  })
+
+  it('will not read a net or a VAT line as the total', () => {
+    expect(totalFromText('Sub-total 1,000.00')).toBeNull()
+    expect(totalFromText('Total VAT 200.00')).toBeNull()
+    expect(totalFromText('Total excluding VAT 1,000.00')).toBeNull()
+  })
+
+  it('ignores a figure with no pence on it', () => {
+    expect(totalFromText('Total due 1200')).toBeNull()
+  })
+
+  it('says nothing where there is nothing to say', () => {
+    expect(totalFromText('Thank you for your business')).toBeNull()
   })
 })

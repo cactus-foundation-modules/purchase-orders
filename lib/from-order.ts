@@ -32,6 +32,7 @@ const LIVE_STATUSES: PoStatus[] = [
   'ACKNOWLEDGED',
   'PART_RECEIVED',
   'RECEIVED',
+  'PENDING_CLOSE',
   'CLOSED',
   'ON_HOLD',
 ]

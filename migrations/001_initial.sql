@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     "updated_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_orders_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "po_orders_number_unique" UNIQUE ("number"),
-    CONSTRAINT "po_orders_status_check" CHECK ("status" IN ('DRAFT','AWAITING_APPROVAL','APPROVED','SENT','ACKNOWLEDGED','PART_RECEIVED','RECEIVED','CLOSED','CANCELLED','ON_HOLD')),
+    CONSTRAINT "po_orders_status_check" CHECK ("status" IN ('DRAFT','AWAITING_APPROVAL','APPROVED','SENT','ACKNOWLEDGED','PART_RECEIVED','RECEIVED','PENDING_CLOSE','CLOSED','CANCELLED','ON_HOLD')),
     CONSTRAINT "po_orders_ship_to_kind_check" CHECK ("ship_to_kind" IN ('WAREHOUSE','CUSTOMER','OTHER')),
     CONSTRAINT "po_orders_source_kind_check" CHECK ("source_kind" IN ('MANUAL','FROM_ORDER','REORDER')),
     CONSTRAINT "po_orders_tax_mode_check" CHECK ("tax_mode" IN ('EXCLUSIVE','INCLUSIVE')),
@@ -373,6 +373,13 @@ CREATE TABLE IF NOT EXISTS "po_bills" (
     "carriage_amount"         NUMERIC(12,2) NOT NULL DEFAULT 0,
     "tax_amount"              NUMERIC(12,2) NOT NULL DEFAULT 0,
     "total"                   NUMERIC(12,2) NOT NULL DEFAULT 0,
+    -- What their own document says it comes to, kept apart from "total", which
+    -- is our arithmetic over the order's prices. The two disagreeing is a fact
+    -- worth a flag; overwriting one with the other is how it disappears. Also
+    -- in 011, for installs that predate it.
+    "stated_total"            NUMERIC(12,2),
+    -- Who filed it: somebody here, or a supplier through their own link.
+    "source"                  TEXT        NOT NULL DEFAULT 'ADMIN',
     "status"                  TEXT        NOT NULL DEFAULT 'DRAFT',
     "match_status"            TEXT        NOT NULL DEFAULT 'NOT_MATCHED',
     "variance"                JSONB       NOT NULL DEFAULT '[]',
@@ -390,6 +397,7 @@ CREATE TABLE IF NOT EXISTS "po_bills" (
     CONSTRAINT "po_bills_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "po_bills_status_check" CHECK ("status" IN ('DRAFT','QUERIED','APPROVED','POSTED','VOID')),
     CONSTRAINT "po_bills_match_status_check" CHECK ("match_status" IN ('NOT_MATCHED','MATCHED','VARIANCE')),
+    CONSTRAINT "po_bills_source_check" CHECK ("source" IN ('ADMIN','PORTAL')),
     CONSTRAINT "po_bills_order_fk" FOREIGN KEY ("order_id") REFERENCES "po_orders" ("id") ON DELETE SET NULL,
     CONSTRAINT "po_bills_supplier_fk" FOREIGN KEY ("supplier_id") REFERENCES "po_suppliers" ("id") ON DELETE RESTRICT
 );
@@ -467,7 +475,7 @@ CREATE TABLE IF NOT EXISTS "po_portal_events" (
     "ip_hash"    TEXT,
     "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_portal_events_pkey" PRIMARY KEY ("id"),
-    CONSTRAINT "po_portal_events_kind_check" CHECK ("kind" IN ('ACKNOWLEDGED','DATE_PROPOSED','SHORTAGE','MESSAGE','PROFORMA','DESPATCHED')),
+    CONSTRAINT "po_portal_events_kind_check" CHECK ("kind" IN ('ACKNOWLEDGED','DATE_PROPOSED','SHORTAGE','MESSAGE','PROFORMA','DESPATCHED','INVOICED')),
     CONSTRAINT "po_portal_events_token_fk" FOREIGN KEY ("token_id") REFERENCES "po_portal_tokens" ("id") ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS "po_portal_events_order_idx" ON "po_portal_events" ("order_id", "created_at");

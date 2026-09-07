@@ -33,12 +33,14 @@ import {
 // and a proforma is nearly always a PDF.
 
 /** Every file that can end up filed against an order, and where each one goes.
- *  A supplier may only send the first two - the proof of payment goes the other
- *  way, out of this building to them. */
-export const PO_FILE_KINDS = ['proforma', 'acknowledgement', 'payment-proof'] as const
+ *  The proof of payment is the one that goes the other way, out of this building
+ *  to them; the rest arrive. */
+export const PO_FILE_KINDS = ['proforma', 'acknowledgement', 'payment-proof', 'invoice'] as const
 export type PoFileKind = (typeof PO_FILE_KINDS)[number]
 
-/** The subset a supplier's own link accepts. */
+/** The subset the two-document upload endpoint accepts. Their invoice has a
+ *  route of its own - it writes a bill rather than filing a document - and so it
+ *  is deliberately not on this list. */
 export const PORTAL_FILE_KINDS = ['proforma', 'acknowledgement'] as const
 export type PortalFileKind = (typeof PORTAL_FILE_KINDS)[number]
 
@@ -46,6 +48,9 @@ const FOLDERS: Record<PoFileKind, string[]> = {
   proforma: ['Purchasing', 'Proforma invoices'],
   acknowledgement: ['Purchasing', 'Order acknowledgements'],
   'payment-proof': ['Purchasing', 'Proof of payment'],
+  // The same shelf the admin's own bill attachments land on, so a folder of
+  // supplier invoices is one folder however the invoice arrived.
+  invoice: ['Purchasing', 'Supplier invoices'],
 }
 
 /** Smaller than the bill attachment's cap. A proforma is a page or two of PDF;

@@ -3,13 +3,11 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import {
-  getBill, openReturnCount, orderInvoicedLines, refreshBillMatch, setBillApprover, setBillStatus,
+  getBill, refreshBillMatch, setBillApprover, setBillStatus,
 } from '@/modules/purchase-orders/lib/bills'
-import {
-  checkBillTransition, shouldAutoClose, type PoBillTransition,
-} from '@/modules/purchase-orders/lib/billing'
+import { checkBillTransition, type PoBillTransition } from '@/modules/purchase-orders/lib/billing'
 import { BillTransitionBody, orNull } from '@/modules/purchase-orders/lib/bill-body'
-import { getOrder, setOrderStatus } from '@/modules/purchase-orders/lib/db'
+import { settleOrder } from '@/modules/purchase-orders/lib/order-settle'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { sendBillToBooks, sendBillVoidToBooks } from '@/modules/purchase-orders/lib/book-handoff'
@@ -78,11 +76,17 @@ export async function POST(request: NextRequest, { params }: Params) {
   const books = await handOver(transition, check.to, id, bill.status, note)
 
   // An order that is fully delivered, fully invoiced and owed no credit has
-  // nothing left to happen to it. Closing it here saves somebody going round
+  // nothing left to happen to it. Settling it here saves somebody going round
   // afterwards ticking off orders that finished weeks ago - and it is refused
   // while a return is still open, because closing the order would file away the
   // one screen showing that a supplier owes money.
-  const autoClosed = check.to === 'APPROVED' ? await maybeCloseOrder(bill.orderId, user.id) : null
+  //
+  // Approving is not the only move that can finish an order off: voiding the one
+  // invoice nobody had approved settles the last of them just as surely, and an
+  // order left at "pending close" with nothing pending is exactly the tidying-up
+  // this is meant to save.
+  const settled =
+    check.to === 'APPROVED' || check.to === 'VOID' ? await settleOrder(bill.orderId, user.id) : null
 
   // Re-read rather than assume: the handoff is what promotes an approved bill to
   // "in the books", and the screen has to be told which of the two it ended on.
@@ -92,7 +96,8 @@ export async function POST(request: NextRequest, { params }: Params) {
     ok: true,
     status: after?.status ?? check.to,
     match,
-    orderClosed: autoClosed,
+    orderClosed: settled?.status === 'CLOSED' ? settled.number : null,
+    orderPendingClose: settled?.status === 'PENDING_CLOSE' ? settled.number : null,
     books,
   })
 }
@@ -121,26 +126,4 @@ async function handOver(
     return sendBillVoidToBooks(billId, note ?? 'Withdrawn in Purchase Orders.')
   }
   return null
-}
-
-async function maybeCloseOrder(orderId: string | null, userId: string): Promise<string | null> {
-  if (!orderId) return null
-  const order = await getOrder(orderId)
-  if (!order) return null
-
-  const [lines, openReturns] = await Promise.all([
-    orderInvoicedLines(orderId),
-    openReturnCount(orderId),
-  ])
-  if (!shouldAutoClose(order.status, lines, openReturns)) return null
-
-  await setOrderStatus(orderId, 'CLOSED', { closeReason: 'Everything delivered and invoiced.' }, userId)
-  await recordAudit(
-    'order',
-    orderId,
-    'order.auto-closed',
-    { reason: 'Everything delivered and invoiced.' },
-    userId,
-  )
-  return order.number
 }

@@ -22,6 +22,7 @@ export const PO_PORTAL_EVENT_KINDS = [
   'MESSAGE',
   'PROFORMA',
   'DESPATCHED',
+  'INVOICED',
 ] as const
 export type PoPortalEventKind = (typeof PO_PORTAL_EVENT_KINDS)[number]
 
@@ -32,6 +33,7 @@ export const PO_PORTAL_EVENT_LABELS: Record<PoPortalEventKind, string> = {
   MESSAGE: 'Left a message',
   PROFORMA: 'Sent their proforma',
   DESPATCHED: 'Despatched part of the order',
+  INVOICED: 'Sent their invoice',
 }
 
 /** The other half of the history: things WE did, said back to the supplier in
@@ -100,6 +102,10 @@ export type PoPortalLine = {
   /** What is left for them to send. Zero means the line is done as far as they
    *  are concerned, and the despatch form leaves it out. */
   qtyToSend: string
+  /** What is left for them to INVOICE, which is a different sum from what is
+   *  left to send: a supplier who has delivered the lot and billed half of it
+   *  has nothing to send and half an order to invoice. */
+  qtyToInvoice: string
   /** A conscious addition to an otherwise tight allow-list: the supplier cannot
    *  send a line on the right service without being told which one. What that
    *  service costs stays behind - it is on the document as carriage, and a
@@ -170,6 +176,10 @@ export type PoPortalView = {
    *  both are switches in Purchase Orders settings. */
   canUpload: boolean
   canDespatch: boolean
+  /** Whether they may send us their VAT invoice through the link. A switch of
+   *  its own, and off until an owner turns it on: it is the one thing on this
+   *  page that writes down what we owe somebody. */
+  canInvoice: boolean
   lines: PoPortalLine[]
   shipments: PoPortalShipment[]
   events: PoPortalEvent[]
@@ -304,6 +314,23 @@ export function portalEventSummary(kind: PoPortalEventKind, payload: Record<stri
       const opening = bits ? `Sent their proforma, ${bits}.` : 'Sent their proforma invoice.'
       return note ? `${opening} ${note}` : opening
     }
+    case 'INVOICED': {
+      const ref = typeof payload.ref === 'string' ? payload.ref.trim() : ''
+      const total = typeof payload.total === 'string' ? payload.total.trim() : ''
+      const lines = Array.isArray(payload.lines) ? payload.lines : []
+      const parts = lines
+        .map((line) => {
+          const row = (line ?? {}) as Record<string, unknown>
+          const what = typeof row.description === 'string' ? row.description : 'a line'
+          const qty = typeof row.qty === 'string' ? row.qty : ''
+          return qty ? `${qty} x ${what}` : what
+        })
+        .filter(Boolean)
+      const head = `Sent their invoice${ref ? ` ${ref}` : ''}${total ? ` for ${total}` : ''}`
+      const what = parts.length ? `, covering ${parts.join('; ')}` : ''
+      const opening = `${head}${what}.`
+      return note ? `${opening} ${note}` : opening
+    }
     case 'DESPATCHED': {
       const number = typeof payload.number === 'string' ? payload.number : ''
       const date = parsePortalDate(payload.date)
@@ -337,6 +364,10 @@ export type PortalViewExtras = {
   despatchedByLine?: Record<string, string>
   uploadsEnabled?: boolean
   despatchEnabled?: boolean
+  invoicesEnabled?: boolean
+  /** orderLineId -> how much of it has been invoiced already, across every bill
+   *  on the order, theirs and ours alike. */
+  invoicedByLine?: Record<string, string>
   /** What we did that the supplier can see: sends, reminders, deliveries booked
    *  in. Gathered on the server; everything else on our side of the history is
    *  worked out from the order row below. */
@@ -430,6 +461,7 @@ export function portalView(
   extras: PortalViewExtras = {},
 ): PoPortalView {
   const despatched = extras.despatchedByLine ?? {}
+  const invoiced = extras.invoicedByLine ?? {}
 
   const proforma: PoPortalProforma = {
     required: Boolean(order.proformaRequired),
@@ -466,12 +498,17 @@ export function portalView(
     acknowledgeBlockedReason,
     canUpload: extras.uploadsEnabled !== false,
     canDespatch: extras.despatchEnabled !== false,
+    // The one switch that is off unless somebody said otherwise, matching the
+    // setting's own default. Sending us an invoice is not something to start
+    // happening because a site updated.
+    canInvoice: extras.invoicesEnabled === true,
     lines: order.lines
       // A line given up on entirely is not one they can be short of.
       .filter((line) => Number(line.qty) - Number(line.qtyCancelled) > 0)
       .map((line) => {
         const qty = Number(line.qty) - Number(line.qtyCancelled)
         const sent = Number(despatched[line.id] ?? 0)
+        const billed = Number(invoiced[line.id] ?? 0)
         return {
           id: line.id,
           description: line.description,
@@ -481,6 +518,7 @@ export function portalView(
           expectedDate: line.expectedDate,
           qtyDespatched: tidyQty(sent),
           qtyToSend: tidyQty(Math.max(0, qty - sent)),
+          qtyToInvoice: tidyQty(Math.max(0, qty - billed)),
           serviceName: line.serviceName,
         }
       }),
@@ -528,7 +566,7 @@ export function qtyProblem(
   typed: string,
   left: string | number,
   what: { description: string; unit: string | null },
-  doing: 'short' | 'sending',
+  doing: 'short' | 'sending' | 'invoicing',
 ): string | null {
   const trimmed = typed.trim()
   if (trimmed === '') return null
@@ -536,14 +574,25 @@ export function qtyProblem(
   if (!Number.isFinite(want) || want <= 0) return 'Put a number in that is more than nothing.'
   const cap = qtyThousandths(left)
   if (!Number.isFinite(cap) || cap <= 0) {
-    return doing === 'short'
-      ? `There is none of ${what.description} left on this order to be short of.`
+    if (doing === 'short') return `There is none of ${what.description} left on this order to be short of.`
+    return doing === 'invoicing'
+      ? `${what.description} has already been invoiced in full.`
       : `There is none of ${what.description} left to send.`
   }
   if (want <= cap) return null
   const remaining = qtyWithUnit(left, what.unit)
-  return doing === 'short'
-    ? `Only ${remaining} of ${what.description} is left on this order, so you cannot be short of more than that.`
+  if (doing === 'short') {
+    return `Only ${remaining} of ${what.description} is left on this order, so you cannot be short of more than that.`
+  }
+  // Over-invoicing is REFUSED here and only here. The rule everywhere else in
+  // this module is that a supplier billing for more than turned up is a claim to
+  // be flagged rather than blocked - but that is about somebody in this building
+  // copying a claim off a piece of paper. This is a supplier writing the record
+  // themselves, unattended, and a link that lets them put down whatever figure
+  // they like is not one worth having. A genuine over-invoice comes in by email
+  // and gets entered at this end, where it is flagged in the ordinary way.
+  return doing === 'invoicing'
+    ? `Only ${remaining} of ${what.description} is left to invoice on this order, so you cannot invoice more than that.`
     : `Only ${remaining} of ${what.description} is left to send, so you cannot send more than that.`
 }
 
@@ -554,11 +603,12 @@ export function qtySaying(
   typed: string,
   left: string | number,
   unit: string | null,
-  doing: 'short' | 'sending',
+  doing: 'short' | 'sending' | 'invoicing',
 ): string | null {
   const want = Number(typed.trim())
   if (!typed.trim() || !Number.isFinite(want) || want <= 0) return null
   const cap = Number(left)
   const of = Number.isFinite(cap) && cap > 0 ? ` of ${qtyWithUnit(cap, unit)}` : ''
-  return doing === 'short' ? `${want}${of} out of stock` : `${want}${of} being sent`
+  if (doing === 'short') return `${want}${of} out of stock`
+  return doing === 'invoicing' ? `${want}${of} on this invoice` : `${want}${of} being sent`
 }

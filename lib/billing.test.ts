@@ -7,8 +7,9 @@ import {
   fullyInvoiced,
   isBillEditable,
   isMatchLive,
+  closeOutcome,
   matchBill,
-  shouldAutoClose,
+  totalMismatch,
   validateBillDrafts,
   varianceTotal,
   type BillLineDraft,
@@ -388,16 +389,95 @@ describe('closing an order once it is done', () => {
     expect(fullyInvoiced([{ qty: '4', qtyCancelled: '4', qtyReceived: '0', qtyInvoiced: '0' }])).toBe(false)
   })
 
-  it('closes a received, fully invoiced order with nothing outstanding', () => {
-    expect(shouldAutoClose('RECEIVED', [line], 0)).toBe(true)
+  it('closes a received, fully invoiced order whose invoices are all settled', () => {
+    expect(closeOutcome('RECEIVED', [line], 0, 0)).toBe('CLOSED')
+  })
+
+  it('holds an order at pending close while an invoice is still unread', () => {
+    expect(closeOutcome('RECEIVED', [line], 0, 1)).toBe('PENDING_CLOSE')
   })
 
   it('leaves an order alone while a supplier still owes a credit', () => {
-    expect(shouldAutoClose('RECEIVED', [line], 1)).toBe(false)
+    expect(closeOutcome('RECEIVED', [line], 1, 0)).toBeNull()
+    expect(closeOutcome('RECEIVED', [line], 1, 1)).toBeNull()
   })
 
-  it('never closes an order that is not fully delivered', () => {
-    expect(shouldAutoClose('PART_RECEIVED', [line], 0)).toBe(false)
-    expect(shouldAutoClose('ON_HOLD', [line], 0)).toBe(false)
+  it('never settles an order that is not fully delivered', () => {
+    expect(closeOutcome('PART_RECEIVED', [line], 0, 0)).toBeNull()
+    expect(closeOutcome('ON_HOLD', [line], 0, 0)).toBeNull()
+    expect(closeOutcome('PENDING_CLOSE', [line], 0, 0)).toBeNull()
+  })
+
+  it('never settles an order with a line still to invoice', () => {
+    expect(closeOutcome('RECEIVED', [{ ...line, qtyInvoiced: '9' }], 0, 0)).toBeNull()
+  })
+})
+
+describe('what the invoice says it comes to, against what it adds up to', () => {
+  it('says nothing when nobody has said what the document says', () => {
+    expect(totalMismatch(null, '120.00')).toBeNull()
+    expect(totalMismatch('', '120.00')).toBeNull()
+  })
+
+  it('lets a penny or two of rounding through', () => {
+    expect(totalMismatch('120.02', '120.00')).toBeNull()
+    expect(totalMismatch('119.98', '120.00')).toBeNull()
+  })
+
+  it('signs the difference the way the supplier meant it', () => {
+    expect(totalMismatch('130.00', '120.00')?.differencePence).toBe(1000)
+    expect(totalMismatch('110.00', '120.00')?.differencePence).toBe(-1000)
+  })
+
+  it('flags a stated total the lines do not reach', () => {
+    const order: MatchOrderLine = {
+      id: 'l1',
+      description: 'Oak desk',
+      qty: '10',
+      qtyCancelled: '0',
+      qtyReceived: '10',
+      qtyInvoicedElsewhere: '0',
+      unitCost: '100',
+    }
+    const match = matchBill(
+      true,
+      [order],
+      [{ orderLineId: 'l1', description: 'Oak desk', qty: '10', unitCost: '100' }],
+      { pricePercent: 2, quantityPercent: 0 },
+      { stated: '1250.00', computed: '1000.00' },
+    )
+    expect(match.status).toBe('VARIANCE')
+    const flag = match.flags.find((f) => f.kind === 'TOTAL')
+    expect(flag?.orderLineId).toBeNull()
+    expect(flag?.amount).toBe('250.00')
+  })
+
+  it('leaves a matching bill matched when the totals agree', () => {
+    const order: MatchOrderLine = {
+      id: 'l1',
+      description: 'Oak desk',
+      qty: '10',
+      qtyCancelled: '0',
+      qtyReceived: '10',
+      qtyInvoicedElsewhere: '0',
+      unitCost: '100',
+    }
+    const match = matchBill(
+      true,
+      [order],
+      [{ orderLineId: 'l1', description: 'Oak desk', qty: '10', unitCost: '100' }],
+      { pricePercent: 2, quantityPercent: 0 },
+      { stated: '1000.00', computed: '1000.00' },
+    )
+    expect(match.status).toBe('MATCHED')
+  })
+
+  it('never puts a flag on a bill with no order behind it', () => {
+    const match = matchBill(false, [], [], { pricePercent: 2, quantityPercent: 0 }, {
+      stated: '999.00',
+      computed: '1.00',
+    })
+    expect(match.status).toBe('NOT_MATCHED')
+    expect(match.flags).toEqual([])
   })
 })

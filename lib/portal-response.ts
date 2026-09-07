@@ -1,4 +1,5 @@
 import { getOrder, supplierPortalNote } from './db'
+import { listBillableLines } from './bills'
 import { getPoConfigCached } from './config'
 import { listOursPortalEvents, listPortalEvents } from './portal'
 import { despatchedTotalsByLine, listShipmentsForOrder } from './shipments'
@@ -36,6 +37,16 @@ export async function buildPortalView(orderId: string): Promise<PoPortalView | n
     supplierPortalNote(orderId),
   ])
 
+  // What has already been billed, line by line, and only where the supplier can
+  // do anything with the answer. A site with the invoice switch off gets no
+  // extra query for a form nobody will see.
+  const invoicedByLine: Record<string, string> = {}
+  if (config.portalInvoicesEnabled) {
+    for (const line of await listBillableLines(orderId)) {
+      invoicedByLine[line.orderLineId] = line.qtyInvoiced
+    }
+  }
+
   // Their own drops, money-free and without the internal notes anybody here has
   // added to them.
   const theirs: PoPortalShipment[] = shipments.map((shipment) => ({
@@ -62,6 +73,10 @@ export async function buildPortalView(orderId: string): Promise<PoPortalView | n
       despatchedByLine,
       uploadsEnabled: config.portalUploadsEnabled,
       despatchEnabled: config.portalDespatchEnabled,
+      // Both switches, because an invoice arrives as a file: a site that has
+      // turned uploads off cannot take one however the invoice switch is set.
+      invoicesEnabled: config.portalInvoicesEnabled && config.portalUploadsEnabled,
+      invoicedByLine,
     },
   )
 }

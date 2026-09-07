@@ -109,3 +109,51 @@ export const PortalUploadFields = z.object({
 })
 
 export type PortalUploadFieldsInput = z.infer<typeof PortalUploadFields>
+
+/**
+ * The fields that ride alongside a supplier's own VAT invoice.
+ *
+ * Its own schema rather than another branch of the upload's, because the two
+ * have nothing in common past the token: one files a document against the order,
+ * this one writes down what we owe somebody.
+ *
+ * Everything except the token and the lines is optional, and deliberately: the
+ * number, the date and the total are read off the document where the document
+ * can be read, and a supplier who has to type all three is a supplier who
+ * emails it instead. Where nothing can be read, the panel asks for the number
+ * and nothing else.
+ */
+export const PortalInvoiceFields = z.object({
+  token: TOKEN,
+  /** Their invoice number. Blank falls back to whatever the document says. */
+  ref: z.string().max(120).optional(),
+  /** The invoice date as printed. Blank falls back to the document, then today. */
+  date: DAY.optional(),
+  /** What their invoice says it comes to, including VAT. Never used as a
+   *  figure - it is compared against our own arithmetic over the order's
+   *  prices, and where the two disagree the bill says so. */
+  total: z
+    .string()
+    .regex(/^\d{1,10}(\.\d{1,2})?$/, 'That total does not look right.')
+    .optional(),
+  lines: z
+    .array(z.object({ lineId: LINE_ID, qty: QTY }))
+    .min(1, 'Tick what this invoice covers.')
+    .max(200),
+  note: NOTE,
+})
+
+export type PortalInvoiceFieldsInput = z.infer<typeof PortalInvoiceFields>
+
+/** The lines of a multipart invoice form, which arrive as one JSON string
+ *  because a form field cannot carry an array. Anything unreadable comes back as
+ *  an empty list, which the schema above then refuses in plain English. */
+export function portalInvoiceLinesField(raw: unknown): unknown {
+  if (typeof raw !== 'string' || raw.trim() === '') return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}

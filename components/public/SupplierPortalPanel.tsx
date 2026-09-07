@@ -37,7 +37,8 @@ import { webAddress } from '@/modules/purchase-orders/lib/web-address'
 const ENDPOINT = '/api/m/purchase-orders/public/portal'
 
 /** Which dialog is up, if any. One at a time, always. */
-type Job = 'confirm' | 'proforma' | 'delay' | 'stock' | 'despatch' | 'message' | 'slips' | 'history'
+type Job =
+  | 'confirm' | 'proforma' | 'invoice' | 'delay' | 'stock' | 'despatch' | 'message' | 'slips' | 'history'
 
 function when(value: string | null): string {
   if (!value) return ''
@@ -97,6 +98,13 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
 
   const [ackRef, setAckRef] = useState('')
   const ackFile = useRef<HTMLInputElement | null>(null)
+
+  const [invoiceRef, setInvoiceRef] = useState('')
+  const [invoiceDate, setInvoiceDate] = useState('')
+  const [invoiceTotal, setInvoiceTotal] = useState('')
+  const [invoiceQty, setInvoiceQty] = useState<Record<string, string>>({})
+  const [invoiceNote, setInvoiceNote] = useState('')
+  const invoiceFile = useRef<HTMLInputElement | null>(null)
 
   const [despatchDate, setDespatchDate] = useState(today())
   const [carrier, setCarrier] = useState('')
@@ -194,6 +202,63 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
     }
   }
 
+  /**
+   * Their VAT invoice, with the lines it covers.
+   *
+   * Its own endpoint rather than a third kind on the upload one, because it does
+   * a different job: the others file a document against the order, this one
+   * writes down what we owe them. The prices are never sent - they are whatever
+   * the order says, at this end - which is why there is no money on this form
+   * beyond the one figure printed on their own invoice.
+   */
+  async function sendInvoice(lines: { lineId: string; qty: string }[]): Promise<boolean> {
+    if (busy) return false
+    const file = invoiceFile.current?.files?.[0]
+    if (!file) {
+      setError('Attach your invoice first.')
+      return false
+    }
+    const refusal = preflightFileError(file)
+    if (refusal) {
+      setError(refusal)
+      return false
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      const form = new FormData()
+      form.set('token', token)
+      form.set('lines', JSON.stringify(lines))
+      if (invoiceRef.trim()) form.set('ref', invoiceRef.trim())
+      if (invoiceDate.trim()) form.set('date', invoiceDate.trim())
+      if (invoiceTotal.trim()) form.set('total', invoiceTotal.trim())
+      if (invoiceNote.trim()) form.set('note', invoiceNote.trim())
+      form.set('file', file)
+
+      const res = await fetch(`${ENDPOINT}/invoice`, { method: 'POST', body: form })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error ?? 'That did not go through. Try again in a moment.')
+        return false
+      }
+      if (data.view) setView(data.view as PoPortalView)
+      setDone(
+        data.pendingClose
+          ? 'Thank you - we have your invoice, and that is everything on this order. It is with us to check.'
+          : 'Thank you - we have your invoice. It is with us to check.',
+      )
+      setJob(null)
+      if (invoiceFile.current) invoiceFile.current.value = ''
+      return true
+    } catch {
+      setError('That did not go through. Try again in a moment.')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const dateLines = Object.entries(dates)
     .map(([lineId, date]) => ({ lineId, date: date.trim() }))
     .filter((row) => /^\d{4}-\d{2}-\d{2}$/.test(row.date))
@@ -230,6 +295,21 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
     .filter((row) => row.qty !== '' && Number(row.qty) > 0)
   const despatchTroubles = troubles(despatchQty, 'sending')
 
+  // What is left to INVOICE, which is a different sum from what is left to
+  // send: a supplier who has delivered the lot and billed half of it has
+  // nothing to send and half an order to invoice.
+  const stillToInvoice = view.lines.filter((line) => Number(line.qtyToInvoice) > 0)
+  const invoiceLines = Object.entries(invoiceQty)
+    .map(([lineId, qty]) => ({ lineId, qty: qty.trim() }))
+    .filter((row) => row.qty !== '' && Number(row.qty) > 0)
+  const invoiceTroubles = Object.entries(invoiceQty)
+    .map(([lineId, qty]) => {
+      const line = byLineId.get(lineId)
+      if (!line) return null
+      return qtyProblem(qty, line.qtyToInvoice, { description: line.description, unit: line.unit }, 'invoicing')
+    })
+    .filter((problem): problem is string => problem !== null)
+
   const waitingOnProforma = view.proforma.required && !view.proforma.paid
   const canConfirm = view.open && !view.acknowledged && view.canAcknowledge
   const canSendProforma = view.open && waitingOnProforma && view.canUpload
@@ -237,6 +317,9 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
   // Nothing outstanding is nothing to be short of, so the button goes with it
   // rather than opening a dialog with an empty list in it.
   const canReportShortage = view.open && stillToSend.length > 0
+  // Nothing left to invoice is a button that does not appear, rather than a
+  // dialog with an empty list in it.
+  const canSendInvoice = view.open && view.canInvoice && stillToInvoice.length > 0
 
   return (
     // data-cactus-unstyled is what stops the site's own button chrome landing on
@@ -365,6 +448,13 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
             name="Record a despatch"
             hint="Say what has left you and we will give you a packing slip for the box"
             onClick={() => open('despatch')}
+          />
+        )}
+        {canSendInvoice && (
+          <Action
+            name="Send your invoice"
+            hint="Attach your VAT invoice and tick what it covers"
+            onClick={() => open('invoice')}
           />
         )}
         {view.open && (
@@ -525,6 +615,191 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                 maxLength={13}
               />
             </div>
+          </div>
+        </PortalDialog>
+      )}
+
+      {/* -------------------------------------------------------------------
+          Their VAT invoice, and what it covers.
+
+          The shortest form on this page that does the most, deliberately. They
+          attach the document and tick the lines; the number, the date and the
+          total are read off the file at the other end, and the three boxes are
+          there for the day it cannot be read. No prices anywhere: what a line
+          costs was settled on the order, and a form that let a supplier retype
+          it would be a form for repricing an order after the fact.
+          ------------------------------------------------------------------- */}
+      {job === 'invoice' && (
+        <PortalDialog
+          title="Send your invoice"
+          intro="Attach your VAT invoice and tick what it covers. We will read the number, the date and the total off it where we can, and somebody here will check it against the order."
+          onClose={() => setJob(null)}
+          footer={
+            <button
+              type="button"
+              className="pop-btn"
+              disabled={busy || invoiceLines.length === 0 || invoiceTroubles.length > 0}
+              onClick={() => {
+                void sendInvoice(invoiceLines).then((ok) => {
+                  if (!ok) return
+                  setInvoiceQty({})
+                  setInvoiceRef('')
+                  setInvoiceDate('')
+                  setInvoiceTotal('')
+                  setInvoiceNote('')
+                })
+              }}
+            >
+              Send it
+            </button>
+          }
+        >
+          <DialogError error={error} />
+          <div className="pop-field">
+            <label className="pop-label" htmlFor="pop-invoice-file">
+              Your invoice
+            </label>
+            <PortalDrop
+              id="pop-invoice-file"
+              inputRef={invoiceFile}
+              accept=".pdf,.jpg,.jpeg,.png,.webp"
+              say="Drop your invoice here"
+              hint="or choose a file - PDF, JPEG, PNG or WebP"
+            />
+          </div>
+
+          <div className="pop-row">
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-invoice-ref">
+                Your invoice number (optional)
+              </label>
+              <input
+                id="pop-invoice-ref"
+                className="pop-input"
+                value={invoiceRef}
+                onChange={(e) => setInvoiceRef(e.target.value)}
+                maxLength={120}
+              />
+              <p className="pop-hint">Only needed if we cannot find it on the file.</p>
+            </div>
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-invoice-date">
+                Invoice date (optional)
+              </label>
+              <input
+                id="pop-invoice-date"
+                type="date"
+                className="pop-input"
+                value={invoiceDate}
+                onChange={(e) => setInvoiceDate(e.target.value)}
+              />
+            </div>
+            <div className="pop-field">
+              <label className="pop-label" htmlFor="pop-invoice-total">
+                Total including VAT (optional)
+              </label>
+              <input
+                id="pop-invoice-total"
+                className="pop-input"
+                inputMode="decimal"
+                value={invoiceTotal}
+                onChange={(e) => setInvoiceTotal(e.target.value)}
+                maxLength={13}
+              />
+            </div>
+          </div>
+
+          {/* One invoice for the whole lot is far commoner than one for three
+              lines of eleven, so there is a button for it. */}
+          <div className="pop-tools">
+            <button
+              type="button"
+              className="pop-btn pop-btn--quiet pop-btn--small"
+              onClick={() =>
+                setInvoiceQty(Object.fromEntries(stillToInvoice.map((line) => [line.id, line.qtyToInvoice])))
+              }
+            >
+              This invoice covers all of it
+            </button>
+            {invoiceLines.length > 0 && (
+              <button
+                type="button"
+                className="pop-btn pop-btn--quiet pop-btn--small"
+                onClick={() => setInvoiceQty({})}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+
+          <ul className="pop-lines">
+            {stillToInvoice.map((line) => {
+              const on = invoiceQty[line.id] !== undefined
+              const typed = invoiceQty[line.id] ?? ''
+              const problem = qtyProblem(
+                typed,
+                line.qtyToInvoice,
+                { description: line.description, unit: line.unit },
+                'invoicing',
+              )
+              return (
+                <PortalLine
+                  key={line.id}
+                  tick={
+                    <input
+                      type="checkbox"
+                      checked={on}
+                      onChange={(e) =>
+                        setInvoiceQty((current) => {
+                          const next = { ...current }
+                          if (e.target.checked) next[line.id] = line.qtyToInvoice
+                          else delete next[line.id]
+                          return next
+                        })
+                      }
+                    />
+                  }
+                  name={line.description}
+                  meta={
+                    <>
+                      {withUnit(line.qtyToInvoice, line.unit)} left to invoice
+                      {line.supplierSku ? ` · your code ${line.supplierSku}` : ''}
+                      {problem ? ` · ${problem}` : ''}
+                      {!problem && qtySaying(typed, line.qtyToInvoice, line.unit, 'invoicing')
+                        ? ` · ${qtySaying(typed, line.qtyToInvoice, line.unit, 'invoicing')}`
+                        : ''}
+                    </>
+                  }
+                  control={
+                    on ? (
+                      <input
+                        className="pop-input pop-input--qty"
+                        inputMode="decimal"
+                        value={typed}
+                        onChange={(e) =>
+                          setInvoiceQty((current) => ({ ...current, [line.id]: e.target.value }))
+                        }
+                        aria-label={`How much of ${line.description} this invoice covers`}
+                      />
+                    ) : undefined
+                  }
+                />
+              )
+            })}
+          </ul>
+
+          <div className="pop-field">
+            <label className="pop-label" htmlFor="pop-invoice-note">
+              Anything else about it (optional)
+            </label>
+            <textarea
+              id="pop-invoice-note"
+              className="pop-input"
+              rows={2}
+              value={invoiceNote}
+              onChange={(e) => setInvoiceNote(e.target.value)}
+              maxLength={500}
+            />
           </div>
         </PortalDialog>
       )}
@@ -726,13 +1001,21 @@ export function SupplierPortalPanel({ view: initial, token }: Props) {
                     trackingUrl: webAddress(trackingUrl) ?? (trackingUrl.trim() || undefined),
                     note: despatchNote.trim() || undefined,
                   },
-                  'Thank you - your packing slip is ready under Packing slips.',
+                  'Thank you - here is the packing slip for it. Print it and put it in the box.',
                 ).then((ok) => {
                   if (!ok) return
                   setDespatchQty({})
                   setTrackingRef('')
                   setTrackingUrl('')
                   setDespatchNote('')
+                  // Straight on to the slip. Telling us what has gone and
+                  // printing the paper that goes in the box are one job in a
+                  // warehouse, and finishing the first of them at a screen that
+                  // says "it is ready under Packing slips" is asking somebody
+                  // holding a roll of tape to go and find a button. `setJob`
+                  // rather than `open`, which would wipe the thank-you it is
+                  // opening underneath.
+                  setJob('slips')
                 })
               }}
             >

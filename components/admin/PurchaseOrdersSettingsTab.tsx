@@ -477,6 +477,22 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
           />
           Let suppliers say what they have sent, and take away a packing slip for each delivery
         </label>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginTop: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={config.portalInvoicesEnabled}
+            disabled={!config.portalEnabled || !config.portalUploadsEnabled}
+            onChange={(e) => set('portalInvoicesEnabled', e.target.checked)}
+          />
+          Let suppliers send you their VAT invoice through the link, ticking off what it covers
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          The invoice switch is the one to think hardest about, which is why it starts off. Everything else a
+          supplier can do through that link is a message or a document; this one writes down what you owe them.
+          Nothing is ever approved and nothing reaches your books on their say-so - what arrives is a draft with
+          their invoice attached, priced at what your order said, for you to read. Once they have invoiced the lot
+          the order goes to Pending close, and it stays there until you have approved every invoice on it.
+        </p>
         <p style={{ ...muted, marginTop: '0.5rem' }}>
           With the link on, every order you send carries one of its own. The supplier can read that order, download it,
           accept it, offer a date line by line or say something is short - and change none of it. Each link is listed

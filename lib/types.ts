@@ -12,6 +12,7 @@ export const PO_STATUSES = [
   'ACKNOWLEDGED',
   'PART_RECEIVED',
   'RECEIVED',
+  'PENDING_CLOSE',
   'CLOSED',
   'CANCELLED',
   'ON_HOLD',
@@ -26,6 +27,7 @@ export const PO_STATUS_LABELS: Record<PoStatus, string> = {
   ACKNOWLEDGED: 'Acknowledged',
   PART_RECEIVED: 'Part received',
   RECEIVED: 'Received',
+  PENDING_CLOSE: 'Pending close',
   CLOSED: 'Closed',
   CANCELLED: 'Cancelled',
   ON_HOLD: 'On hold',
@@ -550,6 +552,12 @@ export const PO_BILL_STATUS_LABELS: Record<PoBillStatus, string> = {
   VOID: 'Void',
 }
 
+/** Who filed a bill. A draft that arrived through a supplier's own link, with
+ *  nobody's login behind it, is not the same object as one somebody here typed -
+ *  and the screen says so before anybody approves it. */
+export const BILL_SOURCES = ['ADMIN', 'PORTAL'] as const
+export type PoBillSource = (typeof BILL_SOURCES)[number]
+
 export const MATCH_STATUSES = ['NOT_MATCHED', 'MATCHED', 'VARIANCE'] as const
 export type PoMatchStatus = (typeof MATCH_STATUSES)[number]
 
@@ -559,8 +567,10 @@ export const PO_MATCH_STATUS_LABELS: Record<PoMatchStatus, string> = {
   VARIANCE: 'Does not agree',
 }
 
-/** What kind of disagreement one flag is about. */
-export const BILL_VARIANCE_KINDS = ['PRICE', 'QUANTITY', 'NOT_RECEIVED', 'NOT_ORDERED'] as const
+/** What kind of disagreement one flag is about. TOTAL is the odd one out: it is
+ *  about the document as a whole rather than any line of it - what the supplier
+ *  says the invoice comes to, against what these lines at these prices come to. */
+export const BILL_VARIANCE_KINDS = ['PRICE', 'QUANTITY', 'NOT_RECEIVED', 'NOT_ORDERED', 'TOTAL'] as const
 export type PoBillVarianceKind = (typeof BILL_VARIANCE_KINDS)[number]
 
 /** One thing the three-way match does not like. Stored on the bill as JSON, so
@@ -600,6 +610,10 @@ export type PoBillSummary = {
   dueDate: string | null
   currency: string
   total: string
+  /** What their own document says it comes to, where anybody has said. Null on a
+   *  bill typed in off a phone call, which has no document to read. */
+  statedTotal: string | null
+  source: PoBillSource
   status: PoBillStatus
   matchStatus: PoMatchStatus
   varianceCount: number

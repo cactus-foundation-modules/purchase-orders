@@ -9,6 +9,7 @@ import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { isReceivable, overReceiptFlags } from '@/modules/purchase-orders/lib/receiving'
 import { ReceiptBody, toReceiptInput } from '@/modules/purchase-orders/lib/receipt-body'
 import { applyReceiptStock, stockBlockedReason } from '@/modules/purchase-orders/lib/inventory'
+import { settleOrder } from '@/modules/purchase-orders/lib/order-settle'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
@@ -85,6 +86,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   const receiptId = await createReceipt(number, input, user.id)
   const status = await syncOrderReceiptStatus(id, user.id)
 
+  // The delivery that completes an order is as much the last thing to happen to
+  // it as the invoice that completes it, and on an order the invoices got to
+  // first this is the only moment anything notices. Never fatal: the delivery is
+  // recorded either way, and an order left at "received" is a tidying job rather
+  // than a lost delivery note.
+  const settled = await settleOrder(id, user.id)
+
   await recordAudit(
     'order',
     id,
@@ -94,7 +102,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       lines: input.lines.length,
       deliveryNote: input.deliveryNoteRef,
       overReceived: flags.length > 0 ? flags.map((f) => f.description) : undefined,
-      status: status ?? undefined,
+      status: settled?.status ?? status ?? undefined,
     },
     user.id,
   )
@@ -121,5 +129,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     }
   }
 
-  return NextResponse.json({ id: receiptId, number, status, overReceipt: flags, stock })
+  return NextResponse.json({
+    id: receiptId,
+    number,
+    status: settled?.status ?? status,
+    settled,
+    overReceipt: flags,
+    stock,
+  })
 }

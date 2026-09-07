@@ -4,7 +4,8 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, getSupplier, setOrderStatus } from '@/modules/purchase-orders/lib/db'
-import { canSend, checkTransition, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import { canSend, checkTransition, closeBlockedReason, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import { unsettledBillCount } from '@/modules/purchase-orders/lib/bills'
 import { sendOrderCancelled, supplierRecipients } from '@/modules/purchase-orders/lib/email'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
@@ -48,6 +49,17 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (transition === 'send') {
     const gate = canSend(order.status, order.approvalRequired)
     if (!gate.ok) return errorResponse(gate.reason, 409)
+  }
+
+  // An order sitting at "pending close" got there because a SUPPLIER said they
+  // had invoiced the lot, and the invoices behind it are drafts nobody here has
+  // read. Closing on their say-so is the exact thing that status exists to
+  // prevent, so the button waits until every one of them has been approved or
+  // voided. Nothing else on the way to CLOSED is gated: those are all somebody
+  // in this building deciding, which is theirs to decide.
+  if (transition === 'close') {
+    const blocked = closeBlockedReason(order.status, await unsettledBillCount(id))
+    if (blocked) return errorResponse(blocked, 409)
   }
 
   await setOrderStatus(

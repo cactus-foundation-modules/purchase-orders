@@ -43,6 +43,11 @@ export const BillBody = z.object({
   carriageTaxRatePercent: Percent.default('0'),
   /** The VAT figure on their invoice, where it differs from ours. Blank uses ours. */
   taxAmount: Amount.nullable().default(null),
+  /** What their invoice says it comes to, as printed on it - read off the
+   *  document where it could be read, typed off it where it could not. Never
+   *  used as a figure: it is compared against our own arithmetic, and the two
+   *  disagreeing is what the bill says rather than either of them winning. */
+  statedTotal: Amount.nullable().default(null),
   lines: z.array(BillLineBody).min(1, 'A bill needs at least one line'),
 })
 

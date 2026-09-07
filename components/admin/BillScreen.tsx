@@ -11,7 +11,8 @@ import {
   PO_VAT_RATE_CODES, PO_VAT_RATE_LABELS, PO_VAT_TREATMENTS, PO_VAT_TREATMENT_LABELS,
 } from '@/modules/purchase-orders/lib/types'
 import {
-  billTotals, dueDateFor, isBillEditable, isBillPostable, varianceTotal, type PoBillTransition,
+  billTotals, dueDateFor, isBillEditable, isBillPostable, totalMismatch, varianceTotal,
+  type PoBillTransition,
 } from '@/modules/purchase-orders/lib/billing'
 import { readBooksOutcome } from '@/modules/purchase-orders/lib/books-outcome'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
@@ -31,6 +32,12 @@ import {
 
 type LineDraft = {
   key: string
+  /** Whether this line is ON the invoice. Every line of the order is drawn
+   *  whether it is ticked or not, so a part-invoice is a matter of ticking three
+   *  of eleven rather than deleting eight - and the eight are still there to
+   *  tick when the second invoice turns up. A charge that is not on the order at
+   *  all is always ticked: it exists because somebody added it. */
+  included: boolean
   orderLineId: string | null
   description: string
   qty: string
@@ -70,6 +77,7 @@ function trimQty(value: number | string): string {
 function blankLine(): LineDraft {
   return {
     key: nextKey(),
+    included: true,
     orderLineId: null,
     description: '',
     qty: '1',
@@ -105,6 +113,10 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
   const [carriage, setCarriage] = useState('0')
   const [carriageTax, setCarriageTax] = useState('0')
   const [taxOverride, setTaxOverride] = useState('')
+  /** What their document says it comes to, read off the PDF where it could be
+   *  read. Never used as a figure: it sits beside our own arithmetic and the two
+   *  disagreeing is the thing worth saying. */
+  const [statedTotal, setStatedTotal] = useState('')
   const [lines, setLines] = useState<LineDraft[]>([])
   const [termsDays, setTermsDays] = useState<number | null>(null)
 
@@ -116,6 +128,12 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
   const [message, setMessage] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  /** On a NEW bill the file cannot be filed yet - there is nothing to file it
+   *  against - so it is held here, read for what is on it, and uploaded the
+   *  moment the bill exists. */
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanned, setScanned] = useState<string | null>(null)
 
   // Written as promise chains rather than an async body called from the effect:
   // every setState lands in a callback, which is what keeps the load out of the
@@ -170,7 +188,8 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
           setFxRate(b.fxRate)
           setCarriage(b.carriageAmount)
           setTaxOverride(b.taxAmount)
-          setLines(linesFromBill(b))
+          setStatedTotal(b.statedTotal ?? '')
+          setLines(linesFromBill(b, data.billable ?? []))
           setEditing(false)
         }
         setLoaded(true)
@@ -206,16 +225,37 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
     setDueDate((current) => current || dueDateFor(value, termsDays) || '')
   }
 
+  // Worked out here rather than below the loading guard, because the totals and
+  // the "these do not agree" line both need to know which figures they are
+  // looking at - the ones being typed, or the ones already saved.
+  const editable = canBills && (isNew || (bill !== null && isBillEditable(bill.status) && editing))
+  const canEditNow = canBills && bill !== null && isBillEditable(bill.status) && !editing
+
+  /** What is actually on the invoice: ticked, and with a figure on it. */
+  const onTheBill = useMemo(() => lines.filter((l) => l.included && Number(l.qty) > 0), [lines])
+
   const totals = useMemo(
     () =>
       billTotals({
-        lines: lines.filter((l) => Number(l.qty) > 0),
+        lines: onTheBill,
         carriageAmount: carriage,
         carriageTaxRatePercent: carriageTax,
         taxOverride: taxOverride || null,
       }),
-    [lines, carriage, carriageTax, taxOverride],
+    [onTheBill, carriage, carriageTax, taxOverride],
   )
+
+  // Their figure against ours, said the moment either changes rather than after
+  // a save. The same function the match uses, so the screen and the bill cannot
+  // end up with two opinions about whether these agree.
+  const mismatch = useMemo(
+    () => totalMismatch(statedTotal, editable ? totals.total : (bill?.total ?? '0')),
+    [statedTotal, totals.total, bill, editable],
+  )
+
+  /** Every order line that is ticked. The header tick is drawn from this. */
+  const orderLines = useMemo(() => lines.filter((l) => l.orderLineId !== null), [lines])
+  const tickedCount = orderLines.filter((l) => l.included).length
 
   const billableById = useMemo(
     () => new Map(billable.map((l) => [l.orderLineId, l])),
@@ -241,8 +281,8 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
       carriageAmount: carriage || '0',
       carriageTaxRatePercent: carriageTax || '0',
       taxAmount: taxOverride || null,
-      lines: lines
-        .filter((l) => Number(l.qty) > 0)
+      statedTotal: statedTotal.trim() || null,
+      lines: onTheBill
         .map((l) => ({
           orderLineId: l.orderLineId,
           description: l.description,
@@ -269,6 +309,11 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
     }
     const data = await res.json()
     if (isNew) {
+      // The file was read when it was picked but could not be filed - there was
+      // no bill to file it against. Now there is. A failure here is worth saying
+      // and nothing more: the invoice is entered, and the file can be attached
+      // again from the bill's own screen.
+      if (pendingFile) await attach(String(data.id), pendingFile)
       router.push(`${base}/bills/${data.id}`)
       return
     }
@@ -325,6 +370,19 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
     router.refresh()
   }
 
+  /** File the bytes against a bill that exists. Returns true when they landed. */
+  async function attach(id: string, file: File): Promise<boolean> {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch(`/api/m/purchase-orders/admin/bills/${id}/attachment`, {
+      method: 'POST',
+      body: form,
+    })
+    if (res.ok) return true
+    setError((await res.json().catch(() => ({}))).error ?? 'That file was not saved.')
+    return false
+  }
+
   async function upload(file: File) {
     setError(null)
     setMessage(null)
@@ -334,20 +392,71 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
       return
     }
     setBusy(true)
-    const form = new FormData()
-    form.append('file', file)
-    const res = await fetch(`/api/m/purchase-orders/admin/bills/${billId}/attachment`, {
-      method: 'POST',
-      body: form,
-    })
+    const ok = await attach(String(billId), file)
     setBusy(false)
-    if (!res.ok) {
-      setError((await res.json().catch(() => ({}))).error ?? 'That file was not saved.')
-      return
-    }
+    if (!ok) return
     setMessage('Their invoice is attached.')
     if (fileRef.current) fileRef.current.value = ''
     await load()
+  }
+
+  /**
+   * A file picked on a NEW bill: read for what is on it, held for later.
+   *
+   * The reading is a guess and is treated as one everywhere. It only ever fills
+   * a box that is still empty - a number somebody has already typed is never
+   * overtyped by a PDF - and every one of them stays editable. A file with no
+   * text in it, which is what a photographed invoice is, simply answers nothing
+   * and leaves all three boxes exactly as empty as they were.
+   */
+  async function scan(file: File) {
+    setError(null)
+    setScanned(null)
+    const problem = preflightFileError(file)
+    if (problem) {
+      setError(problem)
+      setPendingFile(null)
+      if (fileRef.current) fileRef.current.value = ''
+      return
+    }
+    setPendingFile(file)
+    setScanning(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      if (order?.number) form.append('orderNumber', order.number)
+      const res = await fetch('/api/m/purchase-orders/admin/bills/scan', { method: 'POST', body: form })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        // The file is still going up with the bill; only the reading failed.
+        setScanned('We could not read that one. Fill the boxes in yourself and it will still be filed.')
+        return
+      }
+      const guess = (data.guess ?? {}) as { reference?: string | null; date?: string | null; total?: string | null }
+      const filled: string[] = []
+      if (guess.reference && !invoiceNumber.trim()) {
+        setInvoiceNumber(guess.reference)
+        filled.push('their invoice number')
+      }
+      if (guess.date) {
+        setInvoiceDate(guess.date)
+        setDueDate(dueDateFor(guess.date, termsDays) ?? '')
+        filled.push('the invoice date')
+      }
+      if (guess.total && !statedTotal.trim()) {
+        setStatedTotal(guess.total)
+        filled.push('the total')
+      }
+      setScanned(
+        filled.length > 0
+          ? `Read ${filled.join(', ')} off the file. Check it against the document - it is a guess.`
+          : 'Nothing could be read off that file, so the boxes are yours to fill in. It will still be filed.',
+      )
+    } catch {
+      setScanned('We could not read that one. Fill the boxes in yourself and it will still be filed.')
+    } finally {
+      setScanning(false)
+    }
   }
 
   async function detach() {
@@ -377,8 +486,6 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
   if (!loaded) return <p>Loading…</p>
   if (!isNew && !bill) return <div className="alert alert-danger">That bill is not here any more.</div>
 
-  const editable = canBills && (isNew || (bill !== null && isBillEditable(bill.status) && editing))
-  const canEditNow = canBills && bill !== null && isBillEditable(bill.status) && !editing
   const flags = bill?.variance ?? []
 
   return (
@@ -408,6 +515,40 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
       {message && <div className="alert alert-success">{message}</div>}
 
       {/* ------------------------------------------------------------------ */}
+
+      {/* First, because it fills in three of the boxes below. The file is held
+          until the bill is saved - there is nothing to file it against until
+          then - and goes up with it. */}
+      {isNew && canBills && (
+        <div style={card}>
+          <h2 style={{ margin: '0 0 0.5rem', fontSize: 'var(--text-lg)' }}>Their invoice</h2>
+          <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
+            Pick their PDF and we will read the invoice number, the date and the total off it where we can. A
+            PDF, JPEG, PNG or WebP up to 15 MB.
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,.jpg,.jpeg,.png,.webp"
+            aria-label="Their invoice"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) void scan(file)
+            }}
+          />
+          {scanning && <p style={{ ...muted, margin: '0.5rem 0 0' }}>Reading it…</p>}
+          {!scanning && scanned && <p style={{ ...muted, margin: '0.5rem 0 0' }}>{scanned}</p>}
+          {pendingFile && !scanning && (
+            <p style={{ ...muted, margin: '0.5rem 0 0' }}>
+              {pendingFile.name} will be filed against this bill when you save it.
+            </p>
+          )}
+          <p style={{ ...muted, marginTop: '0.75rem', marginBottom: 0 }}>
+            Files are stored and checked for what they claim to be. They are not scanned for viruses - nothing on
+            this platform is, and pretending otherwise would be worse than saying so.
+          </p>
+        </div>
+      )}
 
       <div style={card}>
         <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
@@ -493,10 +634,58 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
 
       <div style={card}>
         <h2 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }}>What they have billed</h2>
+
+        {/* Tick what this invoice covers. A supplier who bills an order in two
+            goes is ordinary, and the alternative - deleting eight rows now and
+            typing them back next month - is how a part-invoice gets entered
+            wrong. */}
+        {editable && orderLines.length > 0 && (
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', margin: '0 0 0.75rem' }}>
+            <button
+              style={linkButton}
+              onClick={() => setLines((current) => current.map((l) => ({ ...l, included: true })))}
+            >
+              Tick everything on the order
+            </button>
+            <span style={muted}>·</span>
+            <button
+              style={linkButton}
+              onClick={() =>
+                setLines((current) =>
+                  // A charge that is not on the order stays: it is on this
+                  // invoice because somebody put it there by hand.
+                  current.map((l) => (l.orderLineId ? { ...l, included: false } : l)),
+                )
+              }
+            >
+              Untick them all
+            </button>
+            <span style={muted}>
+              {tickedCount} of {orderLines.length} {orderLines.length === 1 ? 'line' : 'lines'} on this invoice
+            </span>
+          </div>
+        )}
+
         <div style={{ overflowX: 'auto' }}>
           <table style={table}>
             <thead>
               <tr>
+                {editable && (
+                  <th style={th}>
+                    <input
+                      type="checkbox"
+                      checked={orderLines.length > 0 && tickedCount === orderLines.length}
+                      ref={(node) => {
+                        if (node) node.indeterminate = tickedCount > 0 && tickedCount < orderLines.length
+                      }}
+                      onChange={(e) => {
+                        const on = e.target.checked
+                        setLines((current) => current.map((l) => (l.orderLineId ? { ...l, included: on } : l)))
+                      }}
+                      aria-label="Everything on the order"
+                    />
+                  </th>
+                )}
                 <th style={th}>Description</th>
                 {billable.length > 0 && <th style={thRight}>Ordered</th>}
                 {billable.length > 0 && <th style={thRight}>Delivered</th>}
@@ -516,8 +705,25 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                 const lineTotal = (
                   Math.round(Number(line.qty || 0) * Number(line.unitCost || 0) * 100) / 100
                 ).toFixed(2)
+                const off = editable && !line.included
                 return (
-                  <tr key={line.key}>
+                  <tr key={line.key} style={off ? { opacity: 0.55 } : undefined}>
+                    {editable && (
+                      <td style={td}>
+                        {line.orderLineId ? (
+                          <input
+                            type="checkbox"
+                            checked={line.included}
+                            onChange={(e) => setLine(line.key, { included: e.target.checked })}
+                            aria-label={`Put ${line.description || source?.description || 'this line'} on this invoice`}
+                          />
+                        ) : (
+                          <span style={muted} aria-hidden="true">
+                            +
+                          </span>
+                        )}
+                      </td>
+                    )}
                     <td style={td}>
                       {editable && !line.orderLineId ? (
                         <input
@@ -547,6 +753,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                           style={{ ...input, width: 90, textAlign: 'right' }}
                           inputMode="decimal"
                           value={line.qty}
+                          disabled={!line.included}
                           onChange={(e) => setLine(line.key, { qty: e.target.value })}
                           aria-label={`Quantity billed for ${line.description || source?.description || 'this line'}`}
                         />
@@ -560,6 +767,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                           style={{ ...input, width: 100, textAlign: 'right' }}
                           inputMode="decimal"
                           value={line.unitCost}
+                          disabled={!line.included}
                           onChange={(e) => setLine(line.key, { unitCost: e.target.value })}
                           aria-label={`Unit cost for ${line.description || source?.description || 'this line'}`}
                         />
@@ -645,13 +853,21 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                     </td>
                     {editable && (
                       <td style={td}>
-                        <button
-                          style={linkButton}
-                          onClick={() => setLines((current) => current.filter((l) => l.key !== line.key))}
-                          title="Take this line off the bill"
-                        >
-                          Remove
-                        </button>
+                        {/* Untick an order line; delete a charge that is not on
+                            the order. A deleted order line would have to be
+                            typed back in, which is exactly what the ticks are
+                            here to stop. */}
+                        {line.orderLineId ? (
+                          <span style={muted}>{line.included ? 'On this invoice' : 'Not on it'}</span>
+                        ) : (
+                          <button
+                            style={linkButton}
+                            onClick={() => setLines((current) => current.filter((l) => l.key !== line.key))}
+                            title="Take this charge off the bill"
+                          >
+                            Remove
+                          </button>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -691,6 +907,17 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
               >
                 <input style={input} value={taxOverride} onChange={(e) => setTaxOverride(e.target.value)} />
               </Field>
+              <Field
+                label="Total, as their invoice states it"
+                hint="Read off the file where it could be read. It is never used as a figure - it is checked against ours."
+              >
+                <input
+                  style={input}
+                  inputMode="decimal"
+                  value={statedTotal}
+                  onChange={(e) => setStatedTotal(e.target.value)}
+                />
+              </Field>
             </>
           )}
         </div>
@@ -723,8 +950,28 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                 <Money value={editable ? totals.total : (bill?.total ?? '0')} currency={currency} />
               </td>
             </tr>
+            {statedTotal.trim() !== '' && (
+              <tr>
+                <td style={td}>Their invoice says</td>
+                <td style={tdRight}>
+                  <Money value={statedTotal} currency={currency} />
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
+
+        {/* The one sentence somebody actually needs when the two disagree. Said
+            here as well as on the bill's own flags, because while a bill is
+            being typed there are no flags yet - they are worked out when it is
+            saved, and finding out then is finding out too late. */}
+        {mismatch && (
+          <p className="alert alert-warning" style={{ marginTop: '0.75rem' }}>
+            Their invoice says it comes to <Money value={statedTotal} currency={currency} />, but these lines come
+            to <Money value={editable ? totals.total : (bill?.total ?? '0')} currency={currency} />. Check what
+            they have charged for before approving it.
+          </p>
+        )}
 
         {editable && (
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
@@ -971,31 +1218,47 @@ function linesFromOrder(
   billable: PoBillableLine[],
   defaults: { defaultCategoryId?: string | null; defaultVatTreatment?: string | null; defaultVatRateCode?: string | null },
 ): LineDraft[] {
-  const drafts = billable
-    .map((line) => {
-      const left = Math.max(0, Number(line.qtyReceived) - Number(line.qtyInvoiced))
-      return {
-        key: nextKey(),
-        orderLineId: line.orderLineId,
-        description: line.description,
-        qty: trimQty(left),
-        unitCost: line.unitCost,
-        taxRatePercent: line.taxRatePercent,
-        taxRateCode: line.taxRateCode ?? defaults.defaultVatRateCode ?? '',
-        vatTreatment: line.vatTreatment ?? defaults.defaultVatTreatment ?? '',
-        categoryId: line.categoryId ?? defaults.defaultCategoryId ?? '',
-      }
-    })
-  const withSomething = drafts.filter((line) => Number(line.qty) > 0)
-  // Nothing delivered yet, so nothing is proposed - but the lines are still put
-  // up at zero rather than leaving an empty table, because an invoice ahead of
-  // delivery does happen and typing the order out again would be daft.
-  return withSomething.length > 0 ? withSomething : drafts
+  const drafts = billable.map((line) => {
+    const left = Math.max(0, Number(line.qtyReceived) - Number(line.qtyInvoiced))
+    const stillOwed = Math.max(0, Number(line.qtyOrdered) - Number(line.qtyCancelled) - Number(line.qtyInvoiced))
+    return {
+      key: nextKey(),
+      included: left > 0,
+      orderLineId: line.orderLineId,
+      description: line.description,
+      // Delivered-and-not-yet-billed where there is any, and what is still owed
+      // on the line where there is not. An invoice ahead of delivery does
+      // happen, and a box at zero is a box somebody has to retype.
+      qty: trimQty(left > 0 ? left : stillOwed),
+      unitCost: line.unitCost,
+      taxRatePercent: line.taxRatePercent,
+      taxRateCode: line.taxRateCode ?? defaults.defaultVatRateCode ?? '',
+      vatTreatment: line.vatTreatment ?? defaults.defaultVatTreatment ?? '',
+      categoryId: line.categoryId ?? defaults.defaultCategoryId ?? '',
+    }
+  })
+
+  // Nothing delivered anywhere on the order, so nothing is proposed - but every
+  // line is still ticked rather than none of them, because an invoice that
+  // arrives before the lorry is nearly always for the whole order.
+  return drafts.some((line) => line.included)
+    ? drafts
+    : drafts.map((line) => ({ ...line, included: Number(line.qty) > 0 }))
 }
 
-function linesFromBill(bill: PoBill): LineDraft[] {
-  return bill.lines.map((line) => ({
+/**
+ * A saved bill's own lines, with the rest of the order's put up underneath them
+ * unticked.
+ *
+ * The second half is what makes an invoice editable rather than merely
+ * viewable: a bill entered for three lines of eleven, opened again because the
+ * supplier missed one off, needs the other eight in front of somebody to tick -
+ * and a table showing only what is already on it has nowhere to put the ninth.
+ */
+function linesFromBill(bill: PoBill, billable: PoBillableLine[]): LineDraft[] {
+  const mine = bill.lines.map((line) => ({
     key: nextKey(),
+    included: true,
     orderLineId: line.orderLineId,
     description: line.description,
     qty: trimQty(line.qty),
@@ -1005,4 +1268,24 @@ function linesFromBill(bill: PoBill): LineDraft[] {
     vatTreatment: line.vatTreatment ?? '',
     categoryId: line.categoryId ?? '',
   }))
+
+  const covered = new Set(mine.map((line) => line.orderLineId).filter(Boolean))
+  const rest = billable
+    .filter((line) => !covered.has(line.orderLineId))
+    .map((line) => ({
+      key: nextKey(),
+      included: false,
+      orderLineId: line.orderLineId,
+      description: line.description,
+      // `billable` already excludes THIS bill's own lines from what counts as
+      // invoiced, so what is left here is genuinely left.
+      qty: trimQty(Math.max(0, Number(line.qtyOrdered) - Number(line.qtyCancelled) - Number(line.qtyInvoiced))),
+      unitCost: line.unitCost,
+      taxRatePercent: line.taxRatePercent,
+      taxRateCode: line.taxRateCode ?? '',
+      vatTreatment: line.vatTreatment ?? '',
+      categoryId: line.categoryId ?? '',
+    }))
+
+  return [...mine, ...rest]
 }

@@ -7,6 +7,7 @@ import { matchBill } from './billing'
 import type {
   PoBill,
   PoBillAttachment,
+  PoBillSource,
   PoBillLine,
   PoBillStatus,
   PoBillSummary,
@@ -59,6 +60,11 @@ function mapSummary(r: Record<string, unknown>): PoBillSummary {
     dueDate: day(r.due_date),
     currency: (r.currency as string | null) ?? 'GBP',
     total: dec(r.total),
+    // Null rather than '0': "nobody said what their document comes to" and
+    // "their document says nothing" are different facts, and only one of them
+    // is worth comparing anything against.
+    statedTotal: r.stated_total === null || r.stated_total === undefined ? null : dec(r.stated_total),
+    source: ((r.source as string | null) ?? 'ADMIN') as PoBillSource,
     status: r.status as PoBillStatus,
     matchStatus: r.match_status as PoMatchStatus,
     varianceCount: variances(r.variance).length,
@@ -87,7 +93,8 @@ function mapLine(r: Record<string, unknown>): PoBillLine {
 
 const SUMMARY_SELECT = Prisma.sql`
   b."id", b."supplier_id", b."order_id", b."supplier_invoice_number", b."invoice_date",
-  b."due_date", b."currency", b."total", b."status", b."match_status", b."variance",
+  b."due_date", b."currency", b."total", b."stated_total", b."source",
+  b."status", b."match_status", b."variance",
   b."attachment_media_id", b."created_by_user_id", b."created_at",
   s."name" AS "supplier_name", o."number" AS "order_number",
   COALESCE(u."displayName", u."username") AS "created_by_name",
@@ -277,6 +284,23 @@ export async function orderInvoicedLines(orderId: string): Promise<
   }))
 }
 
+/**
+ * How many invoices on this order nobody here has finished with.
+ *
+ * Draft and queried, which is to say everything that is not approved, in the
+ * books or void. It is the figure that decides whether an order closes on its
+ * own or goes to PENDING_CLOSE for somebody to read first, and the figure the
+ * Close button is refused on.
+ */
+export async function unsettledBillCount(orderId: string): Promise<number> {
+  const rows = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT count(*) AS "count" FROM "po_bills"
+     WHERE "order_id" = ${orderId}
+       AND "status" = ANY(${['DRAFT', 'QUERIED']}::text[])
+  `
+  return Number(rows[0]?.count ?? 0)
+}
+
 /** How many returns on this order are still waiting for their money. */
 export async function openReturnCount(orderId: string): Promise<number> {
   const rows = await prisma.$queryRaw<{ count: bigint }[]>`
@@ -315,6 +339,8 @@ export type BillInput = {
   carriageAmount: string
   taxAmount: string
   total: string
+  /** What their own document says it comes to. Null where nobody has said. */
+  statedTotal: string | null
   lines: BillLineInput[]
 }
 
@@ -334,19 +360,32 @@ function rethrowDuplicate(error: unknown, number: string): never {
   throw error
 }
 
-export async function createBill(input: BillInput, userId: string): Promise<string> {
+/**
+ * Files a new bill.
+ *
+ * `userId` is null for one arriving through a supplier's own link: a supplier is
+ * not a user of this site, and putting somebody else's id in the column that
+ * says who entered it would be a lie in the one place that matters when
+ * somebody asks where an invoice came from. `source` is what says so instead.
+ */
+export async function createBill(
+  input: BillInput,
+  userId: string | null,
+  source: PoBillSource = 'ADMIN',
+): Promise<string> {
   try {
     return await prisma.$transaction(async (tx) => {
       const rows = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO "po_bills" (
           "supplier_id", "order_id", "supplier_invoice_number", "invoice_date", "due_date",
           "currency", "fx_rate", "subtotal", "carriage_amount", "tax_amount", "total",
-          "created_by_user_id"
+          "stated_total", "source", "created_by_user_id"
         ) VALUES (
           ${input.supplierId}, ${input.orderId}, ${input.supplierInvoiceNumber},
           ${input.invoiceDate}::date, ${input.dueDate}::date, ${input.currency},
           ${input.fxRate}::numeric, ${input.subtotal}::numeric, ${input.carriageAmount}::numeric,
-          ${input.taxAmount}::numeric, ${input.total}::numeric, ${userId}
+          ${input.taxAmount}::numeric, ${input.total}::numeric,
+          ${input.statedTotal}::numeric, ${source}, ${userId}
         )
         RETURNING "id"
       `
@@ -378,6 +417,7 @@ export async function updateBill(id: string, input: BillInput): Promise<void> {
           "carriage_amount" = ${input.carriageAmount}::numeric,
           "tax_amount" = ${input.taxAmount}::numeric,
           "total" = ${input.total}::numeric,
+          "stated_total" = ${input.statedTotal}::numeric,
           "updated_at" = now()
         WHERE "id" = ${id}
       `
@@ -586,6 +626,7 @@ export async function refreshBillMatch(id: string): Promise<{ status: PoMatchSta
       pricePercent: config.priceVarianceTolerancePercent,
       quantityPercent: config.quantityVarianceTolerancePercent,
     },
+    { stated: bill.statedTotal, computed: bill.total },
   )
 
   const unchanged =

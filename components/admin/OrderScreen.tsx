@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
-import { availableTransitions, canSend, editMode, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import {
+  availableTransitions, canSend, closeBlockedReason, editMode, TRANSITIONS,
+} from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { PO_PORTAL_EVENT_LABELS } from '@/modules/purchase-orders/lib/portal-view'
@@ -725,6 +727,14 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   const amending = !isNew && mode === 'amend'
   const transitions = order ? availableTransitions(status, access) : []
   const sendable = !isNew && access.canCreate && canSend(status, order!.approvalRequired).ok
+  // Why the Close button will be refused, worked out from the invoices already
+  // on the screen rather than from a second request. The route says the same
+  // thing back if anybody presses it anyway - a check only the browser does is
+  // not a check.
+  const closeBlocked = closeBlockedReason(
+    status,
+    bills.filter((b) => b.status === 'DRAFT' || b.status === 'QUERIED').length,
+  )
 
   return (
     <div>
@@ -931,6 +941,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         <OrderView
           order={order!}
           transitions={transitions}
+          closeBlocked={closeBlocked}
           note={note}
           onNote={setNote}
           onTransition={runTransition}
@@ -1238,6 +1249,8 @@ function LineEditor({ lines, currency, lineTotals, hasCatalogue, supplierId, onC
 type ViewProps = {
   order: PoOrder
   transitions: PoTransition[]
+  /** Why closing is refused right now, or null. */
+  closeBlocked: string | null
   note: string
   onNote: (value: string) => void
   onTransition: (transition: PoTransition) => void
@@ -1289,7 +1302,7 @@ type ViewProps = {
 }
 
 function OrderView({
-  order, transitions, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
+  order, transitions, closeBlocked, note, onNote, onTransition, onEdit, onDelete, onSend, sending, history, revisions,
   receipts, returns, bills, receivingHref, returnsBase, billsBase, canReceive, canBills,
   onCancelLine, portal, newLink, onMakeLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
   shipments, despatchable, onRecordDespatch, onDeleteDespatch,
@@ -1659,12 +1672,17 @@ function OrderView({
                 <button
                   key={t}
                   className={t === 'cancel' ? 'btn btn-secondary' : 'btn btn-primary'}
+                  disabled={t === 'close' && closeBlocked !== null}
+                  title={t === 'close' && closeBlocked ? closeBlocked : undefined}
                   onClick={() => onTransition(t)}
                 >
                   {TRANSITIONS[t].label}
                 </button>
               ))}
             </div>
+            {closeBlocked && (
+              <p style={{ margin: '0.75rem 0 0', color: 'var(--color-text-secondary)' }}>{closeBlocked}</p>
+            )}
           </>
         )}
         <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>

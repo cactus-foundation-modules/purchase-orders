@@ -43,12 +43,17 @@ export const TRANSITIONS: Record<PoTransition, Rule> = {
   },
   resume: { from: ['ON_HOLD'], to: 'DRAFT', needs: 'canCreate', label: 'Taken off hold' },
   close: {
-    from: ['SENT', 'ACKNOWLEDGED', 'PART_RECEIVED', 'RECEIVED'],
+    from: ['SENT', 'ACKNOWLEDGED', 'PART_RECEIVED', 'RECEIVED', 'PENDING_CLOSE'],
     to: 'CLOSED',
     needs: 'canCreate',
     label: 'Closed',
   },
-  reopen: { from: ['CLOSED'], to: 'RECEIVED', needs: 'canCreate', label: 'Reopened' },
+  // Out of PENDING_CLOSE as well as out of CLOSED. An order that went pending
+  // because a supplier said they had invoiced it all, and then turns out not to
+  // have been, needs a way back to being an ordinary received order - and
+  // voiding their invoice is not it: the order would sit pending with nothing
+  // pending about it.
+  reopen: { from: ['CLOSED', 'PENDING_CLOSE'], to: 'RECEIVED', needs: 'canCreate', label: 'Reopened' },
   cancel: {
     from: ['DRAFT', 'AWAITING_APPROVAL', 'APPROVED', 'SENT', 'ACKNOWLEDGED', 'ON_HOLD'],
     to: 'CANCELLED',
@@ -58,6 +63,23 @@ export const TRANSITIONS: Record<PoTransition, Rule> = {
 }
 
 export type TransitionCheck = { ok: true; to: PoStatus; label: string } | { ok: false; reason: string }
+
+/**
+ * Why this order cannot be closed yet, or null.
+ *
+ * The gate on PENDING_CLOSE, and only on PENDING_CLOSE. That status means a
+ * SUPPLIER has said they have invoiced the lot, and the invoices behind it are
+ * drafts nobody here has read - closing on their say-so is exactly the thing the
+ * status exists to prevent. Every other route to CLOSED is somebody in this
+ * building deciding, which is theirs to decide.
+ */
+export function closeBlockedReason(status: PoStatus, unsettledBills: number): string | null {
+  if (status !== 'PENDING_CLOSE') return null
+  if (unsettledBills <= 0) return null
+  return unsettledBills === 1
+    ? 'There is still an invoice on this order nobody has approved. Check it and approve it, or void it, then close the order.'
+    : `There are still ${unsettledBills} invoices on this order nobody has approved. Check them and approve them, or void them, then close the order.`
+}
 
 export function checkTransition(
   transition: PoTransition,
