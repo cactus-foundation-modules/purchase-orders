@@ -76,6 +76,15 @@ export type ShopOrderFacts = {
   customerOrganisation: string | null
   currency: string
   shippingAddress: Record<string, unknown> | null
+  /** What the customer told the shop about getting the goods to that door - a
+   *  gate code, a side entrance, somewhere safe to leave it. Collected at
+   *  checkout on the shops that ask for it, and the reason this module reads it
+   *  at all: on a drop-ship the driver works for the SUPPLIER, so an instruction
+   *  that never reaches the purchase order never reaches the lorry.
+   *
+   *  Null where the shop does not ask, where the shopper had nothing to say, or
+   *  where the shop predates the column - see `readShopOrder`. */
+  deliveryInstructions: string | null
   items: ShopOrderItemFacts[]
 }
 
@@ -100,11 +109,22 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
   if (!hasCatalogue) return null
 
   try {
+    // `delivery_instructions` is read through the row's own JSON rather than
+    // named as a column, and that is deliberate. It arrives with shop's
+    // migration 046, and the two modules are pinned independently - a site can
+    // perfectly well be running this version of Purchase Orders against a shop
+    // that has not had that migration yet. Named as a column it would throw,
+    // and the catch
+    // at the bottom of this function turns a throw into "there is no such
+    // order", which would take the whole panel down over a field nobody had
+    // filled in. `to_jsonb(o) ->> 'missing_key'` is NULL, so an older shop
+    // answers "nothing said" and everything else carries on.
     const orders = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT "id", "order_number", "status", "customer_name", "customer_phone", "customer_organisation",
-             "currency", "shipping_address"
-        FROM "shp_orders"
-       WHERE "id" = ${orderId}
+      SELECT o."id", o."order_number", o."status", o."customer_name", o."customer_phone", o."customer_organisation",
+             o."currency", o."shipping_address",
+             to_jsonb(o) ->> 'delivery_instructions' AS "delivery_instructions"
+        FROM "shp_orders" o
+       WHERE o."id" = ${orderId}
        LIMIT 1
     `
     const order = orders[0]
@@ -136,6 +156,7 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
       customerOrganisation: textOrNull(order.customer_organisation),
       currency: (order.currency as string | null) ?? 'GBP',
       shippingAddress: bag(order.shipping_address),
+      deliveryInstructions: textOrNull(order.delivery_instructions),
       items: items.map((r) => ({
         itemId: r.id as string,
         productId: (r.product_id as string | null) ?? null,
@@ -337,6 +358,14 @@ export function serviceCostFor(lineMeta: Record<string, unknown> | null): string
  * Copied verbatim and never tidied. People type a street into the town box and a
  * flat number into the street box; a purchase order that "corrects" the address
  * the parcel is actually going to is a parcel that goes somewhere else.
+ *
+ * The customer's own delivery instructions ride along in `instructions`, which
+ * is what puts them on the paperwork the supplier's driver reads - the whole
+ * reason the shop collects them on a drop-ship. Blank where the shop does not
+ * ask for them or the shopper had nothing to say, which is the same blank a
+ * purchase order raised by hand starts with; somebody can still type into the
+ * box on the order screen either way, and what they type wins from then on,
+ * because this only ever fills the field in as the order is drafted.
  */
 export function shipToFromShopOrder(order: ShopOrderFacts): PoShipTo {
   const address = order.shippingAddress ?? {}
@@ -357,7 +386,10 @@ export function shipToFromShopOrder(order: ShopOrderFacts): PoShipTo {
       postcode: textOrNull(address.postcode) ?? '',
       country: textOrNull(address.country) ?? '',
     },
-    instructions: '',
+    // Trimmed, and nothing more: the wording is the customer's, and a purchase
+    // order that improves on what somebody wrote about their own front door is
+    // a purchase order that gets it wrong.
+    instructions: order.deliveryInstructions?.trim() ?? '',
   }
 }
 

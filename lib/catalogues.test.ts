@@ -569,6 +569,7 @@ describe('planFromOrder with a price list', () => {
     customerOrganisation: null,
     currency: 'GBP',
     shippingAddress: null,
+    deliveryInstructions: null,
     items: [
       {
         itemId: 'i1',

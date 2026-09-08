@@ -65,6 +65,7 @@ function order(patch: Partial<ShopOrderFacts> = {}): ShopOrderFacts {
     customerPhone: '07445 164570',
     customerOrganisation: 'Deskwell Limited',
     currency: 'GBP',
+    deliveryInstructions: 'Gate code 4821. Side entrance off Myers Walk.',
     shippingAddress: {
       firstName: 'Chris',
       lastName: 'Taylor-Guest',
@@ -276,6 +277,28 @@ describe('the drop-ship address', () => {
     expect(shipTo.contact).toBe('Christopher Taylor-Guest')
     expect(shipTo.phone).toBe('07445 164570')
     expect(shipTo.address.region).toBe('')
+  })
+
+  // The point of collecting them at all on a shop that drop-ships: the driver
+  // works for the supplier, so an instruction that stops at our order screen
+  // never reaches the lorry.
+  it('carries the customer\'s delivery instructions onto the label', () => {
+    const shipTo = shipToFromShopOrder(order())
+    expect(shipTo.instructions).toBe('Gate code 4821. Side entrance off Myers Walk.')
+  })
+
+  it('trims them, and no more than trims them', () => {
+    const shipTo = shipToFromShopOrder(order({ deliveryInstructions: '  leave with number 42  ' }))
+    // Not capitalised, not full-stopped: it is the customer's wording about
+    // their own front door.
+    expect(shipTo.instructions).toBe('leave with number 42')
+  })
+
+  it('leaves the label blank where the shop asks for no instructions', () => {
+    const shipTo = shipToFromShopOrder(order({ deliveryInstructions: null }))
+    // Blank rather than absent - the same blank a purchase order raised by hand
+    // starts with, so the box on the order screen behaves identically either way.
+    expect(shipTo.instructions).toBe('')
   })
 })
 
