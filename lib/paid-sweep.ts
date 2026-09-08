@@ -99,7 +99,11 @@ async function paidWithNothingRaised(): Promise<Array<{ id: string; orderNumber:
        WHERE o."payment_status" = 'PAID'
          AND o."status" NOT IN ('CANCELLED', 'REFUNDED')
          AND o."paid_at" IS NOT NULL
-         AND o."paid_at" >= now() - make_interval(days => ${SWEEP_DAYS})
+         -- ::int4 is load-bearing. Prisma sends a JS integer as bigint and there is
+         -- no make_interval(days => bigint); without the cast this throws 42883, the
+         -- catch below turns it into "nothing to sweep", and the cron reports success
+         -- while drafting nothing for ever.
+         AND o."paid_at" >= now() - make_interval(days => ${SWEEP_DAYS}::int4)
          AND NOT EXISTS (
                SELECT 1 FROM "po_orders" p
                 WHERE p."source_kind" = 'FROM_ORDER'
