@@ -2,6 +2,7 @@ import { headers } from 'next/headers'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import {
   CLOSED_SHOP_ORDER_STATUSES,
+  SHOP_ORDER_KIND_REPLACEMENT,
   listPosForShopOrder,
   livePos,
   planFromShopOrder,
@@ -44,6 +45,8 @@ export async function OrderPurchasePanel({
   const live = livePos(raised)
 
   const order = await readShopOrder(orderId)
+  if (order?.kind === SHOP_ORDER_KIND_REPLACEMENT) return null
+
   const plan = order ? await planFromShopOrder(order) : null
 
   const stillOpen = !CLOSED_SHOP_ORDER_STATUSES.has(orderStatus)

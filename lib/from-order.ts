@@ -63,9 +63,15 @@ export type ShopOrderItemFacts = {
   lineMeta: Record<string, unknown> | null
 }
 
+/** Shop's `shp_orders.kind`. Absent on older installs, read as `SALE`. */
+export const SHOP_ORDER_KIND_SALE = 'SALE'
+export const SHOP_ORDER_KIND_REPLACEMENT = 'REPLACEMENT'
+
 export type ShopOrderFacts = {
   id: string
   orderNumber: string
+  /** `SALE` or `REPLACEMENT` once shop's replacement orders exist. */
+  kind: string
   status: string
   customerName: string
   customerPhone: string | null
@@ -122,7 +128,8 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
     const orders = await prisma.$queryRaw<Record<string, unknown>[]>`
       SELECT o."id", o."order_number", o."status", o."customer_name", o."customer_phone", o."customer_organisation",
              o."currency", o."shipping_address",
-             to_jsonb(o) ->> 'delivery_instructions' AS "delivery_instructions"
+             to_jsonb(o) ->> 'delivery_instructions' AS "delivery_instructions",
+             COALESCE(to_jsonb(o) ->> 'kind', ${SHOP_ORDER_KIND_SALE}) AS "kind"
         FROM "shp_orders" o
        WHERE o."id" = ${orderId}
        LIMIT 1
@@ -150,6 +157,7 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
     return {
       id: order.id as string,
       orderNumber: order.order_number as string,
+      kind: (order.kind as string | null) ?? SHOP_ORDER_KIND_SALE,
       status: order.status as string,
       customerName: (order.customer_name as string | null) ?? '',
       customerPhone: textOrNull(order.customer_phone),

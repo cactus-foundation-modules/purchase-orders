@@ -563,6 +563,7 @@ describe('planFromOrder with a price list', () => {
   const order: ShopOrderFacts = {
     id: 'o1',
     orderNumber: 'DW000135',
+    kind: 'SALE',
     status: 'PAID',
     customerName: 'A Customer',
     customerPhone: null,

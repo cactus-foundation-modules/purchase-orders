@@ -4,6 +4,7 @@ import { getPoConfigCached } from './config'
 import { createOrder, type OrderInput, type OrderLineInput } from './db'
 import {
   CLOSED_SHOP_ORDER_STATUSES,
+  SHOP_ORDER_KIND_REPLACEMENT,
   listPosForShopOrder,
   livePos,
   planFromShopOrder,
@@ -69,6 +70,11 @@ export async function raisePurchaseOrdersFromShopOrder(
 
   const order = await readShopOrder(options.orderId)
   if (!order) return { ...empty, refused: 'That order could not be read.' }
+
+  // A replacement is a spare part sent on the house, not a sale to buy in again.
+  // Automatic drafting must stay quiet: there is no purchase order to raise, and
+  // a nightly email saying "could not match a supplier" is noise.
+  if (order.kind === SHOP_ORDER_KIND_REPLACEMENT) return empty
 
   // Cancelled or refunded. The panel hides its button on those, but the panel is
   // not the only way to this route and an order can be refunded while somebody

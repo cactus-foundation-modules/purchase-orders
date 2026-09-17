@@ -60,6 +60,7 @@ function order(patch: Partial<ShopOrderFacts> = {}): ShopOrderFacts {
   return {
     id: 'order-1',
     orderNumber: 'DW000135',
+    kind: 'SALE',
     status: 'PAID',
     customerName: 'Christopher Taylor-Guest',
     customerPhone: '07445 164570',

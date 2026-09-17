@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db/prisma'
 import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
+import { SHOP_ORDER_KIND_REPLACEMENT, SHOP_ORDER_KIND_SALE } from './from-order'
 import { raisePurchaseOrdersFromShopOrder } from './from-order-run'
 import { reportAutoDraft } from './auto-draft-report'
 import type { FromOrderRaised } from './from-order-run'
@@ -104,6 +105,7 @@ async function paidWithNothingRaised(): Promise<Array<{ id: string; orderNumber:
          -- catch below turns it into "nothing to sweep", and the cron reports success
          -- while drafting nothing for ever.
          AND o."paid_at" >= now() - make_interval(days => ${SWEEP_DAYS}::int4)
+         AND COALESCE(to_jsonb(o) ->> 'kind', ${SHOP_ORDER_KIND_SALE}) <> ${SHOP_ORDER_KIND_REPLACEMENT}
          AND NOT EXISTS (
                SELECT 1 FROM "po_orders" p
                 WHERE p."source_kind" = 'FROM_ORDER'
