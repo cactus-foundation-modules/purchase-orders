@@ -174,9 +174,15 @@ async function raiseOneOrder(
     paymentTerms: null,
     deliveryTerms: null,
     notesSupplier: null,
+    // Where the order CAME from, and nothing about where it has GOT to. A note is
+    // written once and never again, so "nothing has been sent" went on saying so
+    // long after the order had gone - the order screen works that out from the
+    // order itself now (lib/standing.ts). The customer order number stays,
+    // because the orders list searches this column and that is how somebody
+    // finds the purchase order behind DW000123.
     notesInternal: userId
-      ? `Drafted from customer order ${order.orderNumber}, to be delivered straight to the customer. Nothing has been sent to the supplier.`
-      : `Drafted automatically when customer order ${order.orderNumber} was paid for, to be delivered straight to the customer. Nobody has read it and nothing has been sent to the supplier.`,
+      ? `Drafted from customer order ${order.orderNumber}, to be delivered straight to the customer.`
+      : `Drafted automatically when customer order ${order.orderNumber} was paid for, to be delivered straight to the customer.`,
     lines,
   }
 

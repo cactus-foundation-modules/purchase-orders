@@ -134,7 +134,9 @@ async function raiseOneOrder(
     paymentTerms: null,
     deliveryTerms: null,
     notesSupplier: null,
-    notesInternal: 'Drafted from your reorder levels. Nothing has been sent to the supplier.',
+    // Where it came from only - what has and has not been sent is the order
+    // screen's to say, off the order itself (lib/standing.ts).
+    notesInternal: 'Drafted from your reorder levels.',
     lines,
   }
 

@@ -4,7 +4,7 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, getSupplier, setOrderStatus } from '@/modules/purchase-orders/lib/db'
-import { canSend, checkTransition, closeBlockedReason, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
+import { canSend, checkTransition, closeBlockedReason, sendingApproves, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
 import { unsettledBillCount } from '@/modules/purchase-orders/lib/bills'
 import { sendOrderCancelled, supplierRecipients } from '@/modules/purchase-orders/lib/email'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
@@ -73,6 +73,13 @@ export async function POST(request: NextRequest, { params }: Params) {
     },
     user.id,
   )
+
+  // Marking an order as sent by hand approves it exactly as emailing it does -
+  // `setOrderStatus` has just stamped whoever pressed the button - and the
+  // history says so in a line of its own, ahead of the send.
+  if (transition === 'send' && sendingApproves(order.status, order.approvedAt)) {
+    await recordAudit('order', id, 'order.approved', { by: 'SENDING', note: 'Approved by sending it to the supplier.' }, user.id)
+  }
 
   await recordAudit('order', id, `order.${transition}`, { from: order.status, to: check.to, note: note ?? null }, user.id)
 

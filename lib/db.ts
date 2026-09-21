@@ -801,7 +801,19 @@ export async function setOrderStatus(
     sets.push(Prisma.sql`"approved_by_user_id" = ${userId}`, Prisma.sql`"approved_at" = now()`)
   }
   if (patch.approvalNote !== undefined) sets.push(Prisma.sql`"approval_note" = ${patch.approvalNote}`)
-  if (to === 'SENT') sets.push(Prisma.sql`"sent_at" = COALESCE("sent_at", now())`)
+  if (to === 'SENT') {
+    sets.push(Prisma.sql`"sent_at" = COALESCE("sent_at", now())`)
+    // Sending an order nobody formally approved IS the approval - see
+    // `sendingApproves` in lib/lifecycle.ts. COALESCE, so an order that did go
+    // through Approve keeps the name and the date of whoever pressed it. Both
+    // columns are only ever written together, so they cannot come apart here.
+    if (userId) {
+      sets.push(
+        Prisma.sql`"approved_by_user_id" = COALESCE("approved_by_user_id", ${userId})`,
+        Prisma.sql`"approved_at" = COALESCE("approved_at", now())`,
+      )
+    }
+  }
   if (to === 'ACKNOWLEDGED') {
     sets.push(
       Prisma.sql`"acknowledged_at" = now()`,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { availableTransitions, canSend, checkTransition, closeBlockedReason, editMode, isAmendable, isFreelyEditable, needsApproval } from './lifecycle'
+import { availableTransitions, canSend, checkTransition, closeBlockedReason, editMode, isAmendable, isFreelyEditable, needsApproval, sendingApproves } from './lifecycle'
 import { receiptStatus } from './progress'
 import type { PoAccess } from './permissions'
 
@@ -176,5 +176,30 @@ describe('closing an order that is waiting to be checked', () => {
   it('lets a pending order be reopened rather than only closed', () => {
     expect(checkTransition('reopen', 'PENDING_CLOSE', buyer).ok).toBe(true)
     expect(checkTransition('close', 'PENDING_CLOSE', buyer).ok).toBe(true)
+  })
+})
+
+describe('sending an order nobody formally approved', () => {
+  it('is what approves it', () => {
+    expect(sendingApproves('DRAFT', null)).toBe(true)
+  })
+
+  it('leaves alone an order somebody did approve', () => {
+    expect(sendingApproves('APPROVED', '2026-09-21T10:00:00.000Z')).toBe(false)
+    // Approved, held, taken off hold: back in draft with its approver intact.
+    expect(sendingApproves('DRAFT', '2026-09-21T10:00:00.000Z')).toBe(false)
+  })
+
+  it('does not re-approve on an amendment', () => {
+    expect(sendingApproves('SENT', null)).toBe(false)
+    expect(sendingApproves('PART_RECEIVED', null)).toBe(false)
+  })
+
+  it('cannot be reached by an order that needs approving', () => {
+    // The pair that matters: the only unapproved drafts that get as far as the
+    // send are the ones `canSend` lets through, which are never the ones over
+    // the threshold.
+    expect(canSend('DRAFT', true).ok).toBe(false)
+    expect(canSend('DRAFT', false).ok).toBe(true)
   })
 })

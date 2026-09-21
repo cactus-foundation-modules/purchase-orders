@@ -62,6 +62,28 @@ export const TRANSITIONS: Record<PoTransition, Rule> = {
   },
 }
 
+/**
+ * What the BUTTON says, as opposed to what the history says afterwards.
+ *
+ * `label` above is past tense because it is written into the audit log once the
+ * thing has happened. A button reading "Sent to supplier" on an order that has
+ * not been reads as a statement of fact rather than something to press - and
+ * `send` in particular needs telling apart from the button that actually emails
+ * the order, which this transition does not do.
+ */
+export const TRANSITION_ACTIONS: Record<PoTransition, string> = {
+  submit: 'Submit for approval',
+  approve: 'Approve',
+  reject: 'Send back to draft',
+  send: 'Mark as sent without emailing',
+  acknowledge: 'Mark as confirmed by the supplier',
+  hold: 'Put on hold',
+  resume: 'Take off hold',
+  close: 'Close the order',
+  reopen: 'Reopen',
+  cancel: 'Cancel the order',
+}
+
 export type TransitionCheck = { ok: true; to: PoStatus; label: string } | { ok: false; reason: string }
 
 /**
@@ -151,6 +173,23 @@ export function canSend(status: PoStatus, approvalRequired: boolean): SendCheck 
     ok: false,
     reason: `An order that is ${status.toLowerCase().replace(/_/g, ' ')} cannot be sent to a supplier.`,
   }
+}
+
+/**
+ * Whether sending this order is also what approves it.
+ *
+ * An order under the approval threshold never visits AWAITING_APPROVAL, so
+ * nobody ever pressed Approve on it - and yet somebody read it and sent it,
+ * which is the same decision made with a different button. Without this the
+ * order went out with no approver against it and an empty "Authorised by" on
+ * the document the supplier was holding.
+ *
+ * It cannot be used to get round an approval: an order that NEEDS approving is
+ * refused by `canSend` while it is still a draft, so the only orders that reach
+ * here unapproved are the ones whose sender was always allowed to decide.
+ */
+export function sendingApproves(status: PoStatus, approvedAt: string | null): boolean {
+  return status === 'DRAFT' && !approvedAt
 }
 
 /** Whether this total needs somebody with the approve permission before it can go out. */

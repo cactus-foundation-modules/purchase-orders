@@ -8,7 +8,7 @@ import { loadPoDocContext, supplierParty, wordingSnapshot } from '@/modules/purc
 import { sendOrderToSupplier, supplierRecipients } from '@/modules/purchase-orders/lib/email'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { mintPortalLink } from '@/modules/purchase-orders/lib/portal'
-import { canSend } from '@/modules/purchase-orders/lib/lifecycle'
+import { canSend, sendingApproves } from '@/modules/purchase-orders/lib/lifecycle'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -46,7 +46,11 @@ export async function POST(request: NextRequest, { params }: Params) {
     return errorResponse('This supplier has no email address on file, so there is nowhere to send it.', 409)
   }
 
-  const ctx = await loadPoDocContext(id)
+  // Sending an order nobody formally approved is what approves it, and the copy
+  // the supplier gets should say so - see `sendingApproves`. Nothing is written
+  // until the email has gone; the document is only DRAWN with the name on it.
+  const approving = sendingApproves(order.status, order.approvedAt)
+  const ctx = await loadPoDocContext(id, approving ? { approvingUserId: user.id } : undefined)
   if (!ctx) return errorResponse('That purchase order is not here any more.', 404)
 
   // First time out, or an amendment replacing what they already hold. The
@@ -77,7 +81,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   // An order already past SENT keeps the status it has: an amendment to a part
   // received order does not send it back to the beginning.
   if (order.status === 'DRAFT' || order.status === 'APPROVED') {
+    // Stamps whoever is sending as the approver, where there was not one.
     await setOrderStatus(id, 'SENT', {}, user.id)
+  }
+
+  // Its own line in the history, ahead of the send: "who approved this" is a
+  // question that gets asked months later, and the answer should not need
+  // anybody to know that sending implies it.
+  if (approving) {
+    await recordAudit('order', id, 'order.approved', { by: 'SENDING', note: 'Approved by sending it to the supplier.' }, user.id)
   }
 
   await recordAudit(

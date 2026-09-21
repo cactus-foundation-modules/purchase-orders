@@ -122,7 +122,16 @@ export async function buyerParty(): Promise<PoDocParty> {
  *  not there any more, which the callers turn into a 404. */
 export async function loadPoDocContext(
   orderId: string,
-  opts?: { print?: boolean },
+  opts?: {
+    print?: boolean
+    /** Whoever is sending an order that nobody has approved, which is what
+     *  approves it (`sendingApproves`). The order is only stamped once the email
+     *  has actually gone, and the document has to be drawn before that - so the
+     *  copy the supplier receives is drawn as the order WILL read, rather than
+     *  going out with nobody's name under "Authorised by". Ignored on an order
+     *  that already has an approver. */
+    approvingUserId?: string
+  },
 ): Promise<PoDocContext | null> {
   const order = await getOrder(orderId)
   if (!order) return null
@@ -143,7 +152,8 @@ export async function loadPoDocContext(
     ? await prisma.media.findUnique({ where: { id: site.logoMediaId }, select: { url: true } }).catch(() => null)
     : null
 
-  const names = await userNames([people.createdByUserId, people.approvedByUserId])
+  const approverId = people.approvedByUserId ?? opts?.approvingUserId ?? null
+  const names = await userNames([people.createdByUserId, approverId])
   const live = supplierParty(supplier)
 
   return {
@@ -201,8 +211,9 @@ export async function loadPoDocContext(
         instructions: order.shipTo.instructions,
       },
       raisedByName: people.createdByUserId ? (names[people.createdByUserId] ?? '') : '',
-      approvedByName: people.approvedByUserId ? (names[people.approvedByUserId] ?? '') : '',
-      approvedAt: order.approvedAt,
+      approvedByName: approverId ? (names[approverId] ?? '') : '',
+      // Today, on a copy drawn for a send that is about to approve it.
+      approvedAt: order.approvedAt ?? (approverId ? new Date().toISOString() : null),
     },
     buyer,
     // The frozen copy wins once there is one. A supplier renamed or deleted after
