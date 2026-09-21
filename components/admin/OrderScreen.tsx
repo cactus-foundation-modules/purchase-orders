@@ -643,9 +643,15 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         href: `/${adminPath}/m/purchase-orders/receiving/${o.id}`,
       })
     }
-    // From the moment the order has gone out rather than waiting for a delivery:
-    // plenty of suppliers invoice on despatch.
-    if (access.canBills && (o.sentAt || bills.length > 0)) {
+    // Not until the supplier has confirmed the order. Before that the things to
+    // do are the proforma, the payment and their acknowledgement, and a bill
+    // button beside them is an invitation to enter the proforma as an invoice.
+    // Goods turning up counts as confirmation; and an order that already has a
+    // bill against it keeps the button, however it got there.
+    const confirmed =
+      Boolean(o.acknowledgedAt) ||
+      status === 'ACKNOWLEDGED' || status === 'PART_RECEIVED' || status === 'RECEIVED' || status === 'PENDING_CLOSE'
+    if (access.canBills && (confirmed || bills.length > 0)) {
       list.push({
         key: 'bill',
         // The window above is the short road for an ordinary invoice. This is
