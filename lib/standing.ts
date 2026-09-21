@@ -24,6 +24,9 @@ export type PoStanding = {
 
 export type PoStandingFacts = PoStageFacts & {
   approvalRequired: boolean
+  /** The supplier sends the goods straight to the customer, so nothing is ever
+   *  waited for here. */
+  dropships: boolean
   sentAt: string | null
   sourceKind: SourceKind
   /** The customer order it was drafted off, where there was one. */
@@ -98,7 +101,11 @@ export function orderStanding(facts: PoStandingFacts, when: (iso: string) => str
       return { tone: 'info', headline: sent, detail: 'Waiting for them to confirm it.' }
     }
     case 'ACKNOWLEDGED':
-      return { tone: 'info', headline: 'The supplier has confirmed this order.', detail: 'Waiting for the goods.' }
+      return {
+        tone: 'info',
+        headline: 'The supplier has confirmed this order.',
+        detail: facts.dropships ? 'They deliver it straight to the customer. Their invoice is the next thing to expect.' : 'Waiting for the goods.',
+      }
     case 'PART_RECEIVED':
       return { tone: 'warning', headline: 'Some of this order has turned up.', detail: 'The rest is still due.' }
     case 'RECEIVED':

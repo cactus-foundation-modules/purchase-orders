@@ -180,7 +180,12 @@ export function OrderView({
   // Nothing can arrive on an order that has not gone, and a card saying
   // "nothing was ever booked in" on a draft is an answer to a question nobody
   // asked. Once it has gone - or once anything is filed against it - it stays.
-  const showDeliveries = receipts.length > 0 || isReceivable(order.status) || Boolean(order.sentAt)
+  // And never for a supplier who drop-ships, unless something was booked in
+  // before the switch was turned on - what happened stays on the record.
+  const showDeliveries =
+    receipts.length > 0 || (!order.supplierDropships && (isReceivable(order.status) || Boolean(order.sentAt)))
+  // "Received" and "Still due" are columns about a door nothing comes through.
+  const showArrivals = !order.supplierDropships || order.lines.some((l) => Number(l.qtyReceived) > 0)
   // Only once something has actually turned up. Nothing can go back that never
   // arrived.
   const showReturns = returns.length > 0 || order.lines.some((l) => Number(l.qtyReceived) > 0)
@@ -211,8 +216,8 @@ export function OrderView({
                     <th style={th}>Description</th>
                     <th style={th}>Their code</th>
                     <th style={thRight}>Ordered</th>
-                    <th style={thRight}>Received</th>
-                    <th style={thRight}>Still due</th>
+                    {showArrivals && <th style={thRight}>Received</th>}
+                    {showArrivals && <th style={thRight}>Still due</th>}
                     <th style={thRight}>Invoiced</th>
                     <th style={thRight}>Cost</th>
                     <th style={thRight}>Line total</th>
@@ -248,8 +253,8 @@ export function OrderView({
                         </td>
                         <td style={td}>{l.supplierSku ?? '—'}</td>
                         <td style={tdRight}>{withUnit(l.qty, l.unit)}</td>
-                        <td style={tdRight}>{l.qtyReceived}</td>
-                        <td style={tdRight}>{left > 0 ? left : '—'}</td>
+                        {showArrivals && <td style={tdRight}>{l.qtyReceived}</td>}
+                        {showArrivals && <td style={tdRight}>{left > 0 ? left : '—'}</td>}
                         <td style={tdRight}>{l.qtyInvoiced}</td>
                         <td style={tdRight}>
                           <Money value={l.unitCost} currency={order.currency} />
@@ -452,7 +457,10 @@ export function OrderView({
           <div style={card}>
             <h2 style={heading}>Details</h2>
             <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))' }}>
-              <Fact label="Supplier">{order.supplierName}</Fact>
+              <Fact label="Supplier">
+                {order.supplierName}
+                {order.supplierDropships && <div style={muted}>Drop-ships to the customer</div>}
+              </Fact>
               <Fact label="Raised">{formatDay(order.raisedDate)}</Fact>
               <Fact label="Wanted by">{formatDay(order.requiredByDate)}</Fact>
               <Fact label="Expected">{formatDay(order.expectedDate)}</Fact>

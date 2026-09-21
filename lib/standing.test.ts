@@ -10,6 +10,7 @@ function facts(patch: Partial<PoStandingFacts> = {}): PoStandingFacts {
     proformaReceived: false,
     proformaPaid: false,
     approvalRequired: false,
+    dropships: false,
     sentAt: null,
     sourceKind: 'MANUAL',
     sourceOrderNumber: null,
@@ -83,6 +84,11 @@ describe('orderStanding', () => {
       headline: 'Cancelled.',
       detail: 'Customer changed their mind',
     })
+  })
+
+  it('does not wait for goods from a supplier who sends them to the customer', () => {
+    expect(orderStanding(facts({ status: 'ACKNOWLEDGED' }), when).detail).toBe('Waiting for the goods.')
+    expect(orderStanding(facts({ status: 'ACKNOWLEDGED', dropships: true }), when).detail).toContain('straight to the customer')
   })
 
   it('owns up to an order marked as sent with no date on it', () => {

@@ -48,6 +48,7 @@ function order(patch: Partial<PoOrder> = {}): PoOrder {
     status: 'SENT' as PoStatus,
     supplierId: 'supplier-1',
     supplierName: 'Northern Clay Co.',
+    supplierDropships: false,
     supplierSnapshot: {},
     shipToKind: 'CUSTOMER',
     shipTo: {

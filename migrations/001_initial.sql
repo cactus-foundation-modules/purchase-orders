@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     -- else still goes to the ordering address. (Also in 010.)
     "accounts_email"          TEXT,
     "proforma_paid_to_accounts" BOOLEAN   NOT NULL DEFAULT false,
+    -- Whether what is bought from them goes straight to the customer and never
+    -- comes here. Switches off booking in and despatches on their orders, and
+    -- checks their invoices against what was ordered. (Also in 014.)
+    "dropships"               BOOLEAN     NOT NULL DEFAULT false,
     "address"                 JSONB       NOT NULL DEFAULT '{}',
     "currency"                TEXT        NOT NULL DEFAULT 'GBP',
     "payment_terms"           TEXT,

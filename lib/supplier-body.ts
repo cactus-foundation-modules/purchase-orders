@@ -39,6 +39,7 @@ export const SupplierBody = z.object({
   // behaves exactly as every existing row does.
   accountsEmail: z.string().email('That accounts address does not look right').nullable().default(null),
   proformaPaidToAccounts: z.boolean().default(false),
+  dropships: z.boolean().default(false),
   address: AddressBody.default({}),
   currency: z.string().trim().length(3, 'Currency is a three-letter code').default('GBP'),
   paymentTerms: z.string().max(200).nullable().default(null),
@@ -89,6 +90,7 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     // says the same thing; this is the half that holds when the form is not the
     // thing calling.
     proformaPaidToAccounts: body.proformaPaidToAccounts && orNull(body.accountsEmail) !== null,
+    dropships: body.dropships,
     address: body.address,
     currency: body.currency.trim().toUpperCase(),
     paymentTerms: orNull(body.paymentTerms),

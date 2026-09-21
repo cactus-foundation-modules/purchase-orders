@@ -17,6 +17,7 @@ type Form = {
   emailCc: string
   accountsEmail: string
   proformaPaidToAccounts: boolean
+  dropships: boolean
   address: PoAddress
   currency: string
   paymentTerms: string
@@ -46,6 +47,7 @@ const EMPTY_FORM: Form = {
   emailCc: '',
   accountsEmail: '',
   proformaPaidToAccounts: false,
+  dropships: false,
   address: EMPTY_ADDRESS,
   currency: 'GBP',
   paymentTerms: '',
@@ -130,6 +132,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       emailCc: supplier.emailCc ?? '',
       accountsEmail: supplier.accountsEmail ?? '',
       proformaPaidToAccounts: supplier.proformaPaidToAccounts,
+      dropships: supplier.dropships,
       address: supplier.address,
       currency: supplier.currency,
       paymentTerms: supplier.paymentTerms ?? '',
@@ -174,6 +177,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         // same rule - a switch on against an empty box would send the payment
         // note nowhere at all.
         proformaPaidToAccounts: form.proformaPaidToAccounts && textOrNull(form.accountsEmail) !== null,
+        dropships: form.dropships,
         address: form.address,
         currency: form.currency,
         paymentTerms: textOrNull(form.paymentTerms),
@@ -394,6 +398,22 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
                   The &ldquo;we have paid your proforma&rdquo; note, and the proof of payment with it, go to the
                   accounts address instead of the ordering one. Everything else - the order, an amendment, a chase, a
                   cancellation - still goes to the people who take orders. Needs an accounts address above.
+                </span>
+              </label>
+            </Field>
+            <Field label="This supplier drop-ships">
+              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={form.dropships}
+                  onChange={(e) => setForm({ ...form, dropships: e.target.checked })}
+                  style={{ marginTop: '0.25rem' }}
+                />
+                <span style={muted}>
+                  What you buy from them goes straight to your customer and never comes to you. Their orders stop
+                  offering &ldquo;Book goods in&rdquo; and &ldquo;Record a despatch&rdquo;, and their invoices are
+                  checked against what you ordered rather than against a delivery that was never going to arrive
+                  here. Applies to their open orders as well as new ones.
                 </span>
               </label>
             </Field>

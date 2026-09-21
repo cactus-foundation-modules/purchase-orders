@@ -3,6 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { LINE_PROGRESS_SQL } from './progress'
 import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
+import { getSupplier } from './db'
 import { matchBill } from './billing'
 import type {
   PoBill,
@@ -604,6 +605,9 @@ export async function refreshBillMatch(id: string): Promise<{ status: PoMatchSta
 
   const config = await getPoConfigCached()
   const orderLines = bill.orderId ? await listBillableLines(bill.orderId, id) : []
+  // A supplier who drop-ships never has anything booked in, so their invoice is
+  // held against the order instead - see `quantityBasis`.
+  const supplier = bill.orderId ? await getSupplier(bill.supplierId) : null
 
   const match = matchBill(
     Boolean(bill.orderId),
@@ -625,6 +629,7 @@ export async function refreshBillMatch(id: string): Promise<{ status: PoMatchSta
     {
       pricePercent: config.priceVarianceTolerancePercent,
       quantityPercent: config.quantityVarianceTolerancePercent,
+      quantityBasis: supplier?.dropships ? 'ORDERED' : 'RECEIVED',
     },
     { stated: bill.statedTotal, computed: bill.total },
   )

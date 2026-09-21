@@ -70,6 +70,10 @@ export type PoSupplier = {
   /** Whether the "we have paid your proforma" note goes to that address instead
    *  of the ordering one. It governs that ONE email and nothing else. */
   proformaPaidToAccounts: boolean
+  /** Everything bought from them goes straight to the customer. Nothing is ever
+   *  booked in here, so their orders offer neither that nor despatches, and
+   *  their invoices are checked against what was ordered. */
+  dropships: boolean
   address: PoAddress
   currency: string
   paymentTerms: string | null
@@ -171,6 +175,10 @@ export type PoOrderSummary = {
 }
 
 export type PoOrder = PoOrderSummary & {
+  /** The supplier's drop-ship switch, read LIVE off the supplier rather than
+   *  frozen onto the order: it changes what the order screen offers, not what
+   *  the order is, and switching it on should tidy the orders already open. */
+  supplierDropships: boolean
   supplierSnapshot: Record<string, unknown>
   shipToKind: ShipToKind
   shipTo: PoShipTo

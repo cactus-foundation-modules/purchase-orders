@@ -3,7 +3,8 @@ import { z } from 'zod'
 import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
-import { getOrder } from '@/modules/purchase-orders/lib/db'
+import { getOrder, setOrderStatus } from '@/modules/purchase-orders/lib/db'
+import { checkTransition } from '@/modules/purchase-orders/lib/lifecycle'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { readBillUpload } from '@/modules/purchase-orders/lib/bill-attachment'
 import { storeOrderDocument, PO_FILE_KINDS } from '@/modules/purchase-orders/lib/portal-upload'
@@ -45,6 +46,10 @@ const KIND = z.enum(PO_FILE_KINDS)
 const UploadFields = z.object({
   kind: KIND,
   ref: z.string().max(120).optional(),
+  /** With an acknowledgement only: their confirmation is in somebody's hand, so
+   *  mark the order as confirmed in the same breath rather than leaving it
+   *  reading "Sent" with the proof that it is not filed against it. */
+  acknowledge: z.enum(['1']).optional(),
 })
 
 /** The three fields somebody can type in without a file to go with them. An
@@ -72,6 +77,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const parsed = UploadFields.safeParse({
     kind: form.get('kind') ?? '',
     ref: form.get('ref')?.toString().trim() || undefined,
+    acknowledge: form.get('acknowledge')?.toString() === '1' ? '1' : undefined,
   })
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? 'We could not read that.')
   const { kind } = parsed.data
@@ -131,6 +137,23 @@ export async function POST(request: NextRequest, { params }: Params) {
     },
     user.id,
   )
+
+  // Through the same guard as the button that does this on its own, so a filed
+  // acknowledgement can never move an order the transition table would refuse -
+  // one already confirmed, or part delivered, simply keeps the status it has.
+  if (kind === 'acknowledgement' && parsed.data.acknowledge) {
+    const check = checkTransition('acknowledge', order.status, access)
+    if (check.ok) {
+      await setOrderStatus(id, check.to, { acknowledgedNote: ref ? `Their reference ${ref}` : null }, user.id)
+      await recordAudit(
+        'order',
+        id,
+        'order.acknowledge',
+        { from: order.status, to: check.to, note: 'Confirmed when their acknowledgement was filed.' },
+        user.id,
+      )
+    }
+  }
 
   const after = await getOrder(id)
   return NextResponse.json({

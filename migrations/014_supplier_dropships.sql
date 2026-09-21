@@ -1,0 +1,23 @@
+-- Purchase Orders - suppliers who deliver straight to the customer
+--
+-- A business that drop-ships never sees the goods. The supplier sends them to
+-- the customer, and nobody here stands at a door with a delivery note counting
+-- boxes - so "Book goods in" is a button for a thing that never happens, and
+-- "Record a despatch" is a form for a fact nobody here is told. On those orders
+-- they were two pieces of furniture in the way of the things that DO happen:
+-- the proforma, the payment, their confirmation, their invoice.
+--
+-- A switch on the supplier rather than on the order, because it is a fact about
+-- how the supplier trades with you, not about one purchase. Read live rather
+-- than frozen onto each order: it changes what the order SCREEN offers, not what
+-- the order is, and switching it on should tidy the orders already open.
+--
+-- It also changes what their invoice is checked against. With nothing ever
+-- booked in, every invoice from a drop-shipper was flagged "nothing has been
+-- booked in yet" - true, permanent, and therefore noise. For these suppliers the
+-- invoice is checked against what was ORDERED instead.
+--
+-- Defaulted false, so every existing supplier behaves exactly as it did.
+--
+-- Idempotent, and 001 carries the same column for a fresh install.
+ALTER TABLE "po_suppliers" ADD COLUMN IF NOT EXISTS "dropships" BOOLEAN NOT NULL DEFAULT false;

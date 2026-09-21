@@ -224,6 +224,28 @@ describe('matchBill', () => {
     expect(match.flags[0]!.kind).toBe('NOT_RECEIVED')
   })
 
+  it('holds a drop-shipper to what was ordered, since nothing is ever booked in', () => {
+    const ordered = { ...TOLERANCES, quantityBasis: 'ORDERED' as const }
+    // Nothing received, all ten invoiced: NOT_RECEIVED on the three-way match,
+    // and perfectly in order from a supplier whose goods never come here.
+    const whole = matchBill(
+      true,
+      [orderLine({ qtyReceived: '0' })],
+      [{ orderLineId: 'ol1', description: 'Oak desk', qty: '10', unitCost: '100' }],
+      ordered,
+    )
+    expect(whole.status).toBe('MATCHED')
+
+    const over = matchBill(
+      true,
+      [orderLine({ qtyReceived: '0' })],
+      [{ orderLineId: 'ol1', description: 'Oak desk', qty: '12', unitCost: '100' }],
+      ordered,
+    )
+    expect(over.flags[0]!.kind).toBe('QUANTITY')
+    expect(over.flags[0]!.message).toContain('only 10 were ordered')
+  })
+
   it('is quiet about a part invoice, which is entirely ordinary', () => {
     const match = matchBill(
       true,

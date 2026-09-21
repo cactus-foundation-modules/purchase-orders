@@ -186,6 +186,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
       emailCc: 'buying@example.invalid',
       accountsEmail: 'accounts2@example.invalid',
       proformaPaidToAccounts: true,
+      dropships: true,
       address: { line1: 'Unit 5 Lodge Way', line2: '', city: 'Northampton', region: '', postcode: 'NN5 7RA', country: 'GB' },
       currency: 'GBP',
       paymentTerms: null,
@@ -209,6 +210,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
     const supplier = await mod.db.getSupplier(supplierId)
     expect(supplier?.accountsEmail).toBe('accounts2@example.invalid')
     expect(supplier?.proformaPaidToAccounts).toBe(true)
+    expect(supplier?.dropships).toBe(true)
 
     // The UPDATE statement is a separate list of columns from the INSERT, and a
     // column left out of one of them is a field that saves and never changes.
@@ -216,10 +218,12 @@ suite('purchase-orders SQL, against a real Postgres', () => {
       ...supplier!,
       accountsEmail: 'finance@example.invalid',
       proformaPaidToAccounts: false,
+      dropships: false,
     })
     const after = await mod.db.getSupplier(supplierId)
     expect(after?.accountsEmail).toBe('finance@example.invalid')
     expect(after?.proformaPaidToAccounts).toBe(false)
+    expect(after?.dropships).toBe(false)
 
     // And the list query, which selects s.* but maps by hand.
     const listed = await mod.db.listSuppliers()

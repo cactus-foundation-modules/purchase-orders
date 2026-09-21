@@ -140,6 +140,14 @@ export type MatchTolerances = {
   pricePercent: number
   /** How far past what was delivered a quantity may go before it is worth saying. */
   quantityPercent: number
+  /**
+   * What an invoiced quantity is held against. RECEIVED is the three-way match:
+   * nobody pays for what did not turn up. ORDERED is for a supplier who
+   * drop-ships - the goods go to the customer, nothing is ever booked in here,
+   * and holding their invoice against a delivery that cannot exist flagged every
+   * one of them for ever. Defaults to RECEIVED.
+   */
+  quantityBasis?: 'RECEIVED' | 'ORDERED'
 }
 
 /** What the document says it comes to, and what these lines come to. Both
@@ -272,12 +280,16 @@ export function matchBill(
     }
   }
 
-  // Quantity, once per order line, against what actually turned up.
+  // Quantity, once per order line, against what actually turned up - or, for a
+  // supplier who drop-ships, against what was ordered and not since cancelled.
+  const againstOrdered = tolerances.quantityBasis === 'ORDERED'
   for (const [orderLineId, mine] of claimed) {
     const orderLine = byId.get(orderLineId)!
     if (mine.qty <= 0) continue
 
-    const received = Number(orderLine.qtyReceived) || 0
+    const received = againstOrdered
+      ? Math.max(0, (Number(orderLine.qty) || 0) - (Number(orderLine.qtyCancelled) || 0))
+      : Number(orderLine.qtyReceived) || 0
     const elsewhere = Number(orderLine.qtyInvoicedElsewhere) || 0
     const invoiced = elsewhere + mine.qty
     const allowed = received * (1 + qtyTolerance / 100)
@@ -286,6 +298,19 @@ export function matchBill(
 
     const overBy = round3(invoiced - received)
     const amount = money(Math.round((scaled(mine.cost, 4) * scaled(overBy, 3)) / 100_000))
+
+    if (againstOrdered) {
+      flags.push({
+        kind: 'QUANTITY',
+        orderLineId,
+        description: orderLine.description,
+        amount,
+        message:
+          `${orderLine.description}: invoiced for ${qtyWords(invoiced)}, ` +
+          `but only ${qtyWords(received)} ${received === 1 ? 'was' : 'were'} ordered.`,
+      })
+      continue
+    }
 
     if (received === 0) {
       flags.push({

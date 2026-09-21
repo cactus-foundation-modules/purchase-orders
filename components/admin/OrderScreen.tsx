@@ -7,6 +7,9 @@ import {
   availableTransitions, canSend, closeBlockedReason, editMode, TRANSITION_ACTIONS,
 } from '@/modules/purchase-orders/lib/lifecycle'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
+import { fullyInvoiced } from '@/modules/purchase-orders/lib/billing'
+import { nextPaperworkStep, PAPERWORK_STEP_LABELS } from '@/modules/purchase-orders/lib/next-step'
+import type { PoPaperworkStep } from '@/modules/purchase-orders/lib/next-step'
 import type { PoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { isReceivable } from '@/modules/purchase-orders/lib/receiving'
 import { orderStanding } from '@/modules/purchase-orders/lib/standing'
@@ -29,6 +32,7 @@ import { OrderActionBar, type BarAction, type BarNote } from './order/OrderActio
 import { OrderEditForm } from './order/OrderEditForm'
 import { OrderView } from './order/OrderView'
 import { NO_DOCUMENTS, type PortalState, type SupplierDocuments } from './order/shared'
+import { StepModal } from './order/StepModals'
 import { SUPPLIER_LINK_CARD_ID } from './order/SupplierLinkCard'
 import { formatWhen, Money, OrderStatusBadge } from './ui'
 
@@ -98,6 +102,9 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   // Whether the despatch form is showing. Held here rather than on its card
   // because the button that opens it is in the bar with every other action.
   const [despatchOpen, setDespatchOpen] = useState(false)
+  // Which piece of paperwork has its window open, if any. The windows do their
+  // own requests - see StepModals - and hand back a sentence to say.
+  const [openStep, setOpenStep] = useState<PoPaperworkStep | null>(null)
 
   // Written as a promise chain rather than an async body called from the effect:
   // every setState lands in a callback, which is what keeps the load out of the
@@ -546,14 +553,43 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   function viewActions(o: PoOrder): BarAction[] {
     const list: BarAction[] = []
     const has = (t: PoTransition) => transitions.includes(t)
-    const receivable = access.canReceive && isReceivable(status)
-    let primary: PoTransition | 'email' | 'receive' | null = null
+    // A supplier who drop-ships sends the goods to the customer: nothing is ever
+    // booked in here, and nobody here is told when a pallet leaves them.
+    const receivable = access.canReceive && isReceivable(status) && !o.supplierDropships
+    let primary: PoTransition | 'email' | 'receive' | 'paperwork' | null = null
+
+    // The next piece of paperwork, where whoever is looking may file it. Their
+    // documents are buying; saying money has moved, and entering an invoice,
+    // are paying.
+    const expected = nextPaperworkStep({
+      status,
+      proformaRequired: o.proformaRequired,
+      proformaReceived: o.proformaReceived,
+      proformaPaid: o.proformaPaid,
+      acknowledged: Boolean(o.acknowledgedAt) || Boolean(o.ackMediaId),
+      fullyInvoiced: fullyInvoiced(o.lines),
+    })
+    const mayFile: Record<PoPaperworkStep, boolean> = {
+      PROFORMA: access.canCreate,
+      PAYMENT: access.canApprove || access.canBills,
+      ACKNOWLEDGEMENT: access.canCreate,
+      INVOICE: access.canBills,
+    }
+    const step = expected && mayFile[expected] ? expected : null
+    // Goods still on their way come before the invoice for them - except from a
+    // drop-shipper, where no goods are ever on their way here.
+    const goodsFirst = step === 'INVOICE' && receivable && (status === 'ACKNOWLEDGED' || status === 'PART_RECEIVED')
 
     if (sendable && !o.sentAt) primary = 'email'
     else if (has('approve')) primary = 'approve'
     else if (has('submit') && o.approvalRequired) primary = 'submit'
+    else if (step && !goodsFirst) primary = 'paperwork'
     else if (receivable && (status === 'ACKNOWLEDGED' || status === 'PART_RECEIVED')) primary = 'receive'
     else if (status === 'PENDING_CLOSE' && has('close')) primary = 'close'
+    // Nothing left to collect and nothing left to arrive: all that remains is to
+    // say so. `expected`, not `step` - somebody who may not enter the invoice is
+    // not therefore invited to close an order that still wants one.
+    else if (!expected && has('close') && (status === 'RECEIVED' || (o.supplierDropships && isReceivable(status)))) primary = 'close'
     else if (has('resume')) primary = 'resume'
 
     if (canEditNow) {
@@ -591,6 +627,14 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         onClick: () => void sendOrder(),
       })
     }
+    if (step) {
+      list.push({
+        key: 'paperwork',
+        label: PAPERWORK_STEP_LABELS[step],
+        placement: primary === 'paperwork' ? 'primary' : 'secondary',
+        onClick: () => setOpenStep(step),
+      })
+    }
     if (receivable) {
       list.push({
         key: 'receive',
@@ -604,8 +648,10 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     if (access.canBills && (o.sentAt || bills.length > 0)) {
       list.push({
         key: 'bill',
-        label: 'Enter a bill',
-        placement: 'secondary',
+        // The window above is the short road for an ordinary invoice. This is
+        // the long one, for a bill with things on it the order never had.
+        label: step === 'INVOICE' ? 'Enter a bill on the full form' : 'Enter a bill',
+        placement: step === 'INVOICE' ? 'menu' : 'secondary',
         href: `/${adminPath}/m/purchase-orders/bills/new?orderId=${o.id}`,
       })
     }
@@ -617,7 +663,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       href: `/api/m/purchase-orders/admin/orders/${o.id}/pdf`,
       external: true,
     })
-    if (canRecordDespatch(o, despatchable, access.canReceive || access.canCreate)) {
+    if (!o.supplierDropships && canRecordDespatch(o, despatchable, access.canReceive || access.canCreate)) {
       list.push({
         key: 'despatch',
         label: 'Record a despatch',
@@ -733,6 +779,22 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         onDismiss={dismiss}
       />
 
+      {!editing && order && (
+        <StepModal
+          step={openStep}
+          order={order}
+          documents={documents}
+          fullFormHref={`/${adminPath}/m/purchase-orders/bills/new?orderId=${order.id}`}
+          onClose={() => setOpenStep(null)}
+          onDone={(message, problem) => {
+            setOpenStep(null)
+            setError(problem ? message : null)
+            setSent(problem ? null : message)
+            void loadOrder()
+          }}
+        />
+      )}
+
       {editing ? (
         <OrderEditForm form={form} setForm={setForm} suppliers={suppliers} totals={totals} hasCatalogue={hasCatalogue} />
       ) : (
@@ -745,6 +807,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
               proformaReceived: order!.proformaReceived,
               proformaPaid: order!.proformaPaid,
               approvalRequired: order!.approvalRequired,
+              dropships: order!.supplierDropships,
               sentAt: order!.sentAt,
               sourceKind: order!.sourceKind,
               sourceOrderNumber: typeof order!.sourceRef?.orderNumber === 'string' ? order!.sourceRef.orderNumber : null,
@@ -769,7 +832,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           onApplyDate={access.canCreate ? applyPortalDate : null}
           shipments={shipments}
           despatchable={despatchable}
-          onRecordDespatch={access.canReceive || access.canCreate ? recordDespatch : null}
+          onRecordDespatch={(access.canReceive || access.canCreate) && !order!.supplierDropships ? recordDespatch : null}
           onDeleteDespatch={access.canReceive || access.canCreate ? deleteDespatch : null}
           despatchOpen={despatchOpen}
           onDespatchOpenChange={setDespatchOpen}

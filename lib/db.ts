@@ -91,6 +91,7 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     // A row written before 010 has no column to read, which is "send it to the
     // ordering address as we always did" rather than a missing answer.
     proformaPaidToAccounts: Boolean(r.proforma_paid_to_accounts),
+    dropships: Boolean(r.dropships),
     address: address(r.address),
     currency: r.currency as string,
     paymentTerms: (r.payment_terms as string | null) ?? null,
@@ -227,6 +228,7 @@ export type SupplierInput = {
   emailCc: string | null
   accountsEmail: string | null
   proformaPaidToAccounts: boolean
+  dropships: boolean
   address: PoAddress
   currency: string
   paymentTerms: string | null
@@ -252,7 +254,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
     INSERT INTO "po_suppliers" (
       "name", "name_key", "shop_supplier_id", "shop_supplier_name", "account_number",
       "contact_name", "phone", "email", "email_cc", "accounts_email", "proforma_paid_to_accounts",
-      "address", "currency",
+      "dropships", "address", "currency",
       "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
       "carriage_paid_over", "carriage_charge", "discount_percent", "default_category_id",
       "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
@@ -261,7 +263,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
       ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
       ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
       ${input.accountsEmail}, ${input.proformaPaidToAccounts},
-      ${JSON.stringify(input.address)}::jsonb, ${input.currency},
+      ${input.dropships}, ${JSON.stringify(input.address)}::jsonb, ${input.currency},
       ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.accountTerms}, ${input.leadTimeDays},
       ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
       ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
@@ -286,6 +288,7 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
       "email_cc" = ${input.emailCc},
       "accounts_email" = ${input.accountsEmail},
       "proforma_paid_to_accounts" = ${input.proformaPaidToAccounts},
+      "dropships" = ${input.dropships},
       "address" = ${JSON.stringify(input.address)}::jsonb,
       "currency" = ${input.currency},
       "payment_terms" = ${input.paymentTerms},
@@ -513,7 +516,7 @@ function proformaFacts(r: Record<string, unknown>): {
 
 export async function getOrder(id: string): Promise<PoOrder | null> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
-    SELECT o.*, s."name" AS "supplier_name"
+    SELECT o.*, s."name" AS "supplier_name", s."dropships" AS "supplier_dropships"
       FROM "po_orders" o
       JOIN "po_suppliers" s ON s."id" = o."supplier_id"
      WHERE o."id" = ${id}
@@ -536,6 +539,7 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     status: r.status as PoStatus,
     supplierId: r.supplier_id as string,
     supplierName: r.supplier_name as string,
+    supplierDropships: Boolean(r.supplier_dropships),
     supplierSnapshot: (r.supplier_snapshot as Record<string, unknown> | null) ?? {},
     shipToKind: r.ship_to_kind as ShipToKind,
     shipTo: shipTo(r.ship_to),
