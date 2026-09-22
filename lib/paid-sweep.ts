@@ -97,7 +97,10 @@ async function paidWithNothingRaised(): Promise<Array<{ id: string; orderNumber:
     const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
       SELECT o."id", o."order_number"
         FROM "shp_orders" o
-       WHERE o."payment_status" = 'PAID'
+       -- PARTIALLY_REFUNDED is still a paid order with goods to buy in: shop
+       -- moves payment_status there when part of an order is refunded, and the
+       -- lines that are left still need ordering from the supplier.
+       WHERE o."payment_status" IN ('PAID', 'PARTIALLY_REFUNDED')
          AND o."status" NOT IN ('CANCELLED', 'REFUNDED')
          AND o."paid_at" IS NOT NULL
          -- ::int4 is load-bearing. Prisma sends a JS integer as bigint and there is

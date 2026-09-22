@@ -145,8 +145,14 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
     // LEFT JOIN, not a plain one: a product deleted since the order was placed
     // leaves the item with a null product_id, and that line has to be REPORTED
     // rather than quietly left out of the purchase order.
+    // What is still owed, not what was first ordered: units refunded before a
+    // purchase order was raised - a cancelled chair on an order of three - are
+    // not goods anybody should be buying in. The quantity-at-zero skip further
+    // down then drops a line refunded outright.
     const items = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT oi."id", oi."product_id", oi."product_name", oi."quantity", oi."unit_price", oi."line_meta",
+      SELECT oi."id", oi."product_id", oi."product_name",
+             GREATEST(oi."quantity" - COALESCE(oi."refunded_qty", 0), 0) AS "quantity",
+             oi."unit_price", oi."line_meta",
              p."sku", p."supplier_sku", p."supplier", p."cost_price"
         FROM "shp_order_items" oi
         LEFT JOIN "shp_products" p ON p."id" = oi."product_id"
