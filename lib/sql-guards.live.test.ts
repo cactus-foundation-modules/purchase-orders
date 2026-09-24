@@ -196,6 +196,8 @@ suite('purchase-orders SQL, against a real Postgres', () => {
       minimumOrderValue: null,
       carriagePaidOver: null,
       carriageCharge: null,
+      surchargeThreshold: null,
+      surchargeRates: [],
       discountPercent: null,
       defaultCategoryId: null,
       defaultVatTreatment: null,

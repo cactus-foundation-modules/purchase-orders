@@ -53,6 +53,8 @@ function supplier(patch: Partial<ReorderSupplierFacts> = {}): ReorderSupplierFac
     carriagePaidOver: null,
     carriageCharge: null,
     defaultVatRateCode: null,
+    surchargeThreshold: null,
+    surchargeRates: [],
     ...patch,
   }
 }

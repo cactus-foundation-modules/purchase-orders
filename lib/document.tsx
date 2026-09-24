@@ -177,6 +177,7 @@ export async function loadPoDocContext(
       subtotal: order.subtotal,
       discountAmount: order.discountAmount,
       carriageAmount: order.carriageAmount,
+      surchargeAmount: order.surchargeAmount,
       taxAmount: order.taxAmount,
       total: order.total,
       lines: order.lines.map((line) => ({

@@ -67,6 +67,7 @@ function order(patch: Partial<PoOrder> = {}): PoOrder {
     subtotal: '1980.00',
     discountAmount: '0.00',
     carriageAmount: '0.00',
+    surchargeAmount: '0.00',
     taxAmount: '396.00',
     total: '2376.00',
     raisedDate: '2026-04-06',

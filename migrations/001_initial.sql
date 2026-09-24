@@ -81,6 +81,11 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     "minimum_order_value"     NUMERIC(12,2),
     "carriage_paid_over"      NUMERIC(12,2),
     "carriage_charge"         NUMERIC(12,2),
+    -- Net value below which a sale-surcharge applies, and the rates it applies
+    -- at live on their own table, po_supplier_surcharge_rates. NULL is "no
+    -- surcharge", same convention as carriage_paid_over above. See 015, where
+    -- this column arrives for installs that already have 001.
+    "surcharge_threshold"     NUMERIC(12,2),
     -- Trade discount off list, as a percentage, and what a retail price list is
     -- imported at. NULL is "none recorded", which is not the same as 0% - see
     -- 005, where this column arrives for installs that already have 001.
@@ -135,6 +140,10 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     "subtotal"            NUMERIC(12,2) NOT NULL DEFAULT 0,
     "discount_amount"     NUMERIC(12,2) NOT NULL DEFAULT 0,
     "carriage_amount"     NUMERIC(12,2) NOT NULL DEFAULT 0,
+    -- A supplier's small-order fee on clearance stock, worked out and totalled
+    -- exactly like carriage above - see lib/from-order.ts surchargeFor. See
+    -- 015, where this column arrives for installs that already have 001.
+    "surcharge_amount"    NUMERIC(12,2) NOT NULL DEFAULT 0,
     "tax_amount"          NUMERIC(12,2) NOT NULL DEFAULT 0,
     "total"               NUMERIC(12,2) NOT NULL DEFAULT 0,
     "raised_date"         DATE,

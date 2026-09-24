@@ -183,6 +183,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         taxMode: form.taxMode,
         discountAmount: form.discountAmount || '0',
         carriageAmount: form.carriageAmount || '0',
+        surchargeAmount: form.surchargeAmount || '0',
       }),
     [form],
   )

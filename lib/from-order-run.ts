@@ -169,6 +169,9 @@ async function raiseOneOrder(
     // where this module has always carried delivery and a line total that
     // included it would disagree with every supplier invoice ever matched.
     carriageAmount: group.carriageAmount,
+    // This supplier's sale surcharge, already worked out over the group's own
+    // sale-coded lines and capped at their threshold - see `surchargeFor`.
+    surchargeAmount: group.surchargeAmount,
     requiredByDate: null,
     expectedDate: null,
     paymentTerms: null,
@@ -191,6 +194,7 @@ async function raiseOneOrder(
     taxMode: input.taxMode,
     discountAmount: input.discountAmount,
     carriageAmount: input.carriageAmount,
+    surchargeAmount: input.surchargeAmount,
   })
 
   const number = await generateOrderNumber()

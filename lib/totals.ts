@@ -70,12 +70,18 @@ export type OrderTotalsInput = {
   discountAmount?: string | number | null
   carriageAmount?: string | number | null
   carriageTaxRatePercent?: string | number | null
+  /** A supplier's sale surcharge - see `lib/from-order.ts` `surchargeFor`.
+   *  Taxed at the highest line rate, the same ancillary-charge treatment
+   *  carriage gets when nothing overrides it - no override exists for
+   *  surcharge, since nothing on the order side overrides carriage's either. */
+  surchargeAmount?: string | number | null
 }
 
 export type OrderTotals = {
   subtotal: string
   discountAmount: string
   carriageAmount: string
+  surchargeAmount: string
   taxAmount: string
   total: string
   lineTotals: string[]
@@ -110,12 +116,19 @@ export function orderTotals(input: OrderTotalsInput): OrderTotals {
     tax += Math.round((carriage * carriageRate) / 10_000)
   }
 
-  const total = net - cappedDiscount + carriage + tax
+  const surcharge = scaled(input.surchargeAmount ?? 0, 2)
+  const surchargeRate = input.lines.reduce((max, l) => Math.max(max, scaled(l.taxRatePercent ?? 0, 2)), 0)
+  if (surcharge !== 0 && surchargeRate !== 0) {
+    tax += Math.round((surcharge * surchargeRate) / 10_000)
+  }
+
+  const total = net - cappedDiscount + carriage + surcharge + tax
 
   return {
     subtotal: fromPence(net),
     discountAmount: fromPence(cappedDiscount),
     carriageAmount: fromPence(carriage),
+    surchargeAmount: fromPence(surcharge),
     taxAmount: fromPence(tax),
     total: fromPence(total),
     lineTotals: amounts.map((a) => a.lineTotal),

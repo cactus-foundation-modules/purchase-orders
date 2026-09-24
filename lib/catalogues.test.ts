@@ -30,6 +30,7 @@ function item(patch: Partial<CatalogueImportItem> = {}): CatalogueImportItem {
     minimumOrderQty: null,
     leadTimeDays: null,
     discountGroup: null,
+    category: null,
     discontinued: false,
     ...patch,
   }
@@ -45,6 +46,7 @@ function cost(patch: Partial<PoCatalogueCost> = {}): PoCatalogueCost {
     discontinued: false,
     leadTimeDays: null,
     minimumOrderQty: null,
+    category: null,
     ...patch,
   }
 }
@@ -147,8 +149,8 @@ describe('parseCatalogueCsv', () => {
 
   it('takes the headers a supplier actually uses', () => {
     const result = parseCatalogueCsv(
-      'Supplier SKU,Product Name,Trade Price,Pack Size,MOQ,Lead time (days),Discount Group,Discontinued\n' +
-        'DS-1234,Task chair,40.00,2,4,21,B,Yes\n',
+      'Supplier SKU,Product Name,Trade Price,Pack Size,MOQ,Lead time (days),Discount Group,Category,Discontinued\n' +
+        'DS-1234,Task chair,40.00,2,4,21,B,Seating,Yes\n',
     )
     expect(result.columns.unitCost).toBe('Trade Price')
     expect(result.items[0]).toMatchObject({
@@ -158,8 +160,27 @@ describe('parseCatalogueCsv', () => {
       minimumOrderQty: '4.000',
       leadTimeDays: 21,
       discountGroup: 'B',
+      category: 'Seating',
       discontinued: true,
     })
+  })
+
+  it('leaves category unmapped rather than double-claiming the discount group column', () => {
+    // "Product Group" is an alias for discountGroup; it must not also be read
+    // as category, or a list with only that one column would split silently
+    // between two fields instead of filling either one properly.
+    const result = parseCatalogueCsv('Code,Price,Product Group\nDS-1,40.00,B\n')
+    expect(result.columns.discountGroup).toBe('Product Group')
+    expect(result.columns.category).toBeNull()
+    expect(result.items[0]!.discountGroup).toBe('B')
+    expect(result.items[0]!.category).toBeNull()
+  })
+
+  it('treats a category change as a genuine difference, the same as a price change', () => {
+    const result = parseCatalogueCsv('Code,Price,Category\nDS-1,40.00,Seating\nDS-1,40.00,Furniture\n')
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]!.category).toBe('Seating')
+    expect(result.problems[0]!.message).toContain('twice saying two different things')
   })
 
   it('prefers the trade price over the retail one', () => {
@@ -558,6 +579,8 @@ describe('planFromOrder with a price list', () => {
     carriagePaidOver: null,
     carriageCharge: null,
     defaultVatRateCode: null,
+    surchargeThreshold: null,
+    surchargeRates: [],
   }
 
   const order: ShopOrderFacts = {
@@ -580,6 +603,7 @@ describe('planFromOrder with a price list', () => {
         unitPrice: '162.00',
         sku: 'CHR-1',
         supplierSku: 'DS-1234',
+        saleSku: null,
         supplierName: 'Dynamic',
         costPrice: '153.18',
         lineMeta: null,
@@ -622,5 +646,85 @@ describe('planFromOrder with a price list', () => {
     expect(planFromOrder(order, [supplier]).groups[0]!.lines[0]!.catalogueDescription).toBeNull()
     const blank = planFromOrder(order, [supplier], new Map([['s1::DS1234', cost({ description: '' })]]))
     expect(blank.groups[0]!.lines[0]!.catalogueDescription).toBeNull()
+  })
+
+  it('buys under the sale code the line was actually sold on, ahead of the ordinary one', () => {
+    const onSale: ShopOrderFacts = { ...order, items: [{ ...order.items[0]!, saleSku: 'DS-CLR-1' }] }
+    const plan = planFromOrder(onSale, [supplier], new Map([['s1::DSCLR1', cost({ supplierSku: 'DS-CLR-1', unitCost: '99.0000' })]]))
+    const line = plan.groups[0]!.lines[0]!
+    expect(line.supplierSku).toBe('DS-CLR-1')
+    expect(line.unitCost).toBe('99.0000')
+    expect(line.costSource).toBe('CATALOGUE')
+  })
+
+  it('skips a sale line rather than buying clearance stock at the ordinary price', () => {
+    // Guessing here would put the ordinary cost on a purchase order quoting the
+    // CLEARANCE code - not a price that code was ever offered at.
+    const onSale: ShopOrderFacts = { ...order, items: [{ ...order.items[0]!, saleSku: 'DS-CLR-1' }] }
+    const plan = planFromOrder(onSale, [supplier])
+    expect(plan.groups).toEqual([])
+    expect(plan.skipped).toHaveLength(1)
+    expect(plan.skipped[0]!.reason).toContain('DS-CLR-1')
+  })
+
+  describe('the sale surcharge', () => {
+    // Three units on sale, priced off the catalogue at £99 each - net £297,
+    // well clear of every threshold below unless a test says otherwise.
+    const onSale: ShopOrderFacts = {
+      ...order,
+      items: [{ ...order.items[0]!, saleSku: 'DS-CLR-1', quantity: 3 }],
+    }
+    const catalogueWithCategory = new Map([
+      ['s1::DSCLR1', cost({ supplierSku: 'DS-CLR-1', unitCost: '99.0000', category: 'Seating' })],
+    ])
+
+    it('adds the rate per unit, on top of what the supplier already priced the sale code at', () => {
+      const withRates = {
+        ...supplier,
+        surchargeThreshold: '1000.00',
+        surchargeRates: [{ categoryKey: 'seating', ratePerUnit: '6.0000' }],
+      }
+      const plan = planFromOrder(onSale, [withRates], catalogueWithCategory)
+      const group = plan.groups[0]!
+      expect(group.surchargeAmount).toBe('18.00')
+      // The surcharge is on TOP of the goods, never folded into the line cost.
+      expect(group.lines[0]!.unitCost).toBe('99.0000')
+    })
+
+    it('adds nothing once the order is at or above the threshold', () => {
+      const withRates = {
+        ...supplier,
+        surchargeThreshold: '200.00',
+        surchargeRates: [{ categoryKey: 'seating', ratePerUnit: '6.0000' }],
+      }
+      const plan = planFromOrder(onSale, [withRates], catalogueWithCategory)
+      expect(plan.groups[0]!.surchargeAmount).toBe('0.00')
+    })
+
+    it('caps the surcharge at the shortfall to the threshold, even where the raw rate comes to more', () => {
+      // £297 net against a £300 threshold - a £3 shortfall - but three units
+      // at £6 each would raw out at £18.
+      const withRates = {
+        ...supplier,
+        surchargeThreshold: '300.00',
+        surchargeRates: [{ categoryKey: 'seating', ratePerUnit: '6.0000' }],
+      }
+      const plan = planFromOrder(onSale, [withRates], catalogueWithCategory)
+      expect(plan.groups[0]!.surchargeAmount).toBe('3.00')
+    })
+
+    it('carries onSale and the catalogue category onto the line', () => {
+      const plan = planFromOrder(onSale, [supplier], catalogueWithCategory)
+      const line = plan.groups[0]!.lines[0]!
+      expect(line.onSale).toBe(true)
+      expect(line.category).toBe('Seating')
+    })
+
+    it('marks an ordinary line as not on sale, with no category unless the list carries one', () => {
+      const plan = planFromOrder(order, [supplier])
+      const line = plan.groups[0]!.lines[0]!
+      expect(line.onSale).toBe(false)
+      expect(line.category).toBeNull()
+    })
   })
 })

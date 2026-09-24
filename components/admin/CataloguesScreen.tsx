@@ -38,6 +38,7 @@ const FIELD_LABELS: { field: string; label: string; hint?: string }[] = [
   { field: 'minimumOrderQty', label: 'Smallest order' },
   { field: 'leadTimeDays', label: 'Lead time in days' },
   { field: 'discountGroup', label: 'Discount group' },
+  { field: 'category', label: 'Category', hint: 'What this is, for a rule that prices by kind rather than by code - a sale surcharge, say.' },
   { field: 'discontinued', label: 'No longer sold' },
 ]
 
@@ -514,6 +515,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
                     <th style={thRight}>Min order</th>
                     <th style={thRight}>Lead time</th>
                     <th style={th}>Group</th>
+                    <th style={th}>Category</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -529,6 +531,7 @@ export function CataloguesScreen({ enabled, canEdit }: { enabled: boolean; canEd
                       <td style={tdRight}>{item.minimumOrderQty == null ? '—' : Number(item.minimumOrderQty)}</td>
                       <td style={tdRight}>{item.leadTimeDays == null ? '—' : `${item.leadTimeDays} days`}</td>
                       <td style={td}>{item.discountGroup ?? <span style={muted}>—</span>}</td>
+                      <td style={td}>{item.category ?? <span style={muted}>—</span>}</td>
                     </tr>
                   ))}
                 </tbody>

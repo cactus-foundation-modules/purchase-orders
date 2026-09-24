@@ -25,9 +25,11 @@ import { WEB_ADDRESS_MESSAGE, webAddress } from '@/modules/purchase-orders/lib/w
  * a supplier emailing to say two of eleven lines have gone - so the boxes start
  * empty, and nine blanks must mean nine noughts rather than a 400.
  */
+// Nine integer digits, not ten: po_shipment_lines.qty is NUMERIC(12,3), which
+// only holds nine before the three decimal places.
 const Qty = z
   .string()
-  .regex(/^\d{1,10}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
+  .regex(/^\d{1,9}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
   .or(z.literal('').transform(() => '0'))
 
 export const ShipmentLineBody = z.object({

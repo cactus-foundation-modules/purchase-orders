@@ -67,6 +67,15 @@ export type ReorderSupplierFacts = {
   carriagePaidOver: string | null
   carriageCharge: string | null
   defaultVatRateCode: string | null
+  /** Net value below which a sale surcharge applies - see
+   *  `lib/from-order.ts` `surchargeFor`. Null is "no surcharge". Always null
+   *  on the reorder job's own reader (`lib/reorder.ts`): the nightly run buys
+   *  off live stock levels against a product's ordinary code, never a
+   *  customer order's sale SKU, so a sale-coded line can never reach it and
+   *  the field can never fire there. */
+  surchargeThreshold: string | null
+  /** Only the key and the rate - matching, never display. */
+  surchargeRates: Array<{ categoryKey: string; ratePerUnit: string }>
 }
 
 /** What this supplier last charged for this product, off their last order line. */

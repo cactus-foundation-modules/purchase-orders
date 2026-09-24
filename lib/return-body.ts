@@ -5,7 +5,9 @@ import { z } from 'zod'
 // is how a unit cost of 1.005 arrives as 1.0049999999999999 and a credit claim
 // comes out a pound under what the order said.
 
-const Qty = z.string().regex(/^\d{1,10}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
+// Nine integer digits, not ten: po_return_lines.qty is NUMERIC(12,3), which
+// only holds nine before the three decimal places.
+const Qty = z.string().regex(/^\d{1,9}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
 
 export const ReturnLineBody = z.object({
   orderLineId: z.string().min(1),

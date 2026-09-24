@@ -98,5 +98,34 @@ describe('orderTotals', () => {
     const totals = orderTotals({ lines: [], taxMode: 'EXCLUSIVE' })
     expect(totals.subtotal).toBe('0.00')
     expect(totals.total).toBe('0.00')
+    expect(totals.surchargeAmount).toBe('0.00')
+  })
+
+  it('taxes a sale surcharge at the highest rate on the order, same as carriage', () => {
+    const totals = orderTotals({
+      lines: [
+        { qty: '1', unitCost: '100.00', taxRatePercent: '0' },
+        { qty: '1', unitCost: '100.00', taxRatePercent: '20' },
+      ],
+      taxMode: 'EXCLUSIVE',
+      surchargeAmount: '10.00',
+    })
+    expect(totals.surchargeAmount).toBe('10.00')
+    // 20.00 on the standard-rated line, 2.00 on the surcharge.
+    expect(totals.taxAmount).toBe('22.00')
+    expect(totals.total).toBe('232.00')
+  })
+
+  it('adds carriage and surcharge together, as two distinct buckets, never merged into the goods', () => {
+    const totals = orderTotals({
+      lines: [{ qty: '1', unitCost: '100.00', taxRatePercent: '0' }],
+      taxMode: 'EXCLUSIVE',
+      carriageAmount: '10.00',
+      surchargeAmount: '5.00',
+    })
+    expect(totals.subtotal).toBe('100.00')
+    expect(totals.carriageAmount).toBe('10.00')
+    expect(totals.surchargeAmount).toBe('5.00')
+    expect(totals.total).toBe('115.00')
   })
 })

@@ -47,6 +47,7 @@ export type Form = {
   taxMode: 'EXCLUSIVE' | 'INCLUSIVE'
   discountAmount: string
   carriageAmount: string
+  surchargeAmount: string
   requiredByDate: string
   expectedDate: string
   paymentTerms: string
@@ -100,6 +101,7 @@ export function emptyForm(defaults: FormDefaults): Form {
     taxMode: 'EXCLUSIVE',
     discountAmount: '0',
     carriageAmount: '0',
+    surchargeAmount: '0',
     requiredByDate: '',
     expectedDate: '',
     paymentTerms: '',
@@ -130,6 +132,7 @@ export function formFromOrder(order: PoOrder): Form {
     taxMode: order.taxMode,
     discountAmount: order.discountAmount,
     carriageAmount: order.carriageAmount,
+    surchargeAmount: order.surchargeAmount,
     requiredByDate: order.requiredByDate ?? '',
     expectedDate: order.expectedDate ?? '',
     paymentTerms: order.paymentTerms ?? '',
@@ -201,6 +204,7 @@ export function formBody(form: Form, amendReason: string) {
     taxMode: form.taxMode,
     discountAmount: form.discountAmount || '0',
     carriageAmount: form.carriageAmount || '0',
+    surchargeAmount: form.surchargeAmount || '0',
     requiredByDate: form.requiredByDate || null,
     expectedDate: form.expectedDate || null,
     paymentTerms: form.paymentTerms || null,

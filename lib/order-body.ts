@@ -8,11 +8,44 @@ import type { OrderInput } from './db'
 // cost of 1.005 arrives as 1.0049999999999999 and puts a supplier's invoice a
 // pound out over a two-hundred-unit line.
 
-const Decimal = (places: number, label: string) =>
-  z.string().regex(new RegExp(`^-?\\d{1,10}(\\.\\d{1,${places}})?$`), label)
+// The integer-digit cap must come off the column's own precision, not be
+// hardcoded to 10 regardless of scale: NUMERIC(12,3) leaves room for nine
+// integer digits, NUMERIC(12,4) for eight, and a validator that let ten
+// through either way passed a number Postgres would refuse - surfacing as a
+// raw "numeric field overflow" out of the transaction that tried to write it,
+// rather than the plain-English message this exists to give instead. Every
+// column here is NUMERIC(12,x) except fxRate below, which says so itself.
+//
+// Signed, for Money below: carriage and a unit cost can genuinely go negative
+// (a credit note, a cost correction), neither column carries a CHECK
+// forbidding it, and lib/totals.ts's orderTotals() carries both straight
+// through with no clamp either way - a negative value there is consistent
+// end to end, stored and totalled the same figure.
+const Decimal = (places: number, label: string, precision = 12) =>
+  z.string().regex(new RegExp(`^-?\\d{1,${precision - places}}(\\.\\d{1,${places}})?$`), label)
 
 const Money = Decimal(2, 'Amounts need to look like 12.34')
-const Qty = Decimal(3, 'Quantities can have up to three decimal places')
+// NOT Money: an order-level discount is "an amount off the whole order" (the
+// screen's own words) and orderTotals() already assumes exactly that -
+// Math.max(0, ...) clamps a negative discount to nothing there, and
+// Math.min(discount, net) refuses to let it exceed the goods it is coming off
+// either. A negative value passing Zod here would have stored one figure in
+// "discount_amount" while every total on the order was computed as though it
+// were zero - a silent mismatch between what is on record and what the order
+// actually comes to, not the loud rejection this gives instead.
+const DiscountAmount = z.string().regex(/^\d{1,10}(\.\d{1,2})?$/, 'A discount needs to look like 12.34, and never negative')
+// NOT built on Decimal() above - a quantity is never signed, and unlike Money/
+// UnitCost this one has a real CHECK behind it: po_order_lines has
+// CHECK (qty > 0). A leading minus passing Zod here does not just look odd, it
+// fails the INSERT with a raw constraint violation instead of this file's own
+// message - every sibling body-schema file in this module (bill/receipt/
+// return/shipment/portal) already validates its own qty the same unsigned
+// way; this was the one left signed by mistake. qtyCancelled shares this
+// validator too, but for a different reason: no column carries a CHECK on it,
+// it is simply always a COUNT - every reader of it (receiving, billing, the
+// reports) computes qty - qtyCancelled and would silently corrupt that
+// arithmetic on a negative value rather than fail loudly the way qty does.
+const Qty = z.string().regex(/^\d{1,9}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
 const UnitCost = Decimal(4, 'Unit costs can have up to four decimal places')
 const Percent = z.string().regex(/^\d{1,3}(\.\d{1,2})?$/, 'Percentages need to look like 20 or 17.5')
 
@@ -76,10 +109,13 @@ export const OrderBody = z.object({
   shipTo: ShipToBody.default({}),
   currency: z.string().trim().length(3, 'Currency is a three-letter code').default('GBP'),
   baseCurrency: z.string().trim().length(3, 'Currency is a three-letter code').default('GBP'),
-  fxRate: Decimal(8, 'The exchange rate can have up to eight decimal places').default('1'),
+  // NUMERIC(18,8), not the 12 every other decimal column here is - ten
+  // integer digits, not four.
+  fxRate: Decimal(8, 'The exchange rate can have up to eight decimal places', 18).default('1'),
   taxMode: z.enum(['EXCLUSIVE', 'INCLUSIVE']).default('EXCLUSIVE'),
-  discountAmount: Money.default('0'),
+  discountAmount: DiscountAmount.default('0'),
   carriageAmount: Money.default('0'),
+  surchargeAmount: Money.default('0'),
   requiredByDate: DateOnly.default(null),
   expectedDate: DateOnly.default(null),
   paymentTerms: z.string().max(200).nullable().default(null),
@@ -111,6 +147,7 @@ export function toOrderInput(body: OrderBodyInput): OrderInput {
     taxMode: body.taxMode,
     discountAmount: body.discountAmount,
     carriageAmount: body.carriageAmount,
+    surchargeAmount: body.surchargeAmount,
     requiredByDate: body.requiredByDate,
     expectedDate: body.expectedDate,
     paymentTerms: orNull(body.paymentTerms),

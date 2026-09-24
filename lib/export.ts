@@ -56,7 +56,7 @@ const ORDER_COLUMNS = [
   'order_number', 'revision', 'status', 'supplier', 'supplier_account',
   'raised_date', 'required_by_date', 'expected_date', 'sent_at', 'acknowledged_at', 'closed_at',
   'currency', 'fx_rate', 'base_currency', 'tax_mode',
-  'subtotal', 'discount', 'carriage', 'tax', 'total',
+  'subtotal', 'discount', 'carriage', 'surcharge', 'tax', 'total',
   'lines', 'source', 'payment_terms', 'delivery_terms', 'ship_to_kind', 'notes_internal', 'created_at',
 ] as const
 
@@ -117,7 +117,7 @@ async function exportOrders(from: string, to: string): Promise<ExportFile> {
            o."raised_date", o."required_by_date", o."expected_date", o."sent_at",
            o."acknowledged_at", o."closed_at",
            o."currency", o."fx_rate", o."base_currency", o."tax_mode",
-           o."subtotal", o."discount_amount", o."carriage_amount", o."tax_amount", o."total",
+           o."subtotal", o."discount_amount", o."carriage_amount", o."surcharge_amount", o."tax_amount", o."total",
            o."source_kind", o."payment_terms", o."delivery_terms", o."ship_to_kind",
            o."notes_internal", o."created_at",
            (SELECT count(*) FROM "po_order_lines" l WHERE l."order_id" = o."id") AS "line_count"
@@ -135,7 +135,7 @@ async function exportOrders(from: string, to: string): Promise<ExportFile> {
       day(r.raised_date), day(r.required_by_date), day(r.expected_date), when(r.sent_at),
       when(r.acknowledged_at), when(r.closed_at),
       text(r.currency), num(r.fx_rate), text(r.base_currency), text(r.tax_mode),
-      num(r.subtotal), num(r.discount_amount), num(r.carriage_amount), num(r.tax_amount), num(r.total),
+      num(r.subtotal), num(r.discount_amount), num(r.carriage_amount), num(r.surcharge_amount), num(r.tax_amount), num(r.total),
       num(r.line_count), text(r.source_kind), text(r.payment_terms), text(r.delivery_terms),
       text(r.ship_to_kind), text(r.notes_internal), when(r.created_at),
     ]),

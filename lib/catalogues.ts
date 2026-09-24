@@ -101,6 +101,7 @@ function mapItem(r: Record<string, unknown>): PoCatalogueItem {
     minimumOrderQty: num(r.minimum_order_qty),
     leadTimeDays: r.lead_time_days == null ? null : Number(r.lead_time_days),
     discountGroup: text(r.discount_group),
+    category: text(r.category),
     discontinued: Boolean(r.discontinued),
   }
 }
@@ -260,13 +261,13 @@ export async function replaceCatalogueItems(
       (item) => Prisma.sql`(
         ${catalogueId}, ${item.supplierSku}, ${item.supplierSkuKey}, ${item.description},
         ${item.unitCost}::numeric, ${item.packSize}::numeric, ${item.minimumOrderQty}::numeric,
-        ${item.leadTimeDays}, ${item.discountGroup}, ${item.discontinued}
+        ${item.leadTimeDays}, ${item.discountGroup}, ${item.category}, ${item.discontinued}
       )`,
     )
     statements.push(prisma.$executeRaw`
       INSERT INTO "po_catalogue_items"
         ("catalogue_id", "supplier_sku", "supplier_sku_key", "description",
-         "unit_cost", "pack_size", "minimum_order_qty", "lead_time_days", "discount_group", "discontinued")
+         "unit_cost", "pack_size", "minimum_order_qty", "lead_time_days", "discount_group", "category", "discontinued")
       VALUES ${Prisma.join(values)}
     `)
   }
@@ -342,7 +343,7 @@ export async function catalogueCostsBySupplier(supplierIds: string[]): Promise<M
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT DISTINCT ON (c."supplier_id", i."supplier_sku_key")
            c."supplier_id", i."supplier_sku_key", i."supplier_sku", i."description", i."unit_cost",
-           i."discontinued", i."lead_time_days", i."minimum_order_qty",
+           i."discontinued", i."lead_time_days", i."minimum_order_qty", i."category",
            c."id" AS "catalogue_id", c."name" AS "catalogue_name"
       FROM "po_catalogue_items" i
       JOIN "po_supplier_catalogues" c ON c."id" = i."catalogue_id"
@@ -360,6 +361,7 @@ export async function catalogueCostsBySupplier(supplierIds: string[]): Promise<M
       discontinued: Boolean(r.discontinued),
       leadTimeDays: r.lead_time_days == null ? null : Number(r.lead_time_days),
       minimumOrderQty: num(r.minimum_order_qty),
+      category: text(r.category),
     })
   }
   return out

@@ -114,6 +114,9 @@ export function OrderEditForm({ form, setForm, suppliers, totals, hasCatalogue }
             <Field label="Carriage" hint="What the supplier charges you for delivery.">
               <input style={input} inputMode="decimal" value={form.carriageAmount} onChange={(e) => set({ carriageAmount: e.target.value })} />
             </Field>
+            <Field label="Surcharge" hint="A supplier's sale-clearance surcharge, where one applies.">
+              <input style={input} inputMode="decimal" value={form.surchargeAmount} onChange={(e) => set({ surchargeAmount: e.target.value })} />
+            </Field>
           </div>
           <div style={{ flex: '0 1 320px' }}>
             <Totals totals={totals} currency={form.currency} />

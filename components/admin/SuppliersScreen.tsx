@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PoAddress } from '@/modules/purchase-orders/lib/config'
 import type { PoSupplier, SupplierAccountTerms, SupplierStatus } from '@/modules/purchase-orders/lib/types'
 import { card, Field, input, linkButton, muted, table, td, th, thRight } from './ui'
+import { newSurchargeRate, SupplierSurchargeRates, type SurchargeRateRow } from './SupplierSurchargeRates'
 
 type ShopSupplier = { id: string; name: string; email: string | null; accountNumber: string | null }
 
@@ -27,6 +28,8 @@ type Form = {
   minimumOrderValue: string
   carriagePaidOver: string
   carriageCharge: string
+  surchargeThreshold: string
+  surchargeRates: SurchargeRateRow[]
   discountPercent: string
   taxRegistrationNumber: string
   deliveryInstructions: string
@@ -57,6 +60,8 @@ const EMPTY_FORM: Form = {
   minimumOrderValue: '',
   carriagePaidOver: '',
   carriageCharge: '',
+  surchargeThreshold: '',
+  surchargeRates: [],
   discountPercent: '',
   taxRegistrationNumber: '',
   deliveryInstructions: '',
@@ -142,6 +147,8 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       minimumOrderValue: supplier.minimumOrderValue ?? '',
       carriagePaidOver: supplier.carriagePaidOver ?? '',
       carriageCharge: supplier.carriageCharge ?? '',
+      surchargeThreshold: supplier.surchargeThreshold ?? '',
+      surchargeRates: supplier.surchargeRates.map((r) => newSurchargeRate({ category: r.category, ratePerUnit: r.ratePerUnit })),
       discountPercent: supplier.discountPercent ?? '',
       taxRegistrationNumber: supplier.taxRegistrationNumber ?? '',
       deliveryInstructions: supplier.deliveryInstructions ?? '',
@@ -187,6 +194,11 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         minimumOrderValue: moneyOrNull(form.minimumOrderValue),
         carriagePaidOver: moneyOrNull(form.carriagePaidOver),
         carriageCharge: moneyOrNull(form.carriageCharge),
+        surchargeThreshold: moneyOrNull(form.surchargeThreshold),
+        // Nothing is filtered out here: an incomplete row is a mistake to be
+        // told about, same as an order line with nothing on it - not one to
+        // quietly drop.
+        surchargeRates: form.surchargeRates.map((r) => ({ category: r.category, ratePerUnit: r.ratePerUnit })),
         discountPercent: moneyOrNull(form.discountPercent),
         defaultCategoryId: null,
         defaultVatTreatment: null,
@@ -470,6 +482,33 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
               <input style={input} value={form.taxRegistrationNumber} onChange={(e) => setForm({ ...form, taxRegistrationNumber: e.target.value })} />
             </Field>
           </div>
+
+          <fieldset style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '0.75rem', margin: '1rem 0 0' }}>
+            <legend style={{ padding: '0 0.375rem', fontSize: 'var(--text-sm)' }}>Sale surcharge</legend>
+            <p style={{ ...muted, margin: '0 0 0.5rem' }}>
+              Some suppliers charge more for clearance stock under a small order - set a threshold and what each
+              category costs per unit, and it is added to a draft purchase order by itself. Leave the threshold empty
+              and nothing changes.
+            </p>
+            <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '0.75rem' }}>
+              <Field label="Net value below which it applies">
+                <input
+                  style={input}
+                  value={form.surchargeThreshold}
+                  onChange={(e) => setForm({ ...form, surchargeThreshold: e.target.value })}
+                  placeholder="e.g. 300.00"
+                />
+              </Field>
+            </div>
+            <SupplierSurchargeRates
+              rates={form.surchargeRates}
+              onAdd={() => setForm({ ...form, surchargeRates: [...form.surchargeRates, newSurchargeRate()] })}
+              onRemove={(key) => setForm({ ...form, surchargeRates: form.surchargeRates.filter((r) => r.key !== key) })}
+              onChange={(key, patch) =>
+                setForm({ ...form, surchargeRates: form.surchargeRates.map((r) => (r.key === key ? { ...r, ...patch } : r)) })
+              }
+            />
+          </fieldset>
 
           <fieldset style={{ border: '1px solid var(--color-border)', borderRadius: 6, padding: '0.75rem', margin: '1rem 0 0' }}>
             <legend style={{ padding: '0 0.375rem', fontSize: 'var(--text-sm)' }}>Address</legend>

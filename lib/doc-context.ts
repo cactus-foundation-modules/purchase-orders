@@ -85,6 +85,7 @@ export type PoDocOrder = {
   subtotal: string
   discountAmount: string
   carriageAmount: string
+  surchargeAmount: string
   taxAmount: string
   total: string
   lines: PoDocLine[]
@@ -158,6 +159,7 @@ export const SAMPLE_PO_CONTEXT: PoDocContext = {
     subtotal: '2640.00',
     discountAmount: '0.00',
     carriageAmount: '45.00',
+    surchargeAmount: '0.00',
     taxAmount: '537.00',
     total: '3222.00',
     lines: [

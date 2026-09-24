@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { catalogueNameKey } from './catalogue-import'
 import type { SupplierInput } from './db'
 
 // The supplier form, validated once and shared by the create and the update
@@ -7,6 +8,20 @@ import type { SupplierInput } from './db'
 // threshold of 249.99 becomes 249.98999999999998.
 
 const Money = z.string().regex(/^-?\d{1,10}(\.\d{1,2})?$/, 'Amounts need to look like 12.34').nullable()
+
+/** A per-unit rate, four decimal places - same precision `unit_cost` and
+ *  `service_cost` already carry, because a rate is exactly that kind of
+ *  figure and two places would round it before it was ever used. Eight integer
+ *  digits, not ten like `Money` above: the column is NUMERIC(12,4), and a
+ *  ninth digit is a number this rate can never actually hold - caught here
+ *  as a plain validation message rather than a raw overflow error out of
+ *  the transaction that tries to write it. */
+const UnitRate = z.string().regex(/^\d{1,8}(\.\d{1,4})?$/, 'A rate looks like 6.00 or 40')
+
+const SurchargeRateBody = z.object({
+  category: z.string().trim().min(1, 'Give this category a name').max(120),
+  ratePerUnit: UnitRate,
+})
 
 /** A trade discount, as the column holds it: NUMERIC(5,2), nought to a hundred.
  *  A string all the way in, same as the money fields and for the same reason. */
@@ -53,6 +68,15 @@ export const SupplierBody = z.object({
   minimumOrderValue: Money.default(null),
   carriagePaidOver: Money.default(null),
   carriageCharge: Money.default(null),
+  // Net value below which a sale surcharge is added to an order raised for
+  // this supplier - null is "no surcharge", same convention as the two above.
+  surchargeThreshold: Money.default(null),
+  surchargeRates: z.array(SurchargeRateBody)
+    .default([])
+    .refine(
+      (rates) => new Set(rates.map((r) => catalogueNameKey(r.category))).size === rates.length,
+      'Two of these categories are the same - give each one its own name.',
+    ),
   discountPercent: Percent.default(null),
   defaultCategoryId: z.string().max(100).nullable().default(null),
   defaultVatTreatment: z.string().max(60).nullable().default(null),
@@ -100,6 +124,12 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     minimumOrderValue: orNull(body.minimumOrderValue),
     carriagePaidOver: orNull(body.carriagePaidOver),
     carriageCharge: orNull(body.carriageCharge),
+    surchargeThreshold: orNull(body.surchargeThreshold),
+    surchargeRates: body.surchargeRates.map((r) => ({
+      category: r.category.trim(),
+      categoryKey: catalogueNameKey(r.category),
+      ratePerUnit: r.ratePerUnit,
+    })),
     discountPercent: orNull(body.discountPercent),
     defaultCategoryId: orNull(body.defaultCategoryId),
     defaultVatTreatment: orNull(body.defaultVatTreatment),
@@ -119,4 +149,14 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
 export function isDuplicateSupplierName(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return message.includes('po_suppliers_name_key_unique')
+}
+
+/**
+ * The unique index on (supplier_id, category_key) is the backstop for a race
+ * the form's own duplicate check above cannot see - two saves landing at once.
+ * Turned into plain English rather than a 500, same as the supplier-name one.
+ */
+export function isDuplicateSurchargeCategory(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('po_supplier_surcharge_rates_supplier_category_unique')
 }

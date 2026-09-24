@@ -5,7 +5,9 @@ import type { ReceiptInput } from './receipts'
 // the way from the browser to the numeric column, because a JSON float is how
 // 0.3 of a metre becomes 0.30000000000000004 and a delivery note stops adding up.
 
-const Qty = z.string().regex(/^\d{1,10}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
+// Nine integer digits, not ten: po_receipt_lines.qty_accepted/qty_rejected are
+// NUMERIC(12,3), which only holds nine before the three decimal places.
+const Qty = z.string().regex(/^\d{1,9}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
 
 export const ReceiptLineBody = z.object({
   orderLineId: z.string().min(1),

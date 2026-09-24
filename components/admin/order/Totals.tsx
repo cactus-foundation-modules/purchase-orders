@@ -29,6 +29,14 @@ export function Totals({ totals, currency }: { totals: ReturnType<typeof orderTo
             </td>
           </tr>
         )}
+        {Number(totals.surchargeAmount) !== 0 && (
+          <tr>
+            <td style={td}>Surcharge</td>
+            <td style={tdRight}>
+              <Money value={totals.surchargeAmount} currency={currency} />
+            </td>
+          </tr>
+        )}
         <tr>
           <td style={td}>Tax</td>
           <td style={tdRight}>

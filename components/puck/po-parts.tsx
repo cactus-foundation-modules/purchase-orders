@@ -815,9 +815,9 @@ export const poDocLinesPuckRscComponent = { ...poDocLinesPuckComponent, render: 
 // ---------------------------------------------------------------------------
 
 type TotalsProps = DocProps & {
-  subtotalLabel?: string; discountLabel?: string; carriageLabel?: string
+  subtotalLabel?: string; discountLabel?: string; carriageLabel?: string; surchargeLabel?: string
   taxLabel?: string; totalLabel?: string; note?: string
-  emphasis?: string; width?: string; showCarriageRow?: string; showCurrency?: string
+  emphasis?: string; width?: string; showCarriageRow?: string; showSurchargeRow?: string; showCurrency?: string
   rowPt?: number | string; totalPt?: number | string; notePt?: number | string
 }
 
@@ -829,10 +829,12 @@ export function PoDocTotals(props: TotalsProps) {
   const note = props.note?.trim()
   const discount = Number(order.discountAmount)
   const carriage = Number(order.carriageAmount)
+  const surcharge = Number(order.surchargeAmount)
   const tax = Number(order.taxAmount)
   // Carriage printed even at nothing, for an order where "carriage paid" is the
   // deal and a blank would read as "not agreed yet".
   const showCarriage = props.showCarriageRow === 'always' || carriage !== 0
+  const showSurcharge = props.showSurchargeRow === 'always' || surcharge !== 0
   const listClass = `po-doc-totals${props.emphasis === 'accent' ? ' po-doc-total-accent' : ''}`
   // Which currency the figures are in. Obvious on a domestic order and the whole
   // question on one placed abroad, where a supplier reading "1,240.00" needs to
@@ -864,6 +866,12 @@ export function PoDocTotals(props: TotalsProps) {
           <div className="po-doc-row">
             <dt>{props.carriageLabel?.trim() || 'Carriage'}</dt>
             <dd>{formatMoney(carriage, order.currency)}</dd>
+          </div>
+        )}
+        {showSurcharge && (
+          <div className="po-doc-row">
+            <dt>{props.surchargeLabel?.trim() || 'Surcharge'}</dt>
+            <dd>{formatMoney(surcharge, order.currency)}</dd>
           </div>
         )}
         {tax !== 0 && (
@@ -904,6 +912,11 @@ export const poDocTotalsPuckComponent = {
       { value: 'charged', label: 'Leave it off' },
       { value: 'always', label: 'Print it anyway' },
     ] },
+    surchargeLabel: { type: 'text' as const, label: 'Surcharge row' },
+    showSurchargeRow: { type: 'select' as const, label: 'Surcharge row when there is no charge', options: [
+      { value: 'charged', label: 'Leave it off' },
+      { value: 'always', label: 'Print it anyway' },
+    ] },
     taxLabel: { type: 'text' as const, label: 'Tax row' },
     totalLabel: { type: 'text' as const, label: 'Total row' },
     showCurrency: { type: 'select' as const, label: 'The currency code beside the total', options: yesNo },
@@ -914,8 +927,8 @@ export const poDocTotalsPuckComponent = {
   },
   defaultProps: {
     fontFamily: '', emphasis: 'rule', width: 'normal',
-    subtotalLabel: 'Goods', discountLabel: 'Discount', carriageLabel: 'Carriage',
-    showCarriageRow: 'charged', taxLabel: 'VAT', totalLabel: 'Order total', showCurrency: 'yes',
+    subtotalLabel: 'Goods', discountLabel: 'Discount', carriageLabel: 'Carriage', surchargeLabel: 'Surcharge',
+    showCarriageRow: 'charged', showSurchargeRow: 'charged', taxLabel: 'VAT', totalLabel: 'Order total', showCurrency: 'yes',
     note: '',
   },
   render: PoDocTotals,

@@ -6,6 +6,7 @@ import { deleteSupplier, getSupplier, updateSupplier } from '@/modules/purchase-
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import {
   isDuplicateSupplierName,
+  isDuplicateSurchargeCategory,
   SupplierBody,
   toSupplierInput,
 } from '@/modules/purchase-orders/lib/supplier-body'
@@ -30,6 +31,9 @@ export async function PUT(request: NextRequest, { params }: Params) {
   } catch (error) {
     if (isDuplicateSupplierName(error)) {
       return errorResponse('There is already a supplier with that name.', 409)
+    }
+    if (isDuplicateSurchargeCategory(error)) {
+      return errorResponse('Two of the surcharge categories are the same.', 409)
     }
     throw error
   }

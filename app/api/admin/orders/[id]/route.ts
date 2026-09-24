@@ -101,6 +101,7 @@ export async function PUT(request: NextRequest, { params }: Params) {
     taxMode: input.taxMode,
     discountAmount: input.discountAmount,
     carriageAmount: input.carriageAmount,
+    surchargeAmount: input.surchargeAmount,
   })
 
   // The revision is filed BEFORE the write, from the copy already in hand, so a

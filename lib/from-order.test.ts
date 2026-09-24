@@ -3,10 +3,12 @@ import {
   CLOSED_SHOP_ORDER_STATUSES,
   carriageFor,
   livePos,
+  netTotalFor,
   planFromOrder,
   serviceCostFor,
   serviceNameFor,
   shipToFromShopOrder,
+  surchargeFor,
   type PoRaisedFromShopOrder,
   type ShopOrderFacts,
   type ShopOrderItemFacts,
@@ -36,6 +38,8 @@ function supplier(patch: Partial<ReorderSupplierFacts> = {}): ReorderSupplierFac
     carriagePaidOver: null,
     carriageCharge: null,
     defaultVatRateCode: null,
+    surchargeThreshold: null,
+    surchargeRates: [],
     ...patch,
   }
 }
@@ -49,6 +53,7 @@ function item(patch: Partial<ShopOrderItemFacts> = {}): ShopOrderItemFacts {
     unitPrice: '218.00',
     sku: 'I000456',
     supplierSku: null,
+    saleSku: null,
     supplierName: 'Dynamic Office Solutions',
     costPrice: '206.09',
     lineMeta: null,
@@ -141,6 +146,7 @@ describe('the lines that cannot be bought', () => {
     ['a supplier nobody has set up', {}, [], 'Nobody on your supplier list is called'],
     ['a supplier on hold', {}, [supplier({ status: 'ON_HOLD' })], 'is on hold'],
     ['a supplier switched off', {}, [supplier({ status: 'DISABLED' })], 'switched off'],
+    ['a sale line nobody has priced', { saleSku: 'DS-CLR-1' }, [supplier()], 'sale code'],
   ]
 
   for (const [name, patch, suppliers, fragment] of cases) {
@@ -210,6 +216,75 @@ describe('the delivery service on a line', () => {
     expect(plan.groups[0]!.lines[0]!.serviceName).toBe('Pre-Assembled, expected by 3 September 2026')
     expect(plan.groups[0]!.lines[0]!.serviceCost).toBe('39.0000')
     expect(plan.groups[0]!.carriageAmount).toBe('78.00')
+  })
+})
+
+describe('netTotalFor', () => {
+  it('matches what orderTotals itself would store as the order net', () => {
+    // Same lines, same figure lineAmounts (orderTotals' own per-line function)
+    // would produce - this is the whole point of reusing it rather than a
+    // second rounding discipline.
+    expect(netTotalFor([{ qty: 2, unitCost: '100.00' }, { qty: 1, unitCost: '39.99' }])).toBe('239.99')
+    expect(netTotalFor([])).toBe('0.00')
+  })
+})
+
+describe('surchargeFor', () => {
+  const rates = [{ categoryKey: 'seating', ratePerUnit: '2.0000' }]
+
+  it('3 chairs on sale = 3 surcharges', () => {
+    const lines = [{ qty: 3, onSale: true, category: 'Seating' }]
+    expect(surchargeFor(lines, '10.00', '1000.00', rates)).toBe('6.00')
+  })
+
+  it('6 chairs not on sale + 3 chairs on sale = 3 surcharges', () => {
+    const lines = [
+      { qty: 6, onSale: false, category: 'Seating' },
+      { qty: 3, onSale: true, category: 'Seating' },
+    ]
+    expect(surchargeFor(lines, '10.00', '1000.00', rates)).toBe('6.00')
+  })
+
+  it('order comes to £295 net against a £300 threshold - the surcharge is just the £5 difference', () => {
+    // Ten chairs at £2 each would raw out at £20, well over the £5 shortfall.
+    const lines = [{ qty: 10, onSale: true, category: 'Seating' }]
+    expect(surchargeFor(lines, '295.00', '300.00', rates)).toBe('5.00')
+  })
+
+  it('nothing at exactly the threshold, or above it - "under", not "at or under"', () => {
+    const lines = [{ qty: 3, onSale: true, category: 'Seating' }]
+    expect(surchargeFor(lines, '300.00', '300.00', rates)).toBe('0.00')
+    expect(surchargeFor(lines, '301.00', '300.00', rates)).toBe('0.00')
+  })
+
+  it('nothing where the supplier has no threshold set, whatever the rates say', () => {
+    const lines = [{ qty: 3, onSale: true, category: 'Seating' }]
+    expect(surchargeFor(lines, '10.00', null, rates)).toBe('0.00')
+  })
+
+  it('nothing where a threshold is set but no rates are, even under it', () => {
+    const lines = [{ qty: 3, onSale: true, category: 'Seating' }]
+    expect(surchargeFor(lines, '10.00', '1000.00', [])).toBe('0.00')
+  })
+
+  it('a rate of exactly zero contributes nothing, without being treated as unmatched', () => {
+    const lines = [{ qty: 5, onSale: true, category: 'Seating' }]
+    expect(surchargeFor(lines, '10.00', '1000.00', [{ categoryKey: 'seating', ratePerUnit: '0.0000' }])).toBe('0.00')
+  })
+
+  it('a sale line whose category nothing prices contributes nothing', () => {
+    const lines = [{ qty: 3, onSale: true, category: 'Furniture' }]
+    expect(surchargeFor(lines, '10.00', '1000.00', rates)).toBe('0.00')
+  })
+
+  it('a sale line with no category on record contributes nothing', () => {
+    const lines = [{ qty: 3, onSale: true, category: null }]
+    expect(surchargeFor(lines, '10.00', '1000.00', rates)).toBe('0.00')
+  })
+
+  it('matches a category case- and space-insensitively', () => {
+    const lines = [{ qty: 3, onSale: true, category: '  SEATING ' }]
+    expect(surchargeFor(lines, '10.00', '1000.00', rates)).toBe('6.00')
   })
 })
 

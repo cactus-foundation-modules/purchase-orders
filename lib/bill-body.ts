@@ -7,8 +7,13 @@ import type { BillLineDraft } from './billing'
 // is how a unit cost of 1.005 arrives as 1.0049999999999999 and a supplier's
 // invoice ends up a pound out against the paper it was copied from.
 
-const Qty = z.string().regex(/^\d{1,10}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
-const Cost = z.string().regex(/^-?\d{1,10}(\.\d{1,4})?$/, 'Costs can have up to four decimal places')
+// Nine integer digits, not ten: po_bill_lines.qty is NUMERIC(12,3), which only
+// holds nine before the three decimal places. A tenth digit is a number the
+// column can never hold - caught here as a plain message rather than a raw
+// "numeric field overflow" out of the insert that tries to write it.
+const Qty = z.string().regex(/^\d{1,9}(\.\d{1,3})?$/, 'Quantities can have up to three decimal places')
+// Eight integer digits: po_bill_lines.unit_cost is NUMERIC(12,4).
+const Cost = z.string().regex(/^-?\d{1,8}(\.\d{1,4})?$/, 'Costs can have up to four decimal places')
 const Amount = z.string().regex(/^-?\d{1,10}(\.\d{1,2})?$/, 'Amounts need to look like 12.34')
 const Percent = z.string().regex(/^\d{1,3}(\.\d{1,2})?$/, 'A rate looks like 20 or 5.5')
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Dates need to look like 2026-08-27')

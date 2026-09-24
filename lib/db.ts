@@ -11,6 +11,7 @@ import type {
   PoShipTo,
   PoStatus,
   PoSupplier,
+  PoSupplierSurchargeRate,
   ShipToKind,
   SourceKind,
   SupplierAccountTerms,
@@ -103,6 +104,10 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     minimumOrderValue: decOrNull(r.minimum_order_value),
     carriagePaidOver: decOrNull(r.carriage_paid_over),
     carriageCharge: decOrNull(r.carriage_charge),
+    surchargeThreshold: decOrNull(r.surcharge_threshold),
+    // Attached by the caller (listSuppliers/getSupplier) - a child table, not a
+    // column on this row.
+    surchargeRates: [],
     discountPercent: decOrNull(r.discount_percent),
     defaultCategoryId: (r.default_category_id as string | null) ?? null,
     defaultVatTreatment: (r.default_vat_treatment as string | null) ?? null,
@@ -164,6 +169,37 @@ export function supplierNameKey(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
+function mapSurchargeRate(r: Record<string, unknown>): PoSupplierSurchargeRate {
+  return {
+    id: r.id as string,
+    category: r.category as string,
+    categoryKey: r.category_key as string,
+    ratePerUnit: dec(r.rate_per_unit),
+  }
+}
+
+/** Every surcharge rate for a set of suppliers, grouped by supplier id - one
+ *  query for a whole list rather than one per supplier, the same discipline
+ *  every other "facts for several suppliers at once" reader in this module
+ *  already follows. */
+async function surchargeRatesFor(supplierIds: string[]): Promise<Map<string, PoSupplierSurchargeRate[]>> {
+  const out = new Map<string, PoSupplierSurchargeRate[]>()
+  if (supplierIds.length === 0) return out
+  const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT "id", "supplier_id", "category", "category_key", "rate_per_unit"
+      FROM "po_supplier_surcharge_rates"
+     WHERE "supplier_id" = ANY(${supplierIds}::text[])
+     ORDER BY "category" ASC
+  `
+  for (const r of rows) {
+    const supplierId = r.supplier_id as string
+    const list = out.get(supplierId) ?? []
+    list.push(mapSurchargeRate(r))
+    out.set(supplierId, list)
+  }
+  return out
+}
+
 export async function listSuppliers(includeDisabled = true): Promise<PoSupplier[]> {
   const { hasCatalogue } = await getCapabilities()
 
@@ -182,7 +218,9 @@ export async function listSuppliers(includeDisabled = true): Promise<PoSupplier[
      ${includeDisabled ? Prisma.empty : Prisma.sql`WHERE s."status" = 'ENABLED'`}
      ORDER BY s."name" ASC
   `
-  return rows.map(mapSupplier)
+  const suppliers = rows.map(mapSupplier)
+  const rates = await surchargeRatesFor(suppliers.map((s) => s.id))
+  return suppliers.map((s) => ({ ...s, surchargeRates: rates.get(s.id) ?? [] }))
 }
 
 export async function getSupplier(id: string): Promise<PoSupplier | null> {
@@ -194,7 +232,9 @@ export async function getSupplier(id: string): Promise<PoSupplier | null> {
      WHERE s."id" = ${id}
      LIMIT 1
   `
-  return rows[0] ? mapSupplier(rows[0]) : null
+  if (!rows[0]) return null
+  const rates = await surchargeRatesFor([id])
+  return { ...mapSupplier(rows[0]), surchargeRates: rates.get(id) ?? [] }
 }
 
 /**
@@ -238,6 +278,8 @@ export type SupplierInput = {
   minimumOrderValue: string | null
   carriagePaidOver: string | null
   carriageCharge: string | null
+  surchargeThreshold: string | null
+  surchargeRates: Array<{ category: string; categoryKey: string; ratePerUnit: string }>
   discountPercent: string | null
   defaultCategoryId: string | null
   defaultVatTreatment: string | null
@@ -249,67 +291,93 @@ export type SupplierInput = {
   notes: string | null
 }
 
+/** Replaces a supplier's whole set of surcharge rates - delete-then-insert,
+ *  same discipline `insertLines`'s caller uses for order lines. A handful of
+ *  rows per supplier at most, so a per-row loop needs no chunking. */
+async function insertSurchargeRates(
+  tx: Tx,
+  supplierId: string,
+  rates: Array<{ category: string; categoryKey: string; ratePerUnit: string }>,
+): Promise<void> {
+  for (const rate of rates) {
+    await tx.$executeRaw`
+      INSERT INTO "po_supplier_surcharge_rates" ("supplier_id", "category", "category_key", "rate_per_unit")
+      VALUES (${supplierId}, ${rate.category}, ${rate.categoryKey}, ${rate.ratePerUnit}::numeric)
+    `
+  }
+}
+
 export async function createSupplier(input: SupplierInput): Promise<string> {
-  const rows = await prisma.$queryRaw<{ id: string }[]>`
-    INSERT INTO "po_suppliers" (
-      "name", "name_key", "shop_supplier_id", "shop_supplier_name", "account_number",
-      "contact_name", "phone", "email", "email_cc", "accounts_email", "proforma_paid_to_accounts",
-      "dropships", "address", "currency",
-      "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
-      "carriage_paid_over", "carriage_charge", "discount_percent", "default_category_id",
-      "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
-      "delivery_instructions", "portal_note", "status", "notes"
-    ) VALUES (
-      ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
-      ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
-      ${input.accountsEmail}, ${input.proformaPaidToAccounts},
-      ${input.dropships}, ${JSON.stringify(input.address)}::jsonb, ${input.currency},
-      ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.accountTerms}, ${input.leadTimeDays},
-      ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
-      ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
-      ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.portalNote}, ${input.status}, ${input.notes}
-    )
-    RETURNING "id"
-  `
-  return rows[0]!.id
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<{ id: string }[]>`
+      INSERT INTO "po_suppliers" (
+        "name", "name_key", "shop_supplier_id", "shop_supplier_name", "account_number",
+        "contact_name", "phone", "email", "email_cc", "accounts_email", "proforma_paid_to_accounts",
+        "dropships", "address", "currency",
+        "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
+        "carriage_paid_over", "carriage_charge", "surcharge_threshold", "discount_percent", "default_category_id",
+        "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
+        "delivery_instructions", "portal_note", "status", "notes"
+      ) VALUES (
+        ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
+        ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
+        ${input.accountsEmail}, ${input.proformaPaidToAccounts},
+        ${input.dropships}, ${JSON.stringify(input.address)}::jsonb, ${input.currency},
+        ${input.paymentTerms}, ${input.paymentTermsDays}, ${input.accountTerms}, ${input.leadTimeDays},
+        ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
+        ${input.surchargeThreshold}::numeric,
+        ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
+        ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.portalNote}, ${input.status}, ${input.notes}
+      )
+      RETURNING "id"
+    `
+    const id = rows[0]!.id
+    await insertSurchargeRates(tx, id, input.surchargeRates)
+    return id
+  })
 }
 
 export async function updateSupplier(id: string, input: SupplierInput): Promise<void> {
-  await prisma.$executeRaw`
-    UPDATE "po_suppliers" SET
-      "name" = ${input.name},
-      "name_key" = ${supplierNameKey(input.name)},
-      "shop_supplier_id" = ${input.shopSupplierId},
-      "shop_supplier_name" = ${input.shopSupplierName},
-      "account_number" = ${input.accountNumber},
-      "contact_name" = ${input.contactName},
-      "phone" = ${input.phone},
-      "email" = ${input.email},
-      "email_cc" = ${input.emailCc},
-      "accounts_email" = ${input.accountsEmail},
-      "proforma_paid_to_accounts" = ${input.proformaPaidToAccounts},
-      "dropships" = ${input.dropships},
-      "address" = ${JSON.stringify(input.address)}::jsonb,
-      "currency" = ${input.currency},
-      "payment_terms" = ${input.paymentTerms},
-      "payment_terms_days" = ${input.paymentTermsDays},
-      "account_terms" = ${input.accountTerms},
-      "lead_time_days" = ${input.leadTimeDays},
-      "minimum_order_value" = ${input.minimumOrderValue}::numeric,
-      "carriage_paid_over" = ${input.carriagePaidOver}::numeric,
-      "carriage_charge" = ${input.carriageCharge}::numeric,
-      "discount_percent" = ${input.discountPercent}::numeric,
-      "default_category_id" = ${input.defaultCategoryId},
-      "default_vat_treatment" = ${input.defaultVatTreatment},
-      "default_vat_rate_code" = ${input.defaultVatRateCode},
-      "tax_registration_number" = ${input.taxRegistrationNumber},
-      "delivery_instructions" = ${input.deliveryInstructions},
-      "portal_note" = ${input.portalNote},
-      "status" = ${input.status},
-      "notes" = ${input.notes},
-      "updated_at" = now()
-    WHERE "id" = ${id}
-  `
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      UPDATE "po_suppliers" SET
+        "name" = ${input.name},
+        "name_key" = ${supplierNameKey(input.name)},
+        "shop_supplier_id" = ${input.shopSupplierId},
+        "shop_supplier_name" = ${input.shopSupplierName},
+        "account_number" = ${input.accountNumber},
+        "contact_name" = ${input.contactName},
+        "phone" = ${input.phone},
+        "email" = ${input.email},
+        "email_cc" = ${input.emailCc},
+        "accounts_email" = ${input.accountsEmail},
+        "proforma_paid_to_accounts" = ${input.proformaPaidToAccounts},
+        "dropships" = ${input.dropships},
+        "address" = ${JSON.stringify(input.address)}::jsonb,
+        "currency" = ${input.currency},
+        "payment_terms" = ${input.paymentTerms},
+        "payment_terms_days" = ${input.paymentTermsDays},
+        "account_terms" = ${input.accountTerms},
+        "lead_time_days" = ${input.leadTimeDays},
+        "minimum_order_value" = ${input.minimumOrderValue}::numeric,
+        "carriage_paid_over" = ${input.carriagePaidOver}::numeric,
+        "carriage_charge" = ${input.carriageCharge}::numeric,
+        "surcharge_threshold" = ${input.surchargeThreshold}::numeric,
+        "discount_percent" = ${input.discountPercent}::numeric,
+        "default_category_id" = ${input.defaultCategoryId},
+        "default_vat_treatment" = ${input.defaultVatTreatment},
+        "default_vat_rate_code" = ${input.defaultVatRateCode},
+        "tax_registration_number" = ${input.taxRegistrationNumber},
+        "delivery_instructions" = ${input.deliveryInstructions},
+        "portal_note" = ${input.portalNote},
+        "status" = ${input.status},
+        "notes" = ${input.notes},
+        "updated_at" = now()
+      WHERE "id" = ${id}
+    `
+    await tx.$executeRaw`DELETE FROM "po_supplier_surcharge_rates" WHERE "supplier_id" = ${id}`
+    await insertSurchargeRates(tx, id, input.surchargeRates)
+  })
 }
 
 /** Refuses while orders are filed against the supplier - the FK is ON DELETE RESTRICT anyway. */
@@ -552,6 +620,7 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     subtotal: dec(r.subtotal),
     discountAmount: dec(r.discount_amount),
     carriageAmount: dec(r.carriage_amount),
+    surchargeAmount: dec(r.surcharge_amount),
     taxAmount: dec(r.tax_amount),
     total: dec(r.total),
     raisedDate: day(r.raised_date),
@@ -627,6 +696,7 @@ export type OrderInput = {
   taxMode: 'EXCLUSIVE' | 'INCLUSIVE'
   discountAmount: string
   carriageAmount: string
+  surchargeAmount: string
   requiredByDate: string | null
   expectedDate: string | null
   paymentTerms: string | null
@@ -666,7 +736,7 @@ export async function createOrder(
     const rows = await tx.$queryRaw<{ id: string }[]>`
       INSERT INTO "po_orders" (
         "number", "status", "supplier_id", "ship_to_kind", "ship_to", "currency", "base_currency",
-        "fx_rate", "tax_mode", "subtotal", "discount_amount", "carriage_amount", "tax_amount", "total",
+        "fx_rate", "tax_mode", "subtotal", "discount_amount", "carriage_amount", "surcharge_amount", "tax_amount", "total",
         "raised_date", "required_by_date", "expected_date", "payment_terms", "delivery_terms",
         "notes_supplier", "notes_internal", "approval_required", "proforma_required",
         "source_kind", "source_ref",
@@ -674,7 +744,7 @@ export async function createOrder(
       ) VALUES (
         ${number}, 'DRAFT', ${input.supplierId}, ${input.shipToKind}, ${JSON.stringify(input.shipTo)}::jsonb,
         ${input.currency}, ${input.baseCurrency}, ${input.fxRate}::numeric, ${input.taxMode},
-        ${totals.subtotal}::numeric, ${input.discountAmount}::numeric, ${input.carriageAmount}::numeric,
+        ${totals.subtotal}::numeric, ${input.discountAmount}::numeric, ${input.carriageAmount}::numeric, ${input.surchargeAmount}::numeric,
         ${totals.taxAmount}::numeric, ${totals.total}::numeric,
         CURRENT_DATE, ${input.requiredByDate}::date, ${input.expectedDate}::date,
         ${input.paymentTerms}, ${input.deliveryTerms}, ${input.notesSupplier}, ${input.notesInternal},
@@ -714,6 +784,7 @@ export async function updateOrder(
         "subtotal" = ${totals.subtotal}::numeric,
         "discount_amount" = ${input.discountAmount}::numeric,
         "carriage_amount" = ${input.carriageAmount}::numeric,
+        "surcharge_amount" = ${input.surchargeAmount}::numeric,
         "tax_amount" = ${totals.taxAmount}::numeric,
         "total" = ${totals.total}::numeric,
         "required_by_date" = ${input.requiredByDate}::date,

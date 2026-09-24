@@ -53,6 +53,16 @@ export type ShipToKind = (typeof SHIP_TO_KINDS)[number]
 export const SOURCE_KINDS = ['MANUAL', 'FROM_ORDER', 'REORDER'] as const
 export type SourceKind = (typeof SOURCE_KINDS)[number]
 
+/** One category's per-unit rate on a supplier's sale surcharge. */
+export type PoSupplierSurchargeRate = {
+  id: string
+  category: string
+  /** Trimmed, lowercased - what matching against a catalogue item's own
+   *  `category` actually uses. See `catalogueNameKey`. */
+  categoryKey: string
+  ratePerUnit: string
+}
+
 export type PoSupplier = {
   id: string
   name: string
@@ -84,6 +94,14 @@ export type PoSupplier = {
   minimumOrderValue: string | null
   carriagePaidOver: string | null
   carriageCharge: string | null
+  /** Net value below which a sale-surcharge line is added to an order raised
+   *  off this supplier - see lib/from-order.ts `surchargeFor`. Null is "no
+   *  surcharge", same convention as `carriagePaidOver`. */
+  surchargeThreshold: string | null
+  /** What each category of sale-coded stock costs to buy under threshold, per
+   *  unit. Empty is "no rates set", which behaves as "no surcharge" even with
+   *  a threshold recorded - there is nothing to charge. */
+  surchargeRates: PoSupplierSurchargeRate[]
   /** Trade discount off list, as a percentage. Null is "none recorded", which
    *  is not the same as a recorded 0% - and is what stops a retail price list
    *  being imported as though it were already net. */
@@ -190,6 +208,7 @@ export type PoOrder = PoOrderSummary & {
   subtotal: string
   discountAmount: string
   carriageAmount: string
+  surchargeAmount: string
   taxAmount: string
   paymentTerms: string | null
   deliveryTerms: string | null
@@ -1001,6 +1020,11 @@ export type PoCatalogueItem = {
   minimumOrderQty: string | null
   leadTimeDays: number | null
   discountGroup: string | null
+  /** What this line is, for a rule that prices by kind rather than by code -
+   *  a sale surcharge, say (see `PoSupplierSurchargeRate`). Whatever the
+   *  supplier's own sheet calls it. Unlike `discountGroup` this IS read at
+   *  pricing time - see `PoCatalogueCost.category`. */
+  category: string | null
   discontinued: boolean
 }
 
@@ -1015,6 +1039,7 @@ export type PoCatalogueCost = {
   discontinued: boolean
   leadTimeDays: number | null
   minimumOrderQty: string | null
+  category: string | null
 }
 
 /** Why a purchase order line is priced the way it is.

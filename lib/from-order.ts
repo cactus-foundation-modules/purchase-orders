@@ -1,9 +1,9 @@
 import { prisma } from '@/lib/db/prisma'
 import { getCapabilities } from './capabilities'
-import { catalogueSkuKey } from './catalogue-import'
+import { catalogueNameKey, catalogueSkuKey } from './catalogue-import'
 import { catalogueCostsBySupplier, costKey } from './catalogues'
 import { reorderNameKey, reorderTaxRate, type ReorderSupplierFacts } from './reordering'
-import { fromPence, scaled } from './totals'
+import { fromPence, lineAmounts, scaled } from './totals'
 import type { PoCatalogueCost, PoCostSource, PoShipTo, PoStatus } from './types'
 
 // Everything needed to turn one customer order into purchase orders, and
@@ -57,6 +57,16 @@ export type ShopOrderItemFacts = {
   unitPrice: string
   sku: string | null
   supplierSku: string | null
+  /** The supplier's own clearance code, snapshotted on the order line at
+   *  checkout ONLY when it was actually bought at the sale price - shop's
+   *  `shp_order_items.sale_sku` (migration 061). Null on an ordinary line, and
+   *  null on a sale-eligible product bought at full price. Read off the ORDER
+   *  ITEM rather than the live product for the same reason `unitPrice` and
+   *  `costPrice` never are: the product may have had its sale turned off, or
+   *  its clearance code changed, since this was bought - the supplier still
+   *  wants the code this customer's stock was actually raised under. See
+   *  `planFromOrder`, which prefers this over `supplierSku` whenever it is set. */
+  saleSku: string | null
   /** The free-text supplier name the catalogue files this product under. */
   supplierName: string | null
   costPrice: string | null
@@ -149,10 +159,17 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
     // purchase order was raised - a cancelled chair on an order of three - are
     // not goods anybody should be buying in. The quantity-at-zero skip further
     // down then drops a line refunded outright.
+    // `sale_sku` is read off the ORDER ITEM, through its own JSON rather than
+    // named as a column, for the same reason `delivery_instructions` above is:
+    // it arrives on `shp_order_items` in shop migration 061, independently
+    // pinned from this module, and `to_jsonb(oi) ->> 'missing_key'` answers
+    // NULL on a shop that predates it rather than throwing - "nothing on
+    // record", which is the honest answer for an order old enough to have none.
     const items = await prisma.$queryRaw<Record<string, unknown>[]>`
       SELECT oi."id", oi."product_id", oi."product_name",
              GREATEST(oi."quantity" - COALESCE(oi."refunded_qty", 0), 0) AS "quantity",
              oi."unit_price", oi."line_meta",
+             to_jsonb(oi) ->> 'sale_sku' AS "sale_sku",
              p."sku", p."supplier_sku", p."supplier", p."cost_price"
         FROM "shp_order_items" oi
         LEFT JOIN "shp_products" p ON p."id" = oi."product_id"
@@ -179,6 +196,7 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
         unitPrice: numOrNull(r.unit_price) ?? '0',
         sku: textOrNull(r.sku),
         supplierSku: textOrNull(r.supplier_sku),
+        saleSku: textOrNull(r.sale_sku),
         supplierName: textOrNull(r.supplier),
         costPrice: numOrNull(r.cost_price),
         lineMeta: bag(r.line_meta),
@@ -195,9 +213,22 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
 export async function readSuppliersForOrder(): Promise<ReorderSupplierFacts[]> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT "id", "name", "name_key", "status", "currency", "minimum_order_value",
-           "carriage_paid_over", "carriage_charge", "default_vat_rate_code"
+           "carriage_paid_over", "carriage_charge", "default_vat_rate_code", "surcharge_threshold"
       FROM "po_suppliers"
   `
+  const rates = rows.length === 0 ? [] : await prisma.$queryRaw<Record<string, unknown>[]>`
+    SELECT "supplier_id", "category_key", "rate_per_unit"
+      FROM "po_supplier_surcharge_rates"
+     WHERE "supplier_id" = ANY(${rows.map((r) => r.id as string)}::text[])
+  `
+  const ratesBySupplier = new Map<string, Array<{ categoryKey: string; ratePerUnit: string }>>()
+  for (const r of rates) {
+    const supplierId = r.supplier_id as string
+    const list = ratesBySupplier.get(supplierId) ?? []
+    list.push({ categoryKey: r.category_key as string, ratePerUnit: String(r.rate_per_unit) })
+    ratesBySupplier.set(supplierId, list)
+  }
+
   return rows.map((r) => ({
     id: r.id as string,
     name: r.name as string,
@@ -208,6 +239,8 @@ export async function readSuppliersForOrder(): Promise<ReorderSupplierFacts[]> {
     carriagePaidOver: numOrNull(r.carriage_paid_over),
     carriageCharge: numOrNull(r.carriage_charge),
     defaultVatRateCode: textOrNull(r.default_vat_rate_code),
+    surchargeThreshold: numOrNull(r.surcharge_threshold),
+    surchargeRates: ratesBySupplier.get(r.id as string) ?? [],
   }))
 }
 
@@ -417,6 +450,9 @@ export type FromOrderLine = {
   productName: string
   qty: number
   ourSku: string | null
+  /** The code the purchase order asks for. The supplier's CLEARANCE code where
+   *  this was bought on sale (see `ShopOrderItemFacts.saleSku`), their ordinary
+   *  one otherwise, and our own where neither is on record. */
   supplierSku: string | null
   /** What the line will be bought at. See `planFromOrder` for why it is never
    *  the price the customer paid. */
@@ -436,6 +472,15 @@ export type FromOrderLine = {
   discontinued: boolean
   serviceName: string | null
   serviceCost: string | null
+  /** True when `supplierSku` above is the supplier's CLEARANCE code - i.e.
+   *  this unit was genuinely bought on sale, not just that the supplier
+   *  happens to have one on record. Only sale-coded units ever count toward
+   *  a sale surcharge - see `surchargeFor`. */
+  onSale: boolean
+  /** What the matched catalogue row calls this line's kind - a sale surcharge
+   *  rate is keyed against this. Null where nothing priced the line off a
+   *  list, or the list carries no category for it. */
+  category: string | null
 }
 
 export type FromOrderGroup = {
@@ -447,6 +492,11 @@ export type FromOrderGroup = {
   /** The lines' service costs, times their quantities, to the penny. This is
    *  what reaches the order as its carriage. */
   carriageAmount: string
+  /** This supplier's sale surcharge, worked out over the group's own sale-coded
+   *  lines and capped at the shortfall to their threshold - see `surchargeFor`.
+   *  `'0.00'` on every supplier with no threshold set, same as carriage on a
+   *  supplier with no service cost. */
+  surchargeAmount: string
 }
 
 /** A line that cannot be bought, and the sentence that says why. */
@@ -492,6 +542,7 @@ export function planFromOrder(
   catalogueCosts: Map<string, PoCatalogueCost> = new Map(),
 ): FromOrderPlan {
   const byNameKey = new Map(suppliers.map((s) => [s.nameKey, s]))
+  const byId = new Map(suppliers.map((s) => [s.id, s]))
   const groups = new Map<string, FromOrderGroup>()
   const skipped: FromOrderSkipped[] = []
 
@@ -525,6 +576,26 @@ export function planFromOrder(
       continue
     }
 
+    // Bought under the supplier's clearance code takes priority over their
+    // ordinary one - it is what the customer's stock was actually raised
+    // under, and it is the only code a sale price list prices. Falling back to
+    // the ordinary code (or, blank, our own) is what every line that was not
+    // on sale still does exactly as before.
+    const supplierSku = item.saleSku ?? item.supplierSku ?? item.sku
+    const listed = supplierSku ? catalogueCosts.get(costKey(supplier.id, catalogueSkuKey(supplierSku))) : undefined
+    const listCost = listed?.unitCost ?? null
+
+    // A sale code with no price behind it is not a line to guess at: the
+    // ordinary cost price prices the ordinary code, and putting it on a
+    // purchase order under the CLEARANCE code would ask the supplier for
+    // clearance stock at their standard price - not a mistake this module
+    // makes quietly. Upload the sale list, or the human drafting this order
+    // sorts it by hand.
+    if (item.saleSku && listCost == null) {
+      skip(`This was sold under ${supplier.name}'s sale code "${item.saleSku}", but nothing in their price lists prices it. Upload the sale price list, or add the line by hand.`)
+      continue
+    }
+
     const group = groups.get(supplier.id) ?? {
       supplierId: supplier.id,
       supplierName: supplier.name,
@@ -532,12 +603,8 @@ export function planFromOrder(
       taxRatePercent: reorderTaxRate(supplier),
       lines: [],
       carriageAmount: '0.00',
+      surchargeAmount: '0.00',
     }
-    // Blank falls back to our own code, which is what a supplier who has never
-    // given us one of theirs will be reading it as anyway.
-    const supplierSku = item.supplierSku ?? item.sku
-    const listed = supplierSku ? catalogueCosts.get(costKey(supplier.id, catalogueSkuKey(supplierSku))) : undefined
-    const listCost = listed?.unitCost ?? null
 
     group.lines.push({
       itemId: item.itemId,
@@ -556,12 +623,21 @@ export function planFromOrder(
       discontinued: listed?.discontinued ?? false,
       serviceName: serviceNameFor(item.lineMeta),
       serviceCost: serviceCostFor(item.lineMeta),
+      onSale: item.saleSku != null,
+      category: listed?.category ?? null,
     })
     groups.set(supplier.id, group)
   }
 
   for (const group of groups.values()) {
     group.carriageAmount = carriageFor(group.lines)
+    const supplier = byId.get(group.supplierId)!
+    group.surchargeAmount = surchargeFor(
+      group.lines,
+      netTotalFor(group.lines),
+      supplier.surchargeThreshold,
+      supplier.surchargeRates,
+    )
   }
 
   return {
@@ -586,6 +662,65 @@ export function carriageFor(lines: Array<{ qty: number; serviceCost: string | nu
     0,
   )
   return fromPence(Math.round(tenThousandths / 100))
+}
+
+/**
+ * A group's net goods total, to the penny - what a sale surcharge's threshold
+ * is actually checked against.
+ *
+ * Deliberately NOT `carriageFor`'s discipline (sum in ten-thousandths across
+ * every line, round once at the end): `orderTotals` rounds each LINE to the
+ * penny first, then sums the already-rounded pence, and the two can disagree
+ * by a penny on some inputs. A surcharge decided against a different net than
+ * the one the order is actually saved with is a decision made against a
+ * number nobody can see anywhere - so this reuses `lineAmounts`, the exact
+ * function `orderTotals` itself calls per line, rather than a second
+ * arithmetic path that could quietly drift from it.
+ */
+export function netTotalFor(lines: Array<{ qty: number; unitCost: string }>): string {
+  const pence = lines.reduce(
+    (sum, line) => sum + lineAmounts({ qty: String(line.qty), unitCost: line.unitCost }, 'EXCLUSIVE').net,
+    0,
+  )
+  return fromPence(pence)
+}
+
+/**
+ * A supplier's sale surcharge for one group of lines.
+ *
+ * Only lines bought on sale count, and only where their category has a rate -
+ * an ordinary line at full price never adds a penny, however many of them sit
+ * on the same order. Below the threshold, every sale-coded unit's rate is
+ * summed by category; above or AT it, there is nothing to charge - "under",
+ * never "at or under". The figure charged is capped at the shortfall: a
+ * supplier that would rather take five pounds than push the order to their
+ * own threshold and beyond is not one this module second-guesses.
+ *
+ * `thresholdNet == null` or an empty rate list both read as "this supplier has
+ * no surcharge", which is what every supplier starts as and what most stay.
+ */
+export function surchargeFor(
+  lines: Array<{ qty: number; onSale: boolean; category: string | null }>,
+  netTotal: string,
+  thresholdNet: string | null,
+  rates: Array<{ categoryKey: string; ratePerUnit: string }>,
+): string {
+  if (thresholdNet == null || rates.length === 0) return '0.00'
+  const thresholdPence = scaled(thresholdNet, 2)
+  const netPence = scaled(netTotal, 2)
+  if (netPence >= thresholdPence) return '0.00'
+
+  const rateByKey = new Map(rates.map((r) => [r.categoryKey, scaled(r.ratePerUnit, 4)]))
+  let rawTenThousandths = 0
+  for (const line of lines) {
+    if (!line.onSale || !line.category) continue
+    const rate = rateByKey.get(catalogueNameKey(line.category))
+    if (rate == null) continue
+    rawTenThousandths += rate * (Number.isFinite(line.qty) ? line.qty : 0)
+  }
+  const rawPence = Math.round(rawTenThousandths / 100)
+  const shortfallPence = thresholdPence - netPence
+  return fromPence(Math.max(0, Math.min(rawPence, shortfallPence)))
 }
 
 /**

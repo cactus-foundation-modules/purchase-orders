@@ -129,6 +129,11 @@ async function raiseOneOrder(
     taxMode: 'EXCLUSIVE',
     discountAmount: '0',
     carriageAmount: plan.carriageAmount,
+    // A sale surcharge only ever applies to a line bought under a customer
+    // order's sale SKU (see lib/from-order.ts surchargeFor) - the nightly
+    // reorder job buys off stock levels against a product's ordinary code, so
+    // there is never one to add here.
+    surchargeAmount: '0',
     requiredByDate: null,
     expectedDate: null,
     paymentTerms: null,

@@ -31,6 +31,7 @@ export const CATALOGUE_FIELDS = [
   'minimumOrderQty',
   'leadTimeDays',
   'discountGroup',
+  'category',
   'discontinued',
 ] as const
 export type CatalogueField = (typeof CATALOGUE_FIELDS)[number]
@@ -67,6 +68,11 @@ const HEADER_ALIASES: Record<CatalogueField, string[]> = {
   minimumOrderQty: ['minimumorderquantity', 'minimumorderqty', 'minorderqty', 'minimumqty', 'minqty', 'moq'],
   leadTimeDays: ['leadtimedays', 'leadtimeindays', 'leadtime', 'leaddays'],
   discountGroup: ['discountgroup', 'discountcode', 'pricegroup', 'productgroup', 'band'],
+  // Disjoint from discountGroup's aliases above, deliberately - a column
+  // already claimed by discountGroup is never also read as category, so a
+  // list with only a "Product Group" column resolves the same way it always
+  // has rather than silently splitting between the two fields.
+  category: ['category', 'productcategory', 'itemcategory', 'itemtype', 'range'],
   discontinued: ['discontinued', 'obsolete', 'deleted', 'nolongeravailable'],
 }
 
@@ -509,6 +515,7 @@ export function parseCatalogueCsv(text: string, mapping?: CatalogueMapping | nul
       minimumOrderQty: minimumOrderQty === undefined ? null : minimumOrderQty,
       leadTimeDays: leadTimeDays === undefined ? null : leadTimeDays,
       discountGroup: cell(row, 'discountGroup').trim() || null,
+      category: cell(row, 'category').trim() || null,
       discontinued: parseListFlag(cell(row, 'discontinued')),
     }
 
@@ -568,6 +575,7 @@ function sameItem(a: CatalogueImportItem, b: CatalogueImportItem): boolean {
     a.minimumOrderQty === b.minimumOrderQty &&
     a.leadTimeDays === b.leadTimeDays &&
     a.discountGroup === b.discountGroup &&
+    a.category === b.category &&
     a.discontinued === b.discontinued
   )
 }

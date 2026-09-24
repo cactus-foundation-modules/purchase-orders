@@ -46,6 +46,7 @@ export async function POST(request: NextRequest) {
     taxMode: input.taxMode,
     discountAmount: input.discountAmount,
     carriageAmount: input.carriageAmount,
+    surchargeAmount: input.surchargeAmount,
   })
 
   const number = await generateOrderNumber()

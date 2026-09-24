@@ -312,6 +312,14 @@ async function readSuppliers(): Promise<ReorderSupplierFacts[]> {
     carriagePaidOver: r.carriage_paid_over == null ? null : String(r.carriage_paid_over),
     carriageCharge: r.carriage_charge == null ? null : String(r.carriage_charge),
     defaultVatRateCode: (r.default_vat_rate_code as string | null) ?? null,
+    // Never read here, deliberately: a sale surcharge only ever applies to a
+    // line bought under a customer order's sale SKU, and the nightly reorder
+    // job buys off stock levels against a product's ordinary code - no
+    // customer order and no sale SKU concept reaches this far. Firing a real
+    // query against po_supplier_surcharge_rates every night for a value that
+    // can never be acted on here would be pure waste.
+    surchargeThreshold: null,
+    surchargeRates: [],
   }))
 }
 

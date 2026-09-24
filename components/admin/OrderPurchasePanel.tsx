@@ -110,6 +110,7 @@ export async function OrderPurchasePanel({
                   const totals = orderTotals({
                     taxMode: 'EXCLUSIVE',
                     carriageAmount: group.carriageAmount,
+                    surchargeAmount: group.surchargeAmount,
                     lines: group.lines.map((line) => ({
                       qty: String(line.qty),
                       unitCost: line.unitCost,

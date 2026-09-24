@@ -160,6 +160,7 @@ export function OrderView({
     subtotal: order.subtotal,
     discountAmount: order.discountAmount,
     carriageAmount: order.carriageAmount,
+    surchargeAmount: order.surchargeAmount,
     taxAmount: order.taxAmount,
     total: order.total,
     lineTotals: order.lines.map((l) => l.lineTotal),
