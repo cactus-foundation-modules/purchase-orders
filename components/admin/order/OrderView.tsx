@@ -49,6 +49,8 @@ export type OrderViewProps = {
   /** `/…/m/purchase-orders/returns` and `/…/bills`, for the rows that link out. */
   returnsBase: string
   billsBase: string
+  /** `/…/m/shop/orders`, for the customer order a FROM_ORDER order was bought for. */
+  shopOrdersBase: string
   /** Null unless this order is one whose lines can still be given up on. */
   onCancelLine: ((lineId: string) => void) | null
   /** Null until the supplier link has loaded, which is a request of its own. */
@@ -150,7 +152,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * at - who, when, where to, the notes, and the trail of who did what.
  */
 export function OrderView({
-  order, standing, history, revisions, receipts, returns, bills, returnsBase, billsBase,
+  order, standing, history, revisions, receipts, returns, bills, returnsBase, billsBase, shopOrdersBase,
   onCancelLine, portal, newLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
   shipments, despatchable, onRecordDespatch, onDeleteDespatch, despatchOpen, onDespatchOpenChange,
   documents, onPayProforma, onUnpayProforma, onSetProformaTerms,
@@ -168,6 +170,8 @@ export function OrderView({
 
   const sourceOrderNumber =
     order.sourceKind === 'FROM_ORDER' && typeof order.sourceRef?.orderNumber === 'string' ? order.sourceRef.orderNumber : null
+  const sourceOrderId =
+    order.sourceKind === 'FROM_ORDER' && typeof order.sourceRef?.orderId === 'string' ? order.sourceRef.orderId : null
 
   const address = order.shipTo.address
   const addressLines = [
@@ -477,7 +481,15 @@ export function OrderView({
                   {order.currency} at {order.fxRate}
                 </Fact>
               )}
-              {sourceOrderNumber && <Fact label="Bought for customer order">{sourceOrderNumber}</Fact>}
+              {sourceOrderNumber && (
+                <Fact label="Bought for customer order">
+                  {sourceOrderId ? (
+                    <Link href={`${shopOrdersBase}/${sourceOrderId}`} style={{ color: 'var(--color-primary)' }}>
+                      {sourceOrderNumber}
+                    </Link>
+                  ) : sourceOrderNumber}
+                </Fact>
+              )}
             </div>
           </div>
 

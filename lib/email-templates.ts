@@ -44,10 +44,15 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
   {
     key: 'purchase-orders.amended',
     label: 'Purchase order amended',
-    subject: 'Amended purchase order {{orderNumber}} (revision {{revision}})',
+    // Says "revised" and "ignore the previous one" in the subject as well as the
+    // body: the subject is what sits next to the original in their inbox, and a
+    // supplier who works from the first of two near-identical emails is how the
+    // old price or the old quantity gets invoiced.
+    subject: 'REVISED purchase order {{orderNumber}} (revision {{revision}}) - please ignore the previous one',
     bodyHtml:
       '<p>Hello {{supplierName}},</p>' +
-      '<p>Purchase order <strong>{{orderNumber}}</strong> has changed. Revision {{revision}} is attached and replaces the one we sent before.</p>' +
+      '<p><strong>This is a revised purchase order.</strong> Revision {{revision}} of purchase order <strong>{{orderNumber}}</strong> is attached and replaces the one we sent before.</p>' +
+      '<p><strong>Please ignore the previous purchase order</strong> and work to this one only.</p>' +
       '<p>{{amendmentReason}}</p>' +
       '{{portalLink}}' +
       '<p>Thank you,<br />{{siteName}}</p>',

@@ -535,9 +535,18 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         key: 'save',
         label: saving ? 'Saving…' : isNew ? 'Create order' : amending ? 'Save as a new revision' : 'Save changes',
         placement: 'primary',
-        disabled: saving || blocked !== undefined,
+        // Never greyed out for a missing answer: a disabled button explains
+        // itself only in a tooltip nobody sees, and "the save button is broken"
+        // is what an owner concludes. Pressing it says what is missing instead.
+        disabled: saving,
         title: blocked,
-        onClick: () => void save(),
+        onClick: () => {
+          if (blocked) {
+            setError(blocked)
+            return
+          }
+          void save()
+        },
       },
     ]
   }
@@ -581,7 +590,18 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     // drop-shipper, where no goods are ever on their way here.
     const goodsFirst = step === 'INVOICE' && receivable && (status === 'ACKNOWLEDGED' || status === 'PART_RECEIVED')
 
-    if (sendable && !o.sentAt) primary = 'email'
+    // A revision saved since the supplier last heard from us is waiting to go
+    // out, exactly as a new order is: their copy is now the wrong one.
+    const lastSentRevision = history.reduce((max, h) => {
+      if (h.action !== 'order.sent' && h.action !== 'order.amendment-sent') return max
+      const r = Number(h.detail.revision ?? 1)
+      return Number.isFinite(r) && r > max ? r : max
+    }, 0)
+    // No send in the history at all (it is the newest hundred entries) proves
+    // nothing either way, so that is not read as "unsent".
+    const unsentRevision = Boolean(o.sentAt) && lastSentRevision > 0 && o.revision > lastSentRevision
+
+    if (sendable && (!o.sentAt || unsentRevision)) primary = 'email'
     else if (has('approve')) primary = 'approve'
     else if (has('submit') && o.approvalRequired) primary = 'submit'
     else if (step && !goodsFirst) primary = 'paperwork'
@@ -619,7 +639,13 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     if (sendable) {
       list.push({
         key: 'email',
-        label: sending ? 'Sending…' : o.sentAt ? 'Email it again' : 'Email it to the supplier',
+        label: sending
+          ? 'Sending…'
+          : unsentRevision
+            ? `Email revision ${o.revision} to the supplier`
+            : o.sentAt
+              ? 'Email it again'
+              : 'Email it to the supplier',
         placement: primary === 'email' ? 'primary' : 'secondary',
         disabled: sending,
         title: o.sentAt
@@ -831,6 +857,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           bills={bills}
           returnsBase={`/${adminPath}/m/purchase-orders/returns`}
           billsBase={`/${adminPath}/m/purchase-orders/bills`}
+          shopOrdersBase={`/${adminPath}/m/shop/orders`}
           onCancelLine={access.canCreate && mode === 'amend' ? cancelLine : null}
           portal={portal}
           newLink={newLink}
