@@ -384,6 +384,8 @@ CREATE TABLE IF NOT EXISTS "po_bills" (
     "fx_rate"                 NUMERIC(18,8) NOT NULL DEFAULT 1,
     "subtotal"                NUMERIC(12,2) NOT NULL DEFAULT 0,
     "carriage_amount"         NUMERIC(12,2) NOT NULL DEFAULT 0,
+    -- A supplier's sale surcharge, as on the order. See 016.
+    "surcharge_amount"        NUMERIC(12,2) NOT NULL DEFAULT 0,
     "tax_amount"              NUMERIC(12,2) NOT NULL DEFAULT 0,
     "total"                   NUMERIC(12,2) NOT NULL DEFAULT 0,
     -- What their own document says it comes to, kept apart from "total", which

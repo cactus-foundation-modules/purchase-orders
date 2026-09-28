@@ -39,6 +39,8 @@ export async function GET(_request: NextRequest, { params }: Params) {
     currency: order.currency,
     fxRate: order.fxRate,
     paymentTerms: order.paymentTerms,
+    carriageAmount: order.carriageAmount,
+    surchargeAmount: order.surchargeAmount,
     lines,
   }
 

@@ -94,6 +94,7 @@ export async function sendBillToBooks(billId: string): Promise<{ outcome: PoBook
       categoryId: line.categoryId,
     })),
     carriageAmount: bill.carriageAmount,
+    surchargeAmount: bill.surchargeAmount,
     statedTax: bill.taxAmount,
     fxRate: bill.fxRate,
     defaultCategoryId: supplier?.defaultCategoryId || config.defaultCategoryId,

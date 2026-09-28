@@ -664,6 +664,7 @@ export type PoBill = PoBillSummary & {
   fxRate: string
   subtotal: string
   carriageAmount: string
+  surchargeAmount: string
   taxAmount: string
   variance: PoBillVariance[]
   queryNote: string | null
@@ -705,6 +706,10 @@ export type PoBillableOrder = {
   currency: string
   fxRate: string
   paymentTerms: string | null
+  /** The order's carriage and sale surcharge, which a bill against it proposes
+   *  to charge - once, on the first invoice (see the bill screens). */
+  carriageAmount: string
+  surchargeAmount: string
   lines: PoBillableLine[]
 }
 

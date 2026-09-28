@@ -419,7 +419,7 @@ function addDays(day: string, days: number): string {
  *
  * The short road, not a replacement for the bill screen. It proposes what an
  * invoice for an order nearly always is - everything still owed on it, at the
- * prices the order was placed at, plus the carriage - and leaves the checking to
+ * prices the order was placed at, plus the carriage and any surcharge - and leaves the checking to
  * the match, which runs the moment it is saved and says what it disagrees with.
  * Anything stranger than that (a charge that is not on the order, a different
  * VAT treatment per line) belongs on the full screen, and there is a link to it.
@@ -433,6 +433,7 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
   const [dueDate, setDueDate] = useState('')
   const [statedTotal, setStatedTotal] = useState('')
   const [carriage, setCarriage] = useState('0')
+  const [surcharge, setSurcharge] = useState('0')
   const [reading, setReading] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -475,9 +476,11 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
           paymentTermsDays: typeof data.paymentTermsDays === 'number' ? data.paymentTermsDays : null,
         })
         // Carriage is charged once. If anything on this order has been invoiced
-        // already, it has very probably been charged already too.
+        // already, it has very probably been charged already too. The surcharge
+        // is the same: one figure on the order, billed once.
         const invoicedBefore = billable.some((line) => Number(line.qtyInvoiced) > 0)
         setCarriage(invoicedBefore ? '0' : order.carriageAmount)
+        setSurcharge(invoicedBefore ? '0' : order.surchargeAmount)
       })
       .catch(() => {
         if (!live) return
@@ -487,7 +490,7 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
     return () => {
       live = false
     }
-  }, [order.id, order.carriageAmount])
+  }, [order.id, order.carriageAmount, order.surchargeAmount])
 
   // Reading the file is a guess and is treated as one: it only fills a box that
   // is still empty, and every box stays editable.
@@ -541,9 +544,10 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
         lines: live.map((line) => ({ qty: line.qty, unitCost: line.unitCost || '0', taxRatePercent: line.taxRatePercent || '0' })),
         carriageAmount: carriage || '0',
         carriageTaxRatePercent: carriageRate,
+        surchargeAmount: surcharge || '0',
         taxOverride: null,
       }),
-    [live, carriage, carriageRate],
+    [live, carriage, carriageRate, surcharge],
   )
 
   const blocked =
@@ -575,6 +579,7 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
           fxRate: order.fxRate || '1',
           carriageAmount: carriage || '0',
           carriageTaxRatePercent: carriageRate,
+          surchargeAmount: surcharge || '0',
           taxAmount: null,
           statedTotal: statedTotal.trim() || null,
           lines: live.map((line) => ({
@@ -706,6 +711,11 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
         <div style={{ flex: '0 1 180px' }}>
           <Field label="Carriage" hint="Before tax.">
             <input style={input} inputMode="decimal" value={carriage} onChange={(e) => setCarriage(e.target.value)} />
+          </Field>
+        </div>
+        <div style={{ flex: '0 1 180px' }}>
+          <Field label="Surcharge" hint="Before tax.">
+            <input style={input} inputMode="decimal" value={surcharge} onChange={(e) => setSurcharge(e.target.value)} />
           </Field>
         </div>
         <div style={{ textAlign: 'right' }}>

@@ -109,6 +109,21 @@ describe('billTotals', () => {
     expect(totals.total).toBe('132.00')
   })
 
+  it('adds the sale surcharge to the total, taxed at the highest rate on the bill', () => {
+    const totals = billTotals({
+      lines: [
+        { qty: '1', unitCost: '100', taxRatePercent: '0' },
+        { qty: '1', unitCost: '100', taxRatePercent: '20' },
+      ],
+      carriageAmount: '10',
+      surchargeAmount: '15',
+    })
+    expect(totals.surchargeAmount).toBe('15.00')
+    // 20 on the desk, 2 on carriage, 3 on the surcharge.
+    expect(totals.computedTax).toBe('25.00')
+    expect(totals.total).toBe('250.00')
+  })
+
   it("takes the supplier's own VAT figure when it is overtyped, and still reports ours", () => {
     const totals = billTotals({
       lines: [{ qty: '3', unitCost: '33.33', taxRatePercent: '20' }],

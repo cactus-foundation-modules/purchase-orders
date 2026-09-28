@@ -170,8 +170,9 @@ export async function lastChasedByOrder(orderIds: string[]): Promise<Record<stri
 
 const SPEND_BILL_STATUSES = ['APPROVED', 'POSTED']
 
-/** Bill money in the base currency: subtotal and carriage, at the bill's own rate. */
-const BILL_NET_SQL = Prisma.sql`ROUND((b."subtotal" + b."carriage_amount") * b."fx_rate", 2)`
+/** Bill money in the base currency: subtotal, carriage and surcharge, at the
+ *  bill's own rate. */
+const BILL_NET_SQL = Prisma.sql`ROUND((b."subtotal" + b."carriage_amount" + b."surcharge_amount") * b."fx_rate", 2)`
 
 /**
  * A supplier credit, net, off its own lines.

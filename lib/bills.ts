@@ -162,7 +162,7 @@ export async function listBills(filters: BillFilters = {}): Promise<PoBillSummar
 
 export async function getBill(id: string): Promise<PoBill | null> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
-    SELECT ${SUMMARY_SELECT}, b."fx_rate", b."subtotal", b."carriage_amount", b."tax_amount",
+    SELECT ${SUMMARY_SELECT}, b."fx_rate", b."subtotal", b."carriage_amount", b."surcharge_amount", b."tax_amount",
            b."query_note", b."approved_by_user_id", b."approved_at", b."posted_at",
            b."books_outcome", b."updated_at",
            COALESCE(a."displayName", a."username") AS "approved_by_name",
@@ -206,6 +206,7 @@ export async function getBill(id: string): Promise<PoBill | null> {
     fxRate: dec(r.fx_rate),
     subtotal: dec(r.subtotal),
     carriageAmount: dec(r.carriage_amount),
+    surchargeAmount: dec(r.surcharge_amount),
     taxAmount: dec(r.tax_amount),
     variance: variances(r.variance),
     queryNote: (r.query_note as string | null) ?? null,
@@ -338,6 +339,7 @@ export type BillInput = {
   fxRate: string
   subtotal: string
   carriageAmount: string
+  surchargeAmount: string
   taxAmount: string
   total: string
   /** What their own document says it comes to. Null where nobody has said. */
@@ -379,13 +381,13 @@ export async function createBill(
       const rows = await tx.$queryRaw<{ id: string }[]>`
         INSERT INTO "po_bills" (
           "supplier_id", "order_id", "supplier_invoice_number", "invoice_date", "due_date",
-          "currency", "fx_rate", "subtotal", "carriage_amount", "tax_amount", "total",
+          "currency", "fx_rate", "subtotal", "carriage_amount", "surcharge_amount", "tax_amount", "total",
           "stated_total", "source", "created_by_user_id"
         ) VALUES (
           ${input.supplierId}, ${input.orderId}, ${input.supplierInvoiceNumber},
           ${input.invoiceDate}::date, ${input.dueDate}::date, ${input.currency},
           ${input.fxRate}::numeric, ${input.subtotal}::numeric, ${input.carriageAmount}::numeric,
-          ${input.taxAmount}::numeric, ${input.total}::numeric,
+          ${input.surchargeAmount}::numeric, ${input.taxAmount}::numeric, ${input.total}::numeric,
           ${input.statedTotal}::numeric, ${source}, ${userId}
         )
         RETURNING "id"
@@ -416,6 +418,7 @@ export async function updateBill(id: string, input: BillInput): Promise<void> {
           "fx_rate" = ${input.fxRate}::numeric,
           "subtotal" = ${input.subtotal}::numeric,
           "carriage_amount" = ${input.carriageAmount}::numeric,
+          "surcharge_amount" = ${input.surchargeAmount}::numeric,
           "tax_amount" = ${input.taxAmount}::numeric,
           "total" = ${input.total}::numeric,
           "stated_total" = ${input.statedTotal}::numeric,

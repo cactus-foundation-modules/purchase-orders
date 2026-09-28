@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
 import type {
-  PoAuditEntry, PoBill, PoBillableLine, PoBookCategory, PoSupplier,
+  PoAuditEntry, PoBill, PoBillableLine, PoBillableOrder, PoBookCategory, PoSupplier,
 } from '@/modules/purchase-orders/lib/types'
 import {
   PO_VAT_RATE_CODES, PO_VAT_RATE_LABELS, PO_VAT_TREATMENTS, PO_VAT_TREATMENT_LABELS,
@@ -112,6 +112,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
   const [fxRate, setFxRate] = useState('1')
   const [carriage, setCarriage] = useState('0')
   const [carriageTax, setCarriageTax] = useState('0')
+  const [surcharge, setSurcharge] = useState('0')
   const [taxOverride, setTaxOverride] = useState('')
   /** What their document says it comes to, read off the PDF where it could be
    *  read. Never used as a figure: it sits beside our own arithmetic and the two
@@ -153,6 +154,13 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
             setTermsDays(data.paymentTermsDays ?? null)
             setDueDate(dueDateFor(localToday(), data.paymentTermsDays ?? null) ?? '')
             setLines(linesFromOrder(data.order.lines ?? [], data))
+            // The order's carriage and surcharge, charged once: on the first
+            // invoice against it, and not again once anything has been billed.
+            // The same proposal the order screen's quick invoice makes.
+            const billableOrder = data.order as PoBillableOrder
+            const invoicedBefore = billableOrder.lines.some((line) => Number(line.qtyInvoiced) > 0)
+            setCarriage(invoicedBefore ? '0' : billableOrder.carriageAmount)
+            setSurcharge(invoicedBefore ? '0' : billableOrder.surchargeAmount)
           }
           setLoaded(true)
         })
@@ -187,6 +195,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
           setCurrency(b.currency)
           setFxRate(b.fxRate)
           setCarriage(b.carriageAmount)
+          setSurcharge(b.surchargeAmount)
           setTaxOverride(b.taxAmount)
           setStatedTotal(b.statedTotal ?? '')
           setLines(linesFromBill(b, data.billable ?? []))
@@ -240,9 +249,10 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
         lines: onTheBill,
         carriageAmount: carriage,
         carriageTaxRatePercent: carriageTax,
+        surchargeAmount: surcharge,
         taxOverride: taxOverride || null,
       }),
-    [onTheBill, carriage, carriageTax, taxOverride],
+    [onTheBill, carriage, carriageTax, surcharge, taxOverride],
   )
 
   // Their figure against ours, said the moment either changes rather than after
@@ -280,6 +290,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
       fxRate: fxRate || '1',
       carriageAmount: carriage || '0',
       carriageTaxRatePercent: carriageTax || '0',
+      surchargeAmount: surcharge || '0',
       taxAmount: taxOverride || null,
       statedTotal: statedTotal.trim() || null,
       lines: onTheBill
@@ -901,6 +912,9 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
               <Field label="VAT on carriage %" hint="Blank follows the highest rate on the bill.">
                 <input style={input} value={carriageTax} onChange={(e) => setCarriageTax(e.target.value)} />
               </Field>
+              <Field label="Surcharge" hint="A sale-clearance surcharge on their invoice. VAT at the highest rate on the bill.">
+                <input style={input} inputMode="decimal" value={surcharge} onChange={(e) => setSurcharge(e.target.value)} />
+              </Field>
               <Field
                 label="VAT, as their invoice states it"
                 hint={`Ours works out at ${totals.computedTax}. Overtype it if theirs says otherwise.`}
@@ -935,6 +949,14 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                 <td style={td}>Carriage</td>
                 <td style={tdRight}>
                   <Money value={editable ? totals.carriageAmount : (bill?.carriageAmount ?? '0')} currency={currency} />
+                </td>
+              </tr>
+            )}
+            {Number(editable ? totals.surchargeAmount : (bill?.surchargeAmount ?? 0)) !== 0 && (
+              <tr>
+                <td style={td}>Surcharge</td>
+                <td style={tdRight}>
+                  <Money value={editable ? totals.surchargeAmount : (bill?.surchargeAmount ?? '0')} currency={currency} />
                 </td>
               </tr>
             )}

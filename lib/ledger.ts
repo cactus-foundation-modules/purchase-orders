@@ -181,6 +181,8 @@ export type BillLedgerLine = {
 export type BillLedgerInput = {
   lines: BillLedgerLine[]
   carriageAmount?: string | number | null
+  /** The order's sale surcharge, posted as a line of its own. */
+  surchargeAmount?: string | number | null
   /** What the invoice says the VAT is. Null means "use ours". */
   statedTax?: string | number | null
   /** Base currency per 1 unit of the bill's currency. */
@@ -241,6 +243,24 @@ export function billLedgerLines(input: BillLedgerInput): PoLedgerLine[] {
       ratePercent: rate,
       tax: NO_VAT_CHARGED.includes(treatment) ? 0 : Math.round((carriage * rate) / 10_000),
       net: carriage,
+    })
+  }
+
+  // The sale surcharge, the same way and for the same reason: an ancillary
+  // charge on the goods, at their highest rate. Its own line so the ledger
+  // says what it is rather than making carriage look dearer than it was.
+  const surcharge = scaled(input.surchargeAmount ?? 0, 2)
+  if (surcharge !== 0) {
+    const rate = working.reduce((max, line) => Math.max(max, line.ratePercent), 0)
+    const treatment = fallbackTreatment
+    working.push({
+      description: 'Surcharge',
+      categoryId: defaultCategoryId,
+      rateCode: fallbackCode ?? rateCodeFor(rate),
+      treatment,
+      ratePercent: rate,
+      tax: NO_VAT_CHARGED.includes(treatment) ? 0 : Math.round((surcharge * rate) / 10_000),
+      net: surcharge,
     })
   }
 

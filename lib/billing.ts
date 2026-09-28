@@ -33,6 +33,10 @@ export type BillTotalsInput = {
   lines: BillTotalsLine[]
   carriageAmount?: string | number | null
   carriageTaxRatePercent?: string | number | null
+  /** A supplier's sale surcharge, as on the order - see lib/totals.ts
+   *  orderTotals. Taxed at the highest rate on the bill, with no override,
+   *  exactly as the order taxes it. */
+  surchargeAmount?: string | number | null
   /**
    * The VAT figure printed on the supplier's own invoice, where somebody has
    * overtyped ours. A supplier who rounds line by line where we round once at
@@ -46,6 +50,7 @@ export type BillTotalsInput = {
 export type BillTotals = {
   subtotal: string
   carriageAmount: string
+  surchargeAmount: string
   /** What our own arithmetic makes of the VAT, whatever was typed. */
   computedTax: string
   taxAmount: string
@@ -71,6 +76,12 @@ export function billTotals(input: BillTotalsInput): BillTotals {
     tax += Math.round((carriage * carriageRate) / 10_000)
   }
 
+  const surcharge = scaled(input.surchargeAmount ?? 0, 2)
+  const surchargeRate = input.lines.reduce((max, l) => Math.max(max, scaled(l.taxRatePercent ?? 0, 2)), 0)
+  if (surcharge !== 0 && surchargeRate !== 0) {
+    tax += Math.round((surcharge * surchargeRate) / 10_000)
+  }
+
   const computedTax = tax
   const stated =
     input.taxOverride === null || input.taxOverride === undefined || String(input.taxOverride) === ''
@@ -81,9 +92,10 @@ export function billTotals(input: BillTotalsInput): BillTotals {
   return {
     subtotal: fromPence(net),
     carriageAmount: fromPence(carriage),
+    surchargeAmount: fromPence(surcharge),
     computedTax: fromPence(computedTax),
     taxAmount: fromPence(finalTax),
-    total: fromPence(net + carriage + finalTax),
+    total: fromPence(net + carriage + surcharge + finalTax),
     lineTotals: amounts.map((a) => a.lineTotal),
   }
 }

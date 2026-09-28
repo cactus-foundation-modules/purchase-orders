@@ -46,6 +46,7 @@ export const BillBody = z.object({
   fxRate: z.string().regex(/^\d{1,10}(\.\d{1,8})?$/, 'An exchange rate looks like 1.16482').default('1'),
   carriageAmount: Amount.default('0'),
   carriageTaxRatePercent: Percent.default('0'),
+  surchargeAmount: Amount.default('0'),
   /** The VAT figure on their invoice, where it differs from ours. Blank uses ours. */
   taxAmount: Amount.nullable().default(null),
   /** What their invoice says it comes to, as printed on it - read off the

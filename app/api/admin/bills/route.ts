@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
     lines: check.lines,
     carriageAmount: body.carriageAmount,
     carriageTaxRatePercent: body.carriageTaxRatePercent,
+    surchargeAmount: body.surchargeAmount,
     taxOverride: body.taxAmount,
   })
 
@@ -97,6 +98,7 @@ export async function POST(request: NextRequest) {
         fxRate: body.fxRate,
         subtotal: totals.subtotal,
         carriageAmount: totals.carriageAmount,
+        surchargeAmount: totals.surchargeAmount,
         taxAmount: totals.taxAmount,
         total: totals.total,
         statedTotal: orNull(body.statedTotal),

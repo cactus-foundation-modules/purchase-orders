@@ -125,6 +125,7 @@ export async function POST(request: NextRequest) {
         fxRate: order.fxRate,
         subtotal: totals.subtotal,
         carriageAmount: totals.carriageAmount,
+        surchargeAmount: totals.surchargeAmount,
         taxAmount: totals.taxAmount,
         total: totals.total,
         statedTotal,

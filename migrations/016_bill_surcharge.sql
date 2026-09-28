@@ -1,0 +1,13 @@
+-- A supplier's sale surcharge, on the bill as well as on the order.
+--
+-- 015 put the surcharge on the order, where it is added to the total and taxed
+-- at the highest line rate. A bill had nowhere to put it: carriage had its own
+-- figure and the surcharge had none, so entering a supplier's invoice against
+-- an order dropped it, the bill came in under their document, and the books
+-- were short by exactly that much.
+--
+-- Its own column rather than folded into carriage, because it is not delivery
+-- and an accountant reading the ledger should not have to ask why carriage
+-- costs what it does. Posted as its own ledger line (lib/ledger.ts), counted in
+-- spend (lib/reports.ts). Also in 001, for fresh installs.
+ALTER TABLE "po_bills" ADD COLUMN IF NOT EXISTS "surcharge_amount" NUMERIC(12,2) NOT NULL DEFAULT 0;

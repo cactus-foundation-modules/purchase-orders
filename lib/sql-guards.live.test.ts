@@ -128,6 +128,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
     fromOrder: typeof import('@/modules/purchase-orders/lib/from-order')
     mediaUsage: typeof import('@/modules/purchase-orders/lib/media-usage-provider')
     bills: typeof import('@/modules/purchase-orders/lib/bills')
+    reports: typeof import('@/modules/purchase-orders/lib/reports')
   }
   let mod: Loaded
   let vps: typeof import('@/lib/backup/vps-database')
@@ -150,6 +151,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
       fromOrder: await import('@/modules/purchase-orders/lib/from-order'),
       mediaUsage: await import('@/modules/purchase-orders/lib/media-usage-provider'),
       bills: await import('@/modules/purchase-orders/lib/bills'),
+      reports: await import('@/modules/purchase-orders/lib/reports'),
     }
 
     // A freshly-created database takes a moment to accept connections.
@@ -345,8 +347,9 @@ suite('purchase-orders SQL, against a real Postgres', () => {
         fxRate: '1',
         subtotal: '482.00',
         carriageAmount: '0.00',
-        taxAmount: '96.40',
-        total: '578.40',
+        surchargeAmount: '10.00',
+        taxAmount: '98.40',
+        total: '590.40',
         statedTotal: '590.00',
         lines: [
           {
@@ -377,6 +380,7 @@ suite('purchase-orders SQL, against a real Postgres', () => {
     expect(bill?.source).toBe('PORTAL')
     expect(bill?.createdByUserId).toBeNull()
     expect(bill?.lines).toHaveLength(1)
+    expect(bill?.surchargeAmount).toBe('10')
 
     // The list query selects its own column list and maps by hand, so a column
     // added to one and not the other is a field that reads back empty.
@@ -395,17 +399,26 @@ suite('purchase-orders SQL, against a real Postgres', () => {
       fxRate: '1',
       subtotal: '482.00',
       carriageAmount: '0.00',
-      taxAmount: '96.40',
-      total: '578.40',
+      surchargeAmount: '12.50',
+      taxAmount: '98.90',
+      total: '593.40',
       statedTotal: null,
       lines: [],
     })
-    expect((await mod.bills.getBill(billId))?.statedTotal).toBeNull()
+    const updated = await mod.bills.getBill(billId)
+    expect(updated?.statedTotal).toBeNull()
+    expect(updated?.surchargeAmount).toBe('12.5')
 
     // What the close gate counts.
     expect(await mod.bills.unsettledBillCount(orderId)).toBe(1)
     await mod.prisma.prisma.$executeRaw`UPDATE "po_bills" SET "status" = 'APPROVED' WHERE "id" = ${billId}`
     expect(await mod.bills.unsettledBillCount(orderId)).toBe(0)
+
+    // Spend counts the surcharge with the goods: an approved bill is money
+    // agreed, and the report's sum is raw SQL no other gate runs.
+    const reports = await mod.reports.buildReports({ from: '2026-09-01', to: '2026-09-30' })
+    const spent = reports.spend.bySupplier.find((row) => row.supplierId === supplierId)
+    expect(spent?.net).toBe('494.50')
   })
 
   it('accepts the pending-close status the CHECK constraint had never heard of', async () => {

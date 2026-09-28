@@ -94,6 +94,18 @@ describe('billLedgerLines', () => {
     expect(lines[2]).toMatchObject({ description: 'Carriage', net: '10.00', tax: '2.00' })
   })
 
+  it('adds the surcharge as its own line, not folded into carriage', () => {
+    const lines = billLedgerLines({
+      lines: [{ description: 'Desks', lineTotal: '100.00', taxRatePercent: '20' }],
+      carriageAmount: '10.00',
+      surchargeAmount: '15.00',
+      statedTax: '25.00',
+    })
+    expect(lines).toHaveLength(3)
+    expect(lines[1]).toMatchObject({ description: 'Carriage', net: '10.00', tax: '2.00' })
+    expect(lines[2]).toMatchObject({ description: 'Surcharge', net: '15.00', tax: '3.00' })
+  })
+
   it('never files a line that carries VAT as zero-rated', () => {
     // The books refuse a zero-rated line with VAT on it, and rightly: there
     // would be a figure in box 4 with no rate behind it.
