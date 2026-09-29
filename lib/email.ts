@@ -5,6 +5,7 @@ import { isEmailConfigured } from '@/lib/config/env'
 import { getSiteConfig } from '@/lib/config/site'
 import { formatMoney, formatQty, formatQtyUnit, serviceLineText, withUnit } from '@/modules/purchase-orders/lib/money'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
+import { appliedDiscount } from '@/modules/purchase-orders/lib/totals'
 import { poPdfFilename } from '@/modules/purchase-orders/lib/pdf'
 import { poDocumentPdf } from '@/modules/purchase-orders/lib/order-pdf'
 import { poReturnDocumentPdf } from '@/modules/purchase-orders/lib/return-pdf'
@@ -68,7 +69,26 @@ function linesHtml(ctx: PoDocContext): string {
       )
     })
     .join('')
-  return `<table cellpadding="6" cellspacing="0" border="0" width="100%">${rows}</table>`
+  // Carriage, surcharge and any order discount as line items of their own,
+  // the same as the document prints them. The per-line delivery text above
+  // already says which slice of the carriage each line accounts for.
+  const { order } = ctx
+  const charges = [
+    ['Carriage', Number(order.carriageAmount), false],
+    ['Surcharge', Number(order.surchargeAmount), false],
+    ['Discount', Number(appliedDiscount(order)), true],
+  ] as const
+  const chargeRows = charges
+    .filter(([, amount]) => amount !== 0)
+    .map(([label, amount, negative]) =>
+      '<tr>' +
+      `<td>${label}</td>` +
+      '<td align="center"></td>' +
+      `<td align="right">${negative ? '-' : ''}${escapeHtml(formatMoney(amount, order.currency))}</td>` +
+      '</tr>',
+    )
+    .join('')
+  return `<table cellpadding="6" cellspacing="0" border="0" width="100%">${rows}${chargeRows}</table>`
 }
 
 /** The delivery address as one escaped block. Also a rawTag: it is built here,

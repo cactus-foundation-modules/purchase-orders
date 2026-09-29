@@ -2,6 +2,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { googleFontHrefForFamily } from '@/lib/design/tokens'
 import { SiteColourField, SiteFontField } from '@/lib/puck/fields/registry'
 import { formatMoney } from '@/modules/purchase-orders/lib/money'
+import { chargedSubtotal } from '@/modules/purchase-orders/lib/totals'
 import { PO_DOC_CSS } from '@/modules/purchase-orders/components/puck/po-doc-css'
 import { SAMPLE_PO_CONTEXT, type PoDocContext } from '@/modules/purchase-orders/lib/doc-context'
 
@@ -268,7 +269,8 @@ export function poTokens(ctx: PoDocContext): Record<string, string> {
     EXPECTED_DATE: formatDate(order.expectedDate),
     PAYMENT_TERMS: order.paymentTerms ?? '',
     DELIVERY_TERMS: order.deliveryTerms ?? '',
-    SUBTOTAL: formatMoney(order.subtotal, order.currency),
+    // The printed subtotal - goods, carriage and surcharge - to match the Totals block.
+    SUBTOTAL: formatMoney(chargedSubtotal(order), order.currency),
     TOTAL: formatMoney(order.total, order.currency),
     SUPPLIER_NAME: supplier.name ?? '',
     SUPPLIER_ACCOUNT: supplier.accountNumber ?? '',

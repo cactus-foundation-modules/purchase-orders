@@ -634,7 +634,7 @@ export function planFromOrder(
     const supplier = byId.get(group.supplierId)!
     group.surchargeAmount = surchargeFor(
       group.lines,
-      netTotalFor(group.lines),
+      spendTowardThreshold(netTotalFor(group.lines), group.carriageAmount),
       supplier.surchargeThreshold,
       supplier.surchargeRates,
     )
@@ -665,8 +665,9 @@ export function carriageFor(lines: Array<{ qty: number; serviceCost: string | nu
 }
 
 /**
- * A group's net goods total, to the penny - what a sale surcharge's threshold
- * is actually checked against.
+ * A group's net goods total, to the penny - the goods half of what a sale
+ * surcharge's threshold is checked against (carriage is the other half, see
+ * `spendTowardThreshold`).
  *
  * Deliberately NOT `carriageFor`'s discipline (sum in ten-thousandths across
  * every line, round once at the end): `orderTotals` rounds each LINE to the
@@ -686,11 +687,25 @@ export function netTotalFor(lines: Array<{ qty: number; unitCost: string }>): st
 }
 
 /**
+ * What a group puts toward a supplier's surcharge threshold: the goods net
+ * plus the carriage.
+ *
+ * Carriage counts. The supplier is weighing up the whole order they invoice,
+ * delivery included, so £290 of goods with £25.90 carriage is a £315.90 order
+ * and clears a £300 threshold - judging it on the goods alone added a
+ * surcharge the supplier never asked for.
+ */
+export function spendTowardThreshold(netTotal: string, carriageAmount: string): string {
+  return fromPence(scaled(netTotal, 2) + scaled(carriageAmount, 2))
+}
+
+/**
  * A supplier's sale surcharge for one group of lines.
  *
  * Only lines bought on sale count, and only where their category has a rate -
  * an ordinary line at full price never adds a penny, however many of them sit
- * on the same order. Below the threshold, every sale-coded unit's rate is
+ * on the same order. `spend` is goods plus carriage - see
+ * `spendTowardThreshold`. Below the threshold, every sale-coded unit's rate is
  * summed by category; above or AT it, there is nothing to charge - "under",
  * never "at or under". The figure charged is capped at the shortfall: a
  * supplier that would rather take five pounds than push the order to their
@@ -701,14 +716,14 @@ export function netTotalFor(lines: Array<{ qty: number; unitCost: string }>): st
  */
 export function surchargeFor(
   lines: Array<{ qty: number; onSale: boolean; category: string | null }>,
-  netTotal: string,
+  spend: string,
   thresholdNet: string | null,
   rates: Array<{ categoryKey: string; ratePerUnit: string }>,
 ): string {
   if (thresholdNet == null || rates.length === 0) return '0.00'
   const thresholdPence = scaled(thresholdNet, 2)
-  const netPence = scaled(netTotal, 2)
-  if (netPence >= thresholdPence) return '0.00'
+  const spendPence = scaled(spend, 2)
+  if (spendPence >= thresholdPence) return '0.00'
 
   const rateByKey = new Map(rates.map((r) => [r.categoryKey, scaled(r.ratePerUnit, 4)]))
   let rawTenThousandths = 0
@@ -719,7 +734,7 @@ export function surchargeFor(
     rawTenThousandths += rate * (Number.isFinite(line.qty) ? line.qty : 0)
   }
   const rawPence = Math.round(rawTenThousandths / 100)
-  const shortfallPence = thresholdPence - netPence
+  const shortfallPence = thresholdPence - spendPence
   return fromPence(Math.max(0, Math.min(rawPence, shortfallPence)))
 }
 

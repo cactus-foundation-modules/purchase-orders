@@ -487,11 +487,11 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
             <legend style={{ padding: '0 0.375rem', fontSize: 'var(--text-sm)' }}>Sale surcharge</legend>
             <p style={{ ...muted, margin: '0 0 0.5rem' }}>
               Some suppliers charge more for clearance stock under a small order - set a threshold and what each
-              category costs per unit, and it is added to a draft purchase order by itself. Leave the threshold empty
-              and nothing changes.
+              category costs per unit, and it is added to a draft purchase order by itself. The threshold is checked
+              against the goods plus carriage. Leave the threshold empty and nothing changes.
             </p>
             <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', marginBottom: '0.75rem' }}>
-              <Field label="Net value below which it applies">
+              <Field label="Order value (goods plus carriage, net) below which it applies">
                 <input
                   style={input}
                   value={form.surchargeThreshold}

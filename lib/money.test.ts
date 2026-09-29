@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { formatQtyUnit, serviceExtendedCost, serviceLineName, serviceLineText, unitLabel, withUnit } from './money'
+import { formatQtyUnit, serviceExtendedCost, serviceLineName, serviceLineText, serviceRowsCarryCarriage, unitLabel, withUnit } from './money'
 
 // The delivery service is the one thing on a purchase order line the supplier
 // has to act on differently from every other order, and its price is the one
@@ -105,5 +105,24 @@ describe('formatQtyUnit and withUnit', () => {
 
   it('leaves an already-rendered figure exactly as the caller wrote it', () => {
     expect(withUnit('0.50', 'boxes')).toBe('0.50 boxes')
+  })
+})
+
+describe('serviceRowsCarryCarriage', () => {
+  const line = { qty: '2.000', qtyCancelled: '0.000', serviceName: 'Express', serviceCost: '12.9500' }
+
+  it('is true when the delivery rows add up to the carriage exactly', () => {
+    expect(serviceRowsCarryCarriage([line], '25.90')).toBe(true)
+  })
+
+  it('is false when the carriage was changed by hand, waived, or never came off a service', () => {
+    expect(serviceRowsCarryCarriage([line], '30.00')).toBe(false)
+    expect(serviceRowsCarryCarriage([line], '0.00')).toBe(false)
+    expect(serviceRowsCarryCarriage([{ ...line, serviceName: null, serviceCost: null }], '25.90')).toBe(false)
+  })
+
+  it('counts what is still being sent, so a line cancelled down no longer matches', () => {
+    expect(serviceRowsCarryCarriage([{ ...line, qtyCancelled: '1.000' }], '25.90')).toBe(false)
+    expect(serviceRowsCarryCarriage([{ ...line, qtyCancelled: '1.000' }], '12.95')).toBe(true)
   })
 })

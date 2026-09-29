@@ -134,3 +134,42 @@ export function orderTotals(input: OrderTotalsInput): OrderTotals {
     lineTotals: amounts.map((a) => a.lineTotal),
   }
 }
+
+/**
+ * An order's subtotal as a purchase order prints it: the goods, less any order
+ * discount, plus carriage and surcharge.
+ *
+ * Carriage and surcharge are line items on the order - things being paid for,
+ * like the goods - so the subtotal counts them and the totals underneath are
+ * only ever subtotal, tax and total. The stored `subtotal` stays the GOODS net,
+ * because bills, exports and a supplier's minimum order all mean goods by it;
+ * this is the printed figure, worked out from the stored ones.
+ */
+export function chargedSubtotal(order: {
+  subtotal: string | number
+  discountAmount?: string | number | null
+  carriageAmount?: string | number | null
+  surchargeAmount?: string | number | null
+}): string {
+  return fromPence(
+    scaled(order.subtotal, 2) -
+      scaled(appliedDiscount(order), 2) +
+      scaled(order.carriageAmount ?? 0, 2) +
+      scaled(order.surchargeAmount ?? 0, 2),
+  )
+}
+
+/**
+ * The order discount actually taken off, as `orderTotals` takes it: never
+ * below nothing, never more than the goods.
+ *
+ * The stored `discount_amount` is whatever was typed, and nothing stops
+ * somebody typing more than the goods come to. The stored total was worked
+ * out with the capped figure, so printing the raw one would show rows that do
+ * not add up to it.
+ */
+export function appliedDiscount(order: { subtotal: string | number; discountAmount?: string | number | null }): string {
+  const goods = scaled(order.subtotal, 2)
+  const discount = Math.max(0, scaled(order.discountAmount ?? 0, 2))
+  return fromPence(Math.max(0, Math.min(discount, goods)))
+}

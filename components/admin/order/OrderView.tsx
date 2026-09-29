@@ -3,6 +3,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import Link from 'next/link'
 import { withUnit } from '@/modules/purchase-orders/lib/money'
+import { appliedDiscount } from '@/modules/purchase-orders/lib/totals'
 import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receiving'
 import type { PoStanding } from '@/modules/purchase-orders/lib/standing'
 import type {
@@ -167,6 +168,11 @@ export function OrderView({
     total: order.total,
     lineTotals: order.lines.map((l) => l.lineTotal),
   }
+  const charges = [
+    { key: 'carriage', label: 'Carriage', amount: order.carriageAmount, negative: false },
+    { key: 'surcharge', label: 'Surcharge', amount: order.surchargeAmount, negative: false },
+    { key: 'discount', label: 'Order discount', amount: appliedDiscount(order), negative: true },
+  ].filter((c) => Number(c.amount) !== 0)
 
   const sourceOrderNumber =
     order.sourceKind === 'FROM_ORDER' && typeof order.sourceRef?.orderNumber === 'string' ? order.sourceRef.orderNumber : null
@@ -249,7 +255,8 @@ export function OrderView({
                               {l.serviceCost && (
                                 <>
                                   {' - '}
-                                  <Money value={l.serviceCost} currency={order.currency} /> a unit, not in the line total
+                                  <Money value={l.serviceCost} currency={order.currency} /> a unit
+                                  {Number(order.carriageAmount) !== 0 && ', in the carriage below'}
                                 </>
                               )}
                             </div>
@@ -283,6 +290,24 @@ export function OrderView({
                       </tr>
                     )
                   })}
+                  {/* Carriage, surcharge and an order discount as line items of
+                      their own - the subtotal under the table counts them. */}
+                  {charges.map((c) => (
+                    <tr key={c.key}>
+                      <td style={td}>{c.label}</td>
+                      <td style={td} />
+                      <td style={tdRight} />
+                      {showArrivals && <td style={tdRight} />}
+                      {showArrivals && <td style={tdRight} />}
+                      <td style={tdRight} />
+                      <td style={tdRight} />
+                      <td style={tdRight}>
+                        {c.negative && '−'}
+                        <Money value={c.amount} currency={order.currency} />
+                      </td>
+                      {onCancelLine && <td style={td} />}
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>

@@ -13,6 +13,7 @@ import {
 import { injectPoDocContext, type PoDocContext, type PoDocParty } from '@/modules/purchase-orders/lib/doc-context'
 import { docPageSetupFromLayout, type DocPageSetup } from '@/modules/purchase-orders/lib/doc-page-settings'
 import { PO_DOCUMENT_FALLBACK_DATA } from '@/modules/purchase-orders/lib/starterLayouts'
+import { chargedSubtotal } from '@/modules/purchase-orders/lib/totals'
 import { PO_STATUS_LABELS, type PoOrder, type PoStatus, type PoSupplier } from '@/modules/purchase-orders/lib/types'
 import type { PoAddress } from '@/modules/purchase-orders/lib/config'
 
@@ -317,7 +318,9 @@ function poAsDocFooterContext(ctx: PoDocContext): FooterCompatibleContext {
       taxPointDate: order.raisedDate ?? '',
       dueDate: null,
       currencySymbol: '',
-      subtotal: order.subtotal,
+      // The printed subtotal (goods, carriage, surcharge), so a footer's
+      // {{SUBTOTAL}} agrees with the Totals block on the same page.
+      subtotal: chargedSubtotal(order),
       taxAmount: order.taxAmount,
       total: order.total,
       wording: {},

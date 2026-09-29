@@ -1,5 +1,6 @@
 import { Fragment } from 'react'
-import { formatMoney, formatQty, formatQtyUnit, serviceExtendedCost, serviceLineName } from '@/modules/purchase-orders/lib/money'
+import { formatMoney, formatQty, formatQtyUnit, serviceExtendedCost, serviceLineName, serviceRowsCarryCarriage } from '@/modules/purchase-orders/lib/money'
+import { appliedDiscount, chargedSubtotal } from '@/modules/purchase-orders/lib/totals'
 import {
   Style, FontLink, fontStyle, fontField, sizeField, radiusField, spaceField, sizeVars, cssLength,
   yesNo, formatDate, paragraphs, useCtx,
@@ -596,6 +597,8 @@ type LinesProps = DocProps & {
   headPt?: number | string; rowPt?: number | string; skuPt?: number | string; detailPt?: number | string
   headRadius?: string; headRadiusEdges?: string; headPadX?: string; headPadY?: string
   rowPadY?: string; rowRadius?: string; descWidth?: string
+  carriageLabel?: string; surchargeLabel?: string; discountLabel?: string
+  showCarriageRow?: string; showSurchargeRow?: string
 }
 
 /** How much of the table the description column takes, leaving the money columns
@@ -642,6 +645,28 @@ export function PoDocLines(props: LinesProps) {
   const descWidth = DESC_WIDTHS[props.descWidth ?? 'auto'] ?? ''
   const columnCount = 4 + (codeColumn ? 1 : 0)
 
+  // Carriage, surcharge and any order discount are line items: rows in this
+  // table, counted in the subtotal under it, never extra rows in the totals.
+  // Where the delivery rows under the goods already add up to the carriage,
+  // they ARE the carriage and no separate row is printed - see
+  // `serviceRowsCarryCarriage`. Carriage printed even at nothing, when asked,
+  // for an order where "carriage paid" is the deal and a blank would read as
+  // "not agreed yet".
+  const carriage = Number(order.carriageAmount)
+  const surcharge = Number(order.surchargeAmount)
+  const orderDiscount = Number(appliedDiscount(order))
+  const carriageInRows = serviceRowsCarryCarriage(order.lines, order.carriageAmount)
+  const charges: Array<{ key: string; label: string; amount: string }> = []
+  if (!carriageInRows && (carriage !== 0 || props.showCarriageRow === 'always')) {
+    charges.push({ key: 'carriage', label: props.carriageLabel?.trim() || 'Carriage', amount: formatMoney(carriage, order.currency) })
+  }
+  if (surcharge !== 0 || props.showSurchargeRow === 'always') {
+    charges.push({ key: 'surcharge', label: props.surchargeLabel?.trim() || 'Surcharge', amount: formatMoney(surcharge, order.currency) })
+  }
+  if (orderDiscount > 0) {
+    charges.push({ key: 'discount', label: props.discountLabel?.trim() || 'Discount', amount: `-${formatMoney(orderDiscount, order.currency)}` })
+  }
+
   return (
     <>
       <Style />
@@ -686,14 +711,14 @@ export function PoDocLines(props: LinesProps) {
             // two, the name slid a line below its own money and the sheet read
             // as though the figures belonged to the goods above them.
             const service = serviceLineName(line.serviceName, line.serviceCost)
-            // Still not IN the line total, and still summed into the carriage at
-            // the foot. The columns say what it costs; they do not move where it
-            // is counted.
+            // Not IN the goods line total - it is the order's carriage, and
+            // counted in the subtotal as carriage. Priced here only while these
+            // rows add up to that carriage; otherwise one Carriage row below
+            // carries it, and pricing both would print the money twice.
             //
             // Nothing left to send, nothing left to charge for it: a line
-            // cancelled down to none keeps its name and loses its figures, the
-            // same way carrying it into the carriage total does.
-            const serviceTotal = service && qty > 0 ? serviceExtendedCost(line.serviceCost, qty) : null
+            // cancelled down to none keeps its name and loses its figures.
+            const serviceTotal = service && qty > 0 && carriageInRows ? serviceExtendedCost(line.serviceCost, qty) : null
             if (showOurSku && line.ourSku) detail.push(`Our code ${line.ourSku}`)
             if (props.showLineDates !== 'no' && line.expectedDate) detail.push(`Expected ${formatDate(line.expectedDate)}`)
             if (props.showDiscount !== 'no' && discount > 0) detail.push(`Less ${formatQty(discount)}%`)
@@ -746,6 +771,15 @@ export function PoDocLines(props: LinesProps) {
               <td colSpan={columnCount} className="po-doc-empty">There is nothing on this order.</td>
             </tr>
           )}
+          {charges.map((charge, i) => (
+            <tr key={charge.key} className={(order.lines.length + i) % 2 === 1 ? 'po-doc-alt' : undefined}>
+              <td><span className="po-doc-name">{charge.label}</span></td>
+              {codeColumn && <td className="po-doc-sku" />}
+              <td className="po-doc-num" />
+              <td className="po-doc-num" />
+              <td className="po-doc-num">{charge.amount}</td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </>
@@ -793,6 +827,17 @@ export const poDocLinesPuckComponent = {
     qtyLabel: { type: 'text' as const, label: 'Quantity column' },
     costLabel: { type: 'text' as const, label: 'Unit cost column' },
     totalLabel: { type: 'text' as const, label: 'Line total column' },
+    carriageLabel: { type: 'text' as const, label: 'Carriage line' },
+    showCarriageRow: { type: 'select' as const, label: 'Carriage line when there is no charge', options: [
+      { value: 'charged', label: 'Leave it off' },
+      { value: 'always', label: 'Print it anyway' },
+    ] },
+    surchargeLabel: { type: 'text' as const, label: 'Surcharge line' },
+    showSurchargeRow: { type: 'select' as const, label: 'Surcharge line when there is no charge', options: [
+      { value: 'charged', label: 'Leave it off' },
+      { value: 'always', label: 'Print it anyway' },
+    ] },
+    discountLabel: { type: 'text' as const, label: 'Order discount line' },
     headPt: sizeField('Column heading size'),
     rowPt: sizeField('Line size'),
     skuPt: sizeField('Product code size'),
@@ -805,6 +850,8 @@ export const poDocLinesPuckComponent = {
     showSupplierSku: 'yes', showOurSku: 'no', showLineDates: 'yes', showDiscount: 'yes',
     itemLabel: 'Description', codeLabel: 'Your code', qtyLabel: 'Qty',
     costLabel: 'Unit cost', totalLabel: 'Line total',
+    carriageLabel: 'Carriage', showCarriageRow: 'charged', surchargeLabel: 'Surcharge', showSurchargeRow: 'charged',
+    discountLabel: 'Discount',
   },
   render: PoDocLines,
 }
@@ -814,10 +861,15 @@ export const poDocLinesPuckRscComponent = { ...poDocLinesPuckComponent, render: 
 // Totals
 // ---------------------------------------------------------------------------
 
+// Subtotal, tax, total - nothing else. Carriage, surcharge and an order
+// discount are rows on the Lines block, counted in the subtotal here.
+//
+// `subtotalRowLabel`, not the old `subtotalLabel`: every saved layout carries
+// that one as "Goods", which is the wrong word for a figure that now includes
+// carriage, and reusing the key would keep printing it.
 type TotalsProps = DocProps & {
-  subtotalLabel?: string; discountLabel?: string; carriageLabel?: string; surchargeLabel?: string
-  taxLabel?: string; totalLabel?: string; note?: string
-  emphasis?: string; width?: string; showCarriageRow?: string; showSurchargeRow?: string; showCurrency?: string
+  subtotalRowLabel?: string; taxLabel?: string; totalLabel?: string; note?: string
+  emphasis?: string; width?: string; showCurrency?: string
   rowPt?: number | string; totalPt?: number | string; notePt?: number | string
 }
 
@@ -827,14 +879,7 @@ export function PoDocTotals(props: TotalsProps) {
   const { order } = useCtx(props)
   const font = fontStyle(props)
   const note = props.note?.trim()
-  const discount = Number(order.discountAmount)
-  const carriage = Number(order.carriageAmount)
-  const surcharge = Number(order.surchargeAmount)
   const tax = Number(order.taxAmount)
-  // Carriage printed even at nothing, for an order where "carriage paid" is the
-  // deal and a blank would read as "not agreed yet".
-  const showCarriage = props.showCarriageRow === 'always' || carriage !== 0
-  const showSurcharge = props.showSurchargeRow === 'always' || surcharge !== 0
   const listClass = `po-doc-totals${props.emphasis === 'accent' ? ' po-doc-total-accent' : ''}`
   // Which currency the figures are in. Obvious on a domestic order and the whole
   // question on one placed abroad, where a supplier reading "1,240.00" needs to
@@ -854,26 +899,8 @@ export function PoDocTotals(props: TotalsProps) {
           ...sizeVars({ '--po-doc-totals-size': props.rowPt, '--po-doc-grand-size': props.totalPt }),
         }}
       >
-        <dt>{props.subtotalLabel?.trim() || 'Goods'}</dt>
-        <dd>{formatMoney(order.subtotal, order.currency)}</dd>
-        {discount > 0 && (
-          <div className="po-doc-row">
-            <dt>{props.discountLabel?.trim() || 'Discount'}</dt>
-            <dd>-{formatMoney(discount, order.currency)}</dd>
-          </div>
-        )}
-        {showCarriage && (
-          <div className="po-doc-row">
-            <dt>{props.carriageLabel?.trim() || 'Carriage'}</dt>
-            <dd>{formatMoney(carriage, order.currency)}</dd>
-          </div>
-        )}
-        {showSurcharge && (
-          <div className="po-doc-row">
-            <dt>{props.surchargeLabel?.trim() || 'Surcharge'}</dt>
-            <dd>{formatMoney(surcharge, order.currency)}</dd>
-          </div>
-        )}
+        <dt>{props.subtotalRowLabel?.trim() || 'Subtotal'}</dt>
+        <dd>{formatMoney(chargedSubtotal(order), order.currency)}</dd>
         {tax !== 0 && (
           <div className="po-doc-row">
             <dt>{props.taxLabel?.trim() || 'VAT'}{order.taxMode === 'INCLUSIVE' ? ' (included)' : ''}</dt>
@@ -905,18 +932,7 @@ export const poDocTotalsPuckComponent = {
       { value: 'normal', label: 'Normal' },
       { value: 'wide', label: 'Wide' },
     ] },
-    subtotalLabel: { type: 'text' as const, label: 'Goods row' },
-    discountLabel: { type: 'text' as const, label: 'Discount row' },
-    carriageLabel: { type: 'text' as const, label: 'Carriage row' },
-    showCarriageRow: { type: 'select' as const, label: 'Carriage row when there is no charge', options: [
-      { value: 'charged', label: 'Leave it off' },
-      { value: 'always', label: 'Print it anyway' },
-    ] },
-    surchargeLabel: { type: 'text' as const, label: 'Surcharge row' },
-    showSurchargeRow: { type: 'select' as const, label: 'Surcharge row when there is no charge', options: [
-      { value: 'charged', label: 'Leave it off' },
-      { value: 'always', label: 'Print it anyway' },
-    ] },
+    subtotalRowLabel: { type: 'text' as const, label: 'Subtotal row' },
     taxLabel: { type: 'text' as const, label: 'Tax row' },
     totalLabel: { type: 'text' as const, label: 'Total row' },
     showCurrency: { type: 'select' as const, label: 'The currency code beside the total', options: yesNo },
@@ -927,8 +943,7 @@ export const poDocTotalsPuckComponent = {
   },
   defaultProps: {
     fontFamily: '', emphasis: 'rule', width: 'normal',
-    subtotalLabel: 'Goods', discountLabel: 'Discount', carriageLabel: 'Carriage', surchargeLabel: 'Surcharge',
-    showCarriageRow: 'charged', showSurchargeRow: 'charged', taxLabel: 'VAT', totalLabel: 'Order total', showCurrency: 'yes',
+    subtotalRowLabel: 'Subtotal', taxLabel: 'VAT', totalLabel: 'Order total', showCurrency: 'yes',
     note: '',
   },
   render: PoDocTotals,

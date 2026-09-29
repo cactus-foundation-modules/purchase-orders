@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { lineAmounts, orderTotals } from './totals'
+import { appliedDiscount, chargedSubtotal, lineAmounts, orderTotals } from './totals'
 
 // The arithmetic on a purchase order is the one thing here that can be quietly
 // wrong for months: nothing crashes, the screen looks fine, and the supplier's
@@ -127,5 +127,39 @@ describe('orderTotals', () => {
     expect(totals.carriageAmount).toBe('10.00')
     expect(totals.surchargeAmount).toBe('5.00')
     expect(totals.total).toBe('115.00')
+  })
+})
+
+describe('chargedSubtotal', () => {
+  it('counts carriage and surcharge as line items, and takes off an order discount', () => {
+    expect(chargedSubtotal({ subtotal: '290.00', carriageAmount: '25.90', surchargeAmount: '0.00' })).toBe('315.90')
+    expect(chargedSubtotal({ subtotal: '100.00', discountAmount: '5.00', carriageAmount: '10.00', surchargeAmount: '2.50' })).toBe('107.50')
+  })
+
+  it('plus tax is the order total, so the three printed rows always add up', () => {
+    const t = orderTotals({
+      lines: [{ qty: 2, unitCost: '145.00', taxRatePercent: 20 }],
+      taxMode: 'EXCLUSIVE',
+      carriageAmount: '25.90',
+      surchargeAmount: '4.10',
+    })
+    const pence = (v: string) => Math.round(Number(v) * 100)
+    expect(pence(chargedSubtotal(t)) + pence(t.taxAmount)).toBe(pence(t.total))
+  })
+
+  it('still adds up where the discount typed in is more than the goods', () => {
+    // Stored as typed, capped in the total - so the printed subtotal must cap it too.
+    const input = {
+      lines: [{ qty: 1, unitCost: '50.00', taxRatePercent: 20 }],
+      taxMode: 'EXCLUSIVE' as const,
+      discountAmount: '80.00',
+      carriageAmount: '10.00',
+    }
+    const t = orderTotals(input)
+    const stored = { subtotal: t.subtotal, discountAmount: input.discountAmount, carriageAmount: t.carriageAmount }
+    expect(appliedDiscount(stored)).toBe('50.00')
+    expect(chargedSubtotal(stored)).toBe('10.00')
+    const pence = (v: string) => Math.round(Number(v) * 100)
+    expect(pence(chargedSubtotal(stored)) + pence(t.taxAmount)).toBe(pence(t.total))
   })
 })

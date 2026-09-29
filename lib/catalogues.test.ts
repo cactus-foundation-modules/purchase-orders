@@ -713,6 +713,23 @@ describe('planFromOrder with a price list', () => {
       expect(plan.groups[0]!.surchargeAmount).toBe('3.00')
     })
 
+    it('counts carriage toward the threshold - goods under it plus delivery over it is no surcharge', () => {
+      // £297 of goods is £3 short of £300, but £2 a unit delivery on three
+      // units is £6 of carriage: a £303 order, which clears it.
+      const withRates = {
+        ...supplier,
+        surchargeThreshold: '300.00',
+        surchargeRates: [{ categoryKey: 'seating', ratePerUnit: '6.0000' }],
+      }
+      const delivered: ShopOrderFacts = {
+        ...onSale,
+        items: [{ ...onSale.items[0]!, lineMeta: { charges: [{ label: 'Delivery', amount: 2 }] } }],
+      }
+      const group = planFromOrder(delivered, [withRates], catalogueWithCategory).groups[0]!
+      expect(group.carriageAmount).toBe('6.00')
+      expect(group.surchargeAmount).toBe('0.00')
+    })
+
     it('carries onSale and the catalogue category onto the line', () => {
       const plan = planFromOrder(onSale, [supplier], catalogueWithCategory)
       const line = plan.groups[0]!.lines[0]!

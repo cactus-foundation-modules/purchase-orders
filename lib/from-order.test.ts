@@ -8,6 +8,7 @@ import {
   serviceCostFor,
   serviceNameFor,
   shipToFromShopOrder,
+  spendTowardThreshold,
   surchargeFor,
   type PoRaisedFromShopOrder,
   type ShopOrderFacts,
@@ -226,6 +227,25 @@ describe('netTotalFor', () => {
     // second rounding discipline.
     expect(netTotalFor([{ qty: 2, unitCost: '100.00' }, { qty: 1, unitCost: '39.99' }])).toBe('239.99')
     expect(netTotalFor([])).toBe('0.00')
+  })
+})
+
+describe('spendTowardThreshold', () => {
+  it('counts carriage toward the threshold alongside the goods', () => {
+    expect(spendTowardThreshold('290.00', '25.90')).toBe('315.90')
+    expect(spendTowardThreshold('290.00', '0.00')).toBe('290.00')
+  })
+
+  it('£290 of goods with £25.90 carriage clears a £300 threshold - no surcharge', () => {
+    const lines = [{ qty: 5, onSale: true, category: 'Seating' }]
+    const rates = [{ categoryKey: 'seating', ratePerUnit: '2.0000' }]
+    expect(surchargeFor(lines, spendTowardThreshold('290.00', '25.90'), '300.00', rates)).toBe('0.00')
+  })
+
+  it('carriage narrows the shortfall when it does not clear it', () => {
+    const lines = [{ qty: 10, onSale: true, category: 'Seating' }]
+    const rates = [{ categoryKey: 'seating', ratePerUnit: '2.0000' }]
+    expect(surchargeFor(lines, spendTowardThreshold('280.00', '15.00'), '300.00', rates)).toBe('5.00')
   })
 })
 

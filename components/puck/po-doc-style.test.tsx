@@ -227,6 +227,42 @@ describe('the purchase order document blocks', () => {
   })
 })
 
+describe('carriage and surcharge as line items', () => {
+  const withOrder = (patch: Partial<typeof ctx.order>) => ({ ...ctx, order: { ...ctx.order, ...patch } })
+
+  it('prints only subtotal, tax and total, with carriage counted in the subtotal', () => {
+    const html = visible(renderToStaticMarkup(<PoDocTotals _ctx={ctx} />))
+    // 2,640 goods + 45 carriage.
+    expect(html).toContain('Subtotal')
+    expect(html).toContain('\u00a32,685.00')
+    expect(html).not.toContain('Carriage')
+    expect(html).not.toContain('Goods')
+    expect(html.match(/<dt/g)?.length).toBe(3)
+  })
+
+  it('lets the delivery rows be the carriage when they add up to it', () => {
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={ctx} />))
+    expect(html).not.toContain('>Carriage<')
+  })
+
+  it('prints one Carriage line, and unpriced delivery rows, when they do not', () => {
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={withOrder({ carriageAmount: '60.00' })} />))
+    expect(html).toContain('>Carriage<')
+    expect(html).toContain('\u00a360.00')
+    expect(html).toContain('Pre-assembled delivery')
+    expect(html).not.toContain('\u00a345.00')
+  })
+
+  it('prints the surcharge as a line of its own', () => {
+    const html = visible(renderToStaticMarkup(<PoDocLines _ctx={withOrder({ surchargeAmount: '10.00' })} />))
+    expect(html).toContain('>Surcharge<')
+    expect(html).toContain('\u00a310.00')
+    const totals = visible(renderToStaticMarkup(<PoDocTotals _ctx={withOrder({ surchargeAmount: '10.00' })} />))
+    expect(totals).toContain('\u00a32,695.00')
+    expect(totals).not.toContain('Surcharge')
+  })
+})
+
 describe('the manifest and the blocks agree', () => {
   const declared = (manifest.puckBlocks ?? []).map((b: { type: string }) => b.type)
 

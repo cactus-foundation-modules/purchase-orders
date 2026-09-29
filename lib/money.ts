@@ -126,6 +126,39 @@ export function serviceExtendedCost(
 }
 
 /**
+ * Whether the delivery rows under a document's lines already add up to the
+ * order's carriage, to the penny.
+ *
+ * When they do, those rows ARE the carriage line items - priced in the money
+ * columns - and a separate "Carriage" row under them would print the same
+ * money twice. When they do not (carriage typed by hand, a line cancelled
+ * down, carriage waived), the rows keep their names but lose their figures,
+ * and one Carriage row carries the real amount. Either way, the rows on the
+ * page add up to the subtotal under them.
+ *
+ * Summed as the PRINTED figures are - each line rounded to the penny, then
+ * added - not the way `carriageFor` sums them. With sub-penny rates the two can
+ * differ by a penny, and then the rows as printed would not add up to the
+ * carriage; one Carriage row is the honest answer there.
+ */
+export function serviceRowsCarryCarriage(
+  lines: Array<{ qty: string | number; qtyCancelled: string | number; serviceName: string | null; serviceCost: string | null }>,
+  carriageAmount: string | number,
+): boolean {
+  let pence = 0
+  let priced = false
+  for (const line of lines) {
+    const qty = Number(line.qty) - Number(line.qtyCancelled)
+    if (!serviceLineName(line.serviceName, line.serviceCost) || !(qty > 0)) continue
+    const extended = serviceExtendedCost(line.serviceCost, qty)
+    if (extended == null) continue
+    priced = true
+    pence += scaled(extended, 2)
+  }
+  return priced && pence === scaled(carriageAmount, 2)
+}
+
+/**
  * The delivery service on a line, and what it costs, as one sentence.
  *
  * The cost is per unit and is NOT in the line total - it is summed into the
