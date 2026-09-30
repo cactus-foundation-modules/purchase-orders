@@ -8,6 +8,7 @@ function facts(patch: Partial<PoPaperworkFacts> = {}): PoPaperworkFacts {
     proformaReceived: false,
     proformaPaid: false,
     acknowledged: false,
+    invoiced: false,
     fullyInvoiced: false,
     ...patch,
   }
@@ -39,6 +40,12 @@ describe('nextPaperworkStep', () => {
 
   it('does not chase an acknowledgement for goods that have already turned up', () => {
     expect(nextPaperworkStep(facts({ status: 'PART_RECEIVED', proformaRequired: false }))).toBe('INVOICE')
+  })
+
+  it('stops asking for an acknowledgement once their invoice is in', () => {
+    const paid = { proformaReceived: true, proformaPaid: true }
+    expect(nextPaperworkStep(facts({ ...paid, invoiced: true }))).toBe('INVOICE')
+    expect(nextPaperworkStep(facts({ ...paid, invoiced: true, fullyInvoiced: true }))).toBeNull()
   })
 
   it('has nothing to ask of an order the supplier is not holding', () => {

@@ -424,7 +424,9 @@ function addDays(day: string, days: number): string {
  * Anything stranger than that (a charge that is not on the order, a different
  * VAT treatment per line) belongs on the full screen, and there is a link to it.
  */
-function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fullFormHref: string }) {
+function InvoiceModal({
+  order, onClose, onDone, fullFormHref, canConfirmOrder,
+}: StepProps & { fullFormHref: string; canConfirmOrder: boolean }) {
   const [lines, setLines] = useState<InvoiceLine[] | null>(null)
   const [defaults, setDefaults] = useState<BillableDefaults | null>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -435,8 +437,14 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
   const [carriage, setCarriage] = useState('0')
   const [surcharge, setSurcharge] = useState('0')
   const [reading, setReading] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // An order still reading "Sent" when its invoice turns up is one whose
+  // supplier never acknowledged it. The invoice is their confirmation, so it
+  // can say so - the same tick, and the same default, as the acknowledgement.
+  const canConfirm = canConfirmOrder && order.status === 'SENT'
 
   useEffect(() => {
     let live = true
@@ -605,18 +613,35 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
           ? 'It agrees with the order.'
           : `There ${things === 1 ? 'is one thing' : `are ${things} things`} on it to look at before anybody approves it.`
 
-      // The bill exists by now. A file that will not go up is said as a
+      // The bill exists by now, so everything after it is said as a
       // half-success: entering it again would be refused as a duplicate.
+      const problems: string[] = []
       if (file && data.id) {
         const body = new FormData()
         body.append('file', file)
         const attached = await fetch(`/api/m/purchase-orders/admin/bills/${data.id}/attachment`, { method: 'POST', body })
         if (!attached.ok) {
-          onDone(`Their invoice ${number.trim()} is entered, but the file was not attached: ${await readError(attached, 'it would not go up.')} Attach it from the bill.`, true)
-          return
+          problems.push(`the file was not attached (${await readError(attached, 'it would not go up')}) - attach it from the bill`)
         }
       }
-      onDone(`Their invoice ${number.trim()} is entered. ${verdict} It is under Bills, below.`, things > 0)
+      let confirmed = ''
+      if (canConfirm && confirm) {
+        const marked = await fetch(`/api/m/purchase-orders/admin/orders/${order.id}/transition`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            transition: 'acknowledge',
+            note: `Confirmed by their invoice ${number.trim()}. No acknowledgement came.`,
+          }),
+        })
+        if (marked.ok) confirmed = ' The order is marked as confirmed.'
+        else problems.push(`the order is not marked as confirmed (${await readError(marked, 'that was refused')})`)
+      }
+      if (problems.length) {
+        onDone(`Their invoice ${number.trim()} is entered, but ${problems.join(', and ')}.`, true)
+        return
+      }
+      onDone(`Their invoice ${number.trim()} is entered.${confirmed} ${verdict} It is under Bills, below.`, things > 0)
     } finally {
       setBusy(false)
     }
@@ -728,6 +753,13 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
           </div>
         </div>
       </div>
+
+      {canConfirm && (
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start', fontSize: 'var(--text-sm)' }}>
+          <input type="checkbox" checked={confirm} disabled={busy} onChange={(e) => setConfirm(e.target.checked)} style={{ marginTop: '0.2rem' }} />
+          <span>Mark the order as confirmed by the supplier - they have not sent an acknowledgement, and this invoice will do instead</span>
+        </label>
+      )}
     </Modal>
   )
 }
@@ -736,11 +768,11 @@ function InvoiceModal({ order, onClose, onDone, fullFormHref }: StepProps & { fu
 
 /** Whichever of the four is open, or nothing. */
 export function StepModal({
-  step, fullFormHref, ...props
-}: StepProps & { step: PoPaperworkStep | null; fullFormHref: string }) {
+  step, fullFormHref, canConfirmOrder, ...props
+}: StepProps & { step: PoPaperworkStep | null; fullFormHref: string; canConfirmOrder: boolean }) {
   if (step === 'PROFORMA') return <ProformaModal {...props} />
   if (step === 'PAYMENT') return <PaymentModal {...props} />
   if (step === 'ACKNOWLEDGEMENT') return <AcknowledgementModal {...props} />
-  if (step === 'INVOICE') return <InvoiceModal {...props} fullFormHref={fullFormHref} />
+  if (step === 'INVOICE') return <InvoiceModal {...props} fullFormHref={fullFormHref} canConfirmOrder={canConfirmOrder} />
   return null
 }

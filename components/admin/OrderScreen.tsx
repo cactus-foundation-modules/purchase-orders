@@ -577,6 +577,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       proformaReceived: o.proformaReceived,
       proformaPaid: o.proformaPaid,
       acknowledged: Boolean(o.acknowledgedAt) || Boolean(o.ackMediaId),
+      invoiced: o.lines.some((l) => Number(l.qtyInvoiced) > 0),
       fullyInvoiced: fullyInvoiced(o.lines),
     })
     const mayFile: Record<PoPaperworkStep, boolean> = {
@@ -660,6 +661,18 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         label: PAPERWORK_STEP_LABELS[step],
         placement: primary === 'paperwork' ? 'primary' : 'secondary',
         onClick: () => setOpenStep(step),
+      })
+    }
+    // Plenty of suppliers never send an acknowledgement: the next thing through
+    // the door is their invoice. So the invoice is offered alongside, rather
+    // than leaving the order stuck asking for a document that is not coming.
+    if (step === 'ACKNOWLEDGEMENT' && access.canBills) {
+      list.push({
+        key: 'invoice-instead',
+        label: 'No acknowledgement? Enter their invoice',
+        placement: 'secondary',
+        title: 'Their invoice confirms the order just as well. It can mark the order as confirmed as it goes.',
+        onClick: () => setOpenStep('INVOICE'),
       })
     }
     if (receivable) {
@@ -818,6 +831,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           order={order}
           documents={documents}
           fullFormHref={`/${adminPath}/m/purchase-orders/bills/new?orderId=${order.id}`}
+          canConfirmOrder={access.canCreate}
           onClose={() => setOpenStep(null)}
           onDone={(message, problem) => {
             setOpenStep(null)

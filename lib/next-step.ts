@@ -28,6 +28,8 @@ export type PoPaperworkFacts = {
   proformaPaid: boolean
   /** They confirmed it, with a document or without one. */
   acknowledged: boolean
+  /** Something on it has been invoiced, on a bill that has not been voided. */
+  invoiced: boolean
   /** Whether everything still wanted on the order has been invoiced, on bills
    *  that have not been voided. */
   fullyInvoiced: boolean
@@ -47,7 +49,10 @@ export function nextPaperworkStep(facts: PoPaperworkFacts): PoPaperworkStep | nu
   // Only while it still reads "Sent". Goods turning up is confirmation enough,
   // and asking for an acknowledgement of an order already on the shelf is asking
   // somebody to chase a piece of paper for its own sake.
-  if (facts.status === 'SENT' && !facts.acknowledged) return 'ACKNOWLEDGEMENT'
+  // Nor once their invoice is in: plenty of suppliers never send an
+  // acknowledgement at all, and the invoice says they have the order every bit
+  // as well as one would.
+  if (facts.status === 'SENT' && !facts.acknowledged && !facts.invoiced) return 'ACKNOWLEDGEMENT'
   if (!facts.fullyInvoiced) return 'INVOICE'
   return null
 }
