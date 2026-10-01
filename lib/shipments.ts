@@ -44,6 +44,9 @@ function mapSummary(r: Record<string, unknown>): PoShipmentSummary {
     trackingUrl: (r.tracking_url as string | null) ?? null,
     notes: (r.notes as string | null) ?? null,
     source: ((r.source as string | null) ?? 'PORTAL') as PoShipmentSource,
+    deliveryDate: day(r.delivery_date),
+    deliverySlotStart: (r.delivery_slot_start as string | null) ?? null,
+    deliverySlotEnd: (r.delivery_slot_end as string | null) ?? null,
     createdAt: stamp(r.created_at) ?? '',
   }
 }
@@ -64,6 +67,7 @@ function mapLine(r: Record<string, unknown>): PoShipmentLine {
 const SUMMARY_SELECT = Prisma.sql`
   d."id", d."number", d."order_id", d."despatched_date", d."carrier", d."tracking_ref",
   d."tracking_url", d."notes", d."source", d."created_at",
+  d."delivery_date", d."delivery_slot_start", d."delivery_slot_end",
   o."number" AS "order_number", s."name" AS "supplier_name"
 `
 

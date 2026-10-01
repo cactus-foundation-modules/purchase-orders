@@ -22,6 +22,13 @@ type DespatchesCardProps = {
 /** Where the bar scrolls to when somebody asks to record a despatch. */
 export const DESPATCHES_CARD_ID = 'po-despatches'
 
+/** Who told us. */
+const SOURCE_LABELS: Record<PoShipment['source'], string> = {
+  PORTAL: 'Told to us by the supplier',
+  ADMIN: 'Entered here',
+  INBOX: 'From an email with the tracking',
+}
+
 /** Whether there is anything a despatch could still be recorded against - the
  *  same test the card runs, shared so the bar only offers the action when the
  *  card would honour it. */
@@ -205,7 +212,7 @@ export function DespatchesCard({ shipments, despatchable, order, onRecord, onDel
                 <tr key={shipment.id}>
                   <td style={td}>
                     {shipment.number}
-                    <div style={muted}>{shipment.source === 'PORTAL' ? 'Told to us by the supplier' : 'Entered here'}</div>
+                    <div style={muted}>{SOURCE_LABELS[shipment.source]}</div>
                   </td>
                   <td style={td}>{formatDay(shipment.despatchedDate)}</td>
                   <td style={td}>
@@ -230,6 +237,14 @@ export function DespatchesCard({ shipments, despatchable, order, onRecord, onDel
                         ) : (
                           shipment.trackingRef
                         )}
+                      </div>
+                    )}
+                    {shipment.deliveryDate && (
+                      <div style={muted}>
+                        Delivering {formatDay(shipment.deliveryDate)}
+                        {shipment.deliverySlotStart && shipment.deliverySlotEnd
+                          ? `, ${shipment.deliverySlotStart} to ${shipment.deliverySlotEnd}`
+                          : ''}
                       </div>
                     )}
                   </td>

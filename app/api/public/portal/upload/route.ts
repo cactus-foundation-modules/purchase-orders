@@ -8,7 +8,10 @@ import { PortalUploadFields } from '@/modules/purchase-orders/lib/portal-body'
 import { buildPortalView } from '@/modules/purchase-orders/lib/portal-response'
 import { readPortalUpload, storePortalUpload } from '@/modules/purchase-orders/lib/portal-upload'
 import { guessDocumentReference } from '@/modules/purchase-orders/lib/document-reference'
-import { setAcknowledgementDocument, setProformaDocument } from '@/modules/purchase-orders/lib/proforma'
+import {
+  replaceProformaDocument, setAcknowledgementDocument, setProformaDocument, setProformaWarning,
+} from '@/modules/purchase-orders/lib/proforma'
+import { proformaReplacementWarning } from '@/modules/purchase-orders/lib/inbound-filing'
 import {
   acknowledgeFromPortal, portalNoticeRecipient, recordPortalEvent, resolvePortalToken,
 } from '@/modules/purchase-orders/lib/portal'
@@ -77,6 +80,17 @@ export async function POST(request: NextRequest) {
     )
   }
 
+  // A paid proforma is never replaced, whichever door the new one comes in by:
+  // a "revised" proforma after the money has gone is the shape of invoice
+  // fraud, and this link cannot prove who is holding it. Refused before the
+  // file is stored, so nothing is left behind.
+  if (fields.kind === 'proforma' && order.proformaPaidAt) {
+    return errorResponse(
+      'We have already paid your proforma for this order, so we cannot take a new one through this page. Please ring us.',
+      409,
+    )
+  }
+
   // The file is read and sniffed BEFORE anything is written, so a refusal leaves
   // the order exactly as it was.
   const upload = await readPortalUpload(form.get('file'))
@@ -101,8 +115,30 @@ export async function POST(request: NextRequest) {
       ? typed
       : guessDocumentReference(fields.kind, upload.filename, upload.buffer, order.number) ?? ''
 
+  let warning: string | null = null
   if (fields.kind === 'proforma') {
-    await setProformaDocument(order.id, stored.mediaId, ref || null, fields.amount ?? null)
+    const hasOne = Boolean(order.proformaMediaId) || Boolean(order.proformaRef) || Boolean(order.proformaAmount)
+    if (!hasOne) {
+      await setProformaDocument(order.id, stored.mediaId, ref || null, fields.amount ?? null)
+    } else {
+      // A second proforma: the same checks and the same pay gate as one from
+      // email (lib/inbound-filing.ts). Their own number is read off the file
+      // where they left the box empty, because the one on the order is the
+      // OLD document's and must not stand beside the new file.
+      const theirs = typed || guessDocumentReference('proforma', upload.filename, upload.buffer, order.number) || null
+      warning = proformaReplacementWarning(
+        { mediaId: order.proformaMediaId, ref: order.proformaRef, amount: order.proformaAmount },
+        { ref: theirs, amount: fields.amount ?? null },
+        order.currency,
+      )
+      if (!(await replaceProformaDocument(order.id, stored.mediaId, theirs, fields.amount ?? null, null))) {
+        return errorResponse(
+          'We have already paid your proforma for this order, so we cannot take a new one through this page. Please ring us.',
+          409,
+        )
+      }
+      if (warning) await setProformaWarning(order.id, warning)
+    }
   } else {
     await setAcknowledgementDocument(order.id, stored.mediaId, ref || null)
     // Same guarded write the plain acknowledge action makes. Attaching the
@@ -118,7 +154,7 @@ export async function POST(request: NextRequest) {
 
   await recordPortalEvent(token.id, order.id, kind, payload, hashPortalIp(ip))
 
-  const summary = portalEventSummary(kind, payload)
+  const summary = portalEventSummary(kind, payload) + (warning ? ` ${warning}` : '')
   await recordAudit(
     'order',
     order.id,

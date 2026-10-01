@@ -100,12 +100,26 @@ export function orderStanding(facts: PoStandingFacts, when: (iso: string) => str
       if (stage === 'PAID') return { tone: 'info', headline: sent, detail: 'The proforma is paid. Waiting for them to confirm the order.' }
       return { tone: 'info', headline: sent, detail: 'Waiting for them to confirm it.' }
     }
-    case 'ACKNOWLEDGED':
+    case 'ACKNOWLEDGED': {
+      // Their emailed sales order acknowledges an order whether or not the
+      // proforma is paid, and the money is then still the thing on us.
+      const stage = proformaStage(facts)
+      if (stage === 'RECEIVED') {
+        return {
+          tone: 'warning',
+          headline: 'The supplier has confirmed this order.',
+          detail: 'Their proforma is here and has not been paid. This one is waiting on you.',
+        }
+      }
+      if (stage === 'AWAITED') {
+        return { tone: 'info', headline: 'The supplier has confirmed this order.', detail: 'Their proforma has not arrived yet.' }
+      }
       return {
         tone: 'info',
         headline: 'The supplier has confirmed this order.',
         detail: facts.dropships ? 'They deliver it straight to the customer. Their invoice is the next thing to expect.' : 'Waiting for the goods.',
       }
+    }
     case 'PART_RECEIVED':
       return { tone: 'warning', headline: 'Some of this order has turned up.', detail: 'The rest is still due.' }
     case 'RECEIVED':

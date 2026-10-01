@@ -16,9 +16,11 @@ import { recordAudit } from './audit'
 // Miss any one of those and an order sits at "received" for ever with everybody
 // finished with it, which is the state this whole exercise is about.
 //
-// It never moves an order that is not RECEIVED, never one with an open return on
-// it, and never one whose lines are not all invoiced - lib/billing.ts holds
-// those rules and is the only place they are written down.
+// It never moves an order that is not RECEIVED - or, for a supplier who
+// delivers straight to the customer and so is never booked in, one that has
+// gone out - never one with an open return on it, and never one whose lines
+// are not all invoiced. lib/billing.ts holds those rules and is the only place
+// they are written down.
 
 export type Settled = { status: Exclude<CloseOutcome, null>; number: string }
 
@@ -46,7 +48,7 @@ export async function settleOrder(
     unsettledBillCount(orderId),
   ])
 
-  const outcome = closeOutcome(order.status, lines, openReturns, unsettled)
+  const outcome = closeOutcome(order.status, lines, openReturns, unsettled, order.supplierDropships)
   if (!outcome) return null
 
   // Only CLOSED carries a reason. PENDING_CLOSE is not a closure and must not

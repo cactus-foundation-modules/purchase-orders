@@ -5,6 +5,7 @@ import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getCapabilities } from '@/modules/purchase-orders/lib/capabilities'
 import { createSupplier, listShopSuppliers, listSuppliers } from '@/modules/purchase-orders/lib/db'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
+import { autoDraftRecords } from '@/modules/purchase-orders/lib/auto-send-queue'
 import {
   isDuplicateSupplierName,
   isDuplicateSurchargeCategory,
@@ -18,11 +19,14 @@ export async function GET() {
   const access = await getPoAccess(user)
   if (!access.canAccess) return errorResponse('Forbidden', 403)
 
-  const [suppliers, capabilities] = await Promise.all([listSuppliers(), getCapabilities()])
+  const [suppliers, capabilities, records] = await Promise.all([listSuppliers(), getCapabilities(), autoDraftRecords()])
   // Only fetched where there is a catalogue to link to; the helper returns an
   // empty list rather than throwing on a site with no shop.
   const shopSuppliers = capabilities.hasCatalogue ? await listShopSuppliers() : []
-  return NextResponse.json({ suppliers, shopSuppliers, capabilities })
+  // Beside each supplier's automatic-send switch: how often their automatic
+  // drafts were changed before they went. Information, never a lock.
+  const autoDraftRecord = Object.fromEntries(records)
+  return NextResponse.json({ suppliers, shopSuppliers, capabilities, autoDraftRecord })
 }
 
 export async function POST(request: NextRequest) {

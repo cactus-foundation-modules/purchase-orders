@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { prisma } from '@/lib/db/prisma'
+import { isBarePublicSuffix } from './tracking-recognise'
 
 // Purchase Orders settings, stored as one JSON column on the po_settings
 // singleton row - the same shape shop uses for shp_settings. A corrupted or
@@ -135,6 +136,59 @@ export const PoConfigSchema = z.object({
   // later without somebody saying so out loud.
   autoDraftFromPaidOrders: z.boolean().default(false),
 
+  // Whether those automatic drafts are SENT by themselves - the master switch
+  // over each supplier's own (`po_suppliers.auto_send`). Both have to be on.
+  //
+  // OFF by default, and the line above is the one being moved, deliberately and
+  // out loud: with this on, a draft nobody has read goes to a supplier who is
+  // switched on, after `autoSendHoldMinutes`, exactly as if somebody had
+  // pressed Send. A draft somebody changes is never sent by itself, and a draft
+  // the job is not sure of - an approval it needs, a price not off the
+  // supplier's list, a customer order refunded since - is left as a draft and
+  // you are told why. See lib/auto-send.ts.
+  autoSendEnabled: z.boolean().default(false),
+  // How long a draft waits before it goes: time for a refund, a change of mind,
+  // or somebody opening it and changing it. The half-hourly job adds up to half
+  // an hour on top.
+  autoSendHoldMinutes: z.number().int().min(0).max(10080).default(60),
+
+  // Whether a supplier's emailed paperwork is filed by itself.
+  //
+  // OFF by default, for the fourth time on this schema and for the same reason
+  // each time. With it on, a PDF arriving in the unified inbox from a
+  // supplier's address is read on the half-hourly job, and each proforma,
+  // acknowledgement or VAT invoice in it that quotes exactly one of our order
+  // numbers - an order to that same supplier, at a point where that paperwork
+  // makes sense - is filed on it. An invoice becomes a DRAFT bill, never
+  // approved and never sent to the books. Everything else, credit notes
+  // included, waits on the Paperwork list for a person. Nothing is sent to
+  // anybody and no money moves. See lib/inbound-run.ts.
+  inboundFilingEnabled: z.boolean().default(false),
+
+  // Delivery tracking from email. When on, an email carrying tracking - the
+  // supplier replying on the order's thread, or the carrier they booked - that
+  // can be pinned to exactly one of our orders (our order number from that
+  // supplier, their own reference we hold, or a parcel already on one of our
+  // despatches) is recorded as that order's despatch, and later news about the
+  // same parcel updates it. Matched by delivery postcode alone, it waits on the
+  // Paperwork list for a person. A switch of its own rather than part of the
+  // paperwork one, because it reads carriers' mail as well as suppliers', and
+  // what it records can go on to reach a customer. See lib/inbound-tracking.ts.
+  inboundTrackingEnabled: z.boolean().default(false),
+  // Extra hosts whose tracking links are believed when a courier, rather than
+  // the supplier, sends them: one per line or comma separated, a host covering
+  // its subdomains. The big carriers, the Multidrop-style service and GFS are
+  // believed already, as is a courier linking its own domain; anything else in
+  // a stranger's email is left out and only the number kept.
+  trackingLinkHosts: z
+    .string()
+    .max(2000)
+    .refine(
+      (text) => trackingLinkHostList(text).every((host) => !isBarePublicSuffix(host)),
+      'List whole websites, like tracking.yourcourier.co.uk - not an ending such as co.uk or com, which would trust every site under it.',
+    )
+    .default(''),
+
   defaultShipToKind: z.enum(['WAREHOUSE', 'CUSTOMER', 'OTHER']).default('WAREHOUSE'),
   warehouse: ShipToSchema.default({}),
 
@@ -255,4 +309,9 @@ export async function updatePoConfig(patch: Partial<PoConfig>): Promise<PoConfig
   `
   invalidatePoConfigCache()
   return next
+}
+
+/** The extra hosts the owner listed, as hosts. */
+export function trackingLinkHostList(text: string): string[] {
+  return text.split(/[\s,;]+/).map((host) => host.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '')).filter(Boolean)
 }

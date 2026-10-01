@@ -412,6 +412,127 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
       </div>
 
       <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Sending those drafts by themselves</h3>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={config.autoSendEnabled}
+            disabled={!config.autoDraftFromPaidOrders && !config.autoSendEnabled}
+            onChange={(e) => set('autoSendEnabled', e.target.checked)}
+          />
+          Send automatic drafts by themselves, to the suppliers you have switched on
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          {config.autoDraftFromPaidOrders
+            ? 'When on, a draft raised when a customer pays is emailed to its supplier once the wait below is up, exactly as if you had pressed Send - but only for a supplier you have ticked "Send their automatic drafts by themselves" on, under Suppliers. It goes out signed "Sent automatically" where a name would be.'
+            : 'This sends the drafts made when a customer pays, so it needs "Draft the purchase orders as soon as a customer pays" switched on first.'}
+        </p>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          What it does not do: send a draft anybody has changed (once somebody saves a change, a person sends it), send
+          a change to an order already sent, approve anything that needs approving, or send anything it is not sure
+          of - a customer order cancelled or refunded in the wait, a price that did not come from the supplier&rsquo;s
+          current price list, a price of nothing, a supplier with no email address, or something on the customer
+          order that could not be drafted. Each of those stays a draft, says why on the order, and you get one email
+          about it. Drafts have often needed their prices changing before they went, which is why each supplier shows
+          how many of theirs were changed: that is the number to watch.
+        </p>
+        <div style={{ marginTop: '0.75rem', maxWidth: 260 }}>
+          <Field label="Wait before sending (minutes)">
+            <input
+              type="number"
+              min={0}
+              max={10080}
+              style={input}
+              value={config.autoSendHoldMinutes}
+              onChange={(e) => set('autoSendHoldMinutes', Number(e.target.value))}
+            />
+          </Field>
+        </div>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          Time for a refund, a change of mind, or somebody opening the draft and changing it. The check runs every half
+          hour, so a draft goes up to thirty minutes after the wait is up.
+        </p>
+      </div>
+
+      <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Supplier paperwork by email</h3>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={config.inboundFilingEnabled}
+            disabled={!capabilities?.hasInbox && !config.inboundFilingEnabled}
+            onChange={(e) => set('inboundFilingEnabled', e.target.checked)}
+          />
+          File suppliers&rsquo; emailed proformas, acknowledgements and invoices by themselves
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          {capabilities?.hasInbox
+            ? 'When on, a PDF arriving in the inbox from one of your suppliers is read within half an hour. A proforma or acknowledgement that quotes exactly one of your order numbers - an order to that same supplier, sent and still open - is filed on it, and their acknowledgement marks the order acknowledged. A VAT invoice whose total matches what is left to invoice becomes a draft bill for it, at the prices on your order, with their total beside it. A daily batch of invoices in one file is cut into one invoice per order.'
+            : 'There is no unified inbox on this site, so no email reaches purchasing. Install the Unified Inbox module and this switches on.'}
+        </p>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          What it does not do: pay anything, approve anything, send anything to anybody, or put anything in the books.
+          Credit notes, anything it cannot place on exactly one order, and anything arriving at an odd moment - an
+          invoice for an order you never sent - wait at the top of the Orders tab for you to decide. A proforma that
+          comes to more or less than the order, beyond your price tolerance, or replaces one already on the order, is
+          filed and you are emailed about it - and a replaced one cannot be marked paid until somebody says they have
+          checked the bank details with the supplier. An invoice for part of the order, or for an extra charge, waits
+          for you too. Mail from anybody who is not one of your suppliers is ignored.
+        </p>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          Switching it off leaves anything already waiting on the Paperwork list as it is, and stops the emails about it.
+        </p>
+      </div>
+
+      <div style={card}>
+        <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Delivery tracking by email</h3>
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <input
+            type="checkbox"
+            checked={config.inboundTrackingEnabled}
+            disabled={!capabilities?.hasInbox && !config.inboundTrackingEnabled}
+            onChange={(e) => set('inboundTrackingEnabled', e.target.checked)}
+          />
+          Record a despatch when an email brings the tracking
+        </label>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          {capabilities?.hasInbox
+            ? 'When on, an email with delivery tracking in it - your supplier replying about an order, or the courier they booked writing to you - is recorded as a despatch on the order it is about, as soon as it arrives. It has to be certain which order: one of your order numbers from that supplier, the supplier’s own order number you already hold, or a parcel already on one of your despatches. Later emails about the same parcel - a delivery day, a timeslot, a better link - update that despatch rather than adding another.'
+            : 'There is no unified inbox on this site, so no email reaches purchasing. Install the Unified Inbox module and this switches on.'}
+        </p>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          Tracking matched only by the delivery postcode is never recorded by itself: it waits at the top of the Orders
+          tab for you to say &ldquo;yes, that one&rdquo;. On an order going straight to a customer, the despatch is
+          passed to the shop, which puts it on the customer&rsquo;s order if the shop has been told to (Shop settings,
+          Notifications) - and nobody is emailed unless the shop has been told that too. Mail between your own
+          colleagues is ignored.
+        </p>
+        <p style={{ ...muted, marginTop: '0.5rem' }}>
+          A tracking link from somebody who is not your supplier is only kept when it goes to a known carrier (DPD, Royal
+          Mail, Evri, UPS and the like, Multidrop, GFS) or to the sender&rsquo;s own website. Anything else is left out
+          and only the parcel number kept, so a stranger&rsquo;s email cannot put a link of theirs in front of your
+          customer. And somebody who is not your supplier is never, on their own, the first word that an order has gone:
+          unless their email quotes the supplier&rsquo;s order number and the right delivery postcode, it waits for you
+          at the top of the Orders tab.
+        </p>
+        <div style={{ marginTop: '0.75rem' }}>
+          <Field label="Also trust tracking links to">
+            <textarea
+              rows={2}
+              style={input}
+              value={config.trackingLinkHosts}
+              placeholder="tracking.yourcourier.example"
+              onChange={(e) => set('trackingLinkHosts', e.target.value)}
+            />
+          </Field>
+          <p style={{ ...muted, marginTop: '0.25rem' }}>
+            One website per line, for a courier of yours whose emails link to a tracking site of their own on a
+            different address. Leave it empty unless one of their links is being left out.
+          </p>
+        </div>
+      </div>
+
+      <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Suppliers&rsquo; price lists</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input

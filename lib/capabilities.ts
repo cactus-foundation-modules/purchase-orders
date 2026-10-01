@@ -22,6 +22,9 @@ export type PoCapabilities = {
   hasInventory: boolean
   /** A set of books an approved bill could be handed to. */
   hasBooks: boolean
+  /** A unified inbox that could hand this module a supplier's emailed
+   *  paperwork. Its table, not its code: this module never imports it. */
+  hasInbox: boolean
 }
 
 /** The extension point core publishes for "something that can adjust stock". */
@@ -65,13 +68,14 @@ async function hasInventoryProvider(): Promise<boolean> {
 export async function getCapabilities(): Promise<PoCapabilities> {
   if (cached && Date.now() - cached.at < TTL_MS) return cached.value
 
-  const [hasCatalogue, hasBooks, hasInventory] = await Promise.all([
+  const [hasCatalogue, hasBooks, hasInventory, hasInbox] = await Promise.all([
     hasTables(['shp_products']),
     hasTables(['bk_transactions']),
     hasInventoryProvider(),
+    hasTables(['uin_messages']),
   ])
 
-  const value: PoCapabilities = { hasCatalogue, hasInventory, hasBooks }
+  const value: PoCapabilities = { hasCatalogue, hasInventory, hasBooks, hasInbox }
   cached = { value, at: Date.now() }
   return value
 }

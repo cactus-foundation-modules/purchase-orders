@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/db/prisma'
 import { LINE_PROGRESS_SQL } from './progress'
+import { SENT_AUTOMATICALLY } from './auto-send'
 import type { PoExportKind } from './types'
 
 // The four spreadsheets purchasing will hand you.
@@ -58,6 +59,9 @@ const ORDER_COLUMNS = [
   'currency', 'fx_rate', 'base_currency', 'tax_mode',
   'subtotal', 'discount', 'carriage', 'surcharge', 'tax', 'total',
   'lines', 'source', 'payment_terms', 'delivery_terms', 'ship_to_kind', 'notes_internal', 'created_at',
+  // On the end rather than beside sent_at, so a spreadsheet built on the
+  // columns before them keeps working.
+  'approved_at', 'approved_by',
 ] as const
 
 const LINE_COLUMNS = [
@@ -120,9 +124,11 @@ async function exportOrders(from: string, to: string): Promise<ExportFile> {
            o."subtotal", o."discount_amount", o."carriage_amount", o."surcharge_amount", o."tax_amount", o."total",
            o."source_kind", o."payment_terms", o."delivery_terms", o."ship_to_kind",
            o."notes_internal", o."created_at",
+           o."approved_at", o."approved_automatically", COALESCE(u."displayName", u."username") AS "approved_by",
            (SELECT count(*) FROM "po_order_lines" l WHERE l."order_id" = o."id") AS "line_count"
       FROM "po_orders" o
       JOIN "po_suppliers" s ON s."id" = o."supplier_id"
+      LEFT JOIN "User" u ON u."id" = o."approved_by_user_id"
      WHERE ${ORDER_DAY} >= ${from}::date AND ${ORDER_DAY} <= ${to}::date
      ORDER BY o."number" ASC
   `
@@ -138,6 +144,7 @@ async function exportOrders(from: string, to: string): Promise<ExportFile> {
       num(r.subtotal), num(r.discount_amount), num(r.carriage_amount), num(r.surcharge_amount), num(r.tax_amount), num(r.total),
       num(r.line_count), text(r.source_kind), text(r.payment_terms), text(r.delivery_terms),
       text(r.ship_to_kind), text(r.notes_internal), when(r.created_at),
+      when(r.approved_at), r.approved_automatically && !r.approved_by ? SENT_AUTOMATICALLY : text(r.approved_by),
     ]),
   }
 }

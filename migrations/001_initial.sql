@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS "po_suppliers" (
     -- else. See 008, where this column arrives for installs that already
     -- have 001.
     "portal_note"             TEXT,
+    -- Extra addresses or domains their emailed paperwork comes from, beyond the
+    -- email and copy-to above. See 017.
+    "inbound_senders"         TEXT[]      NOT NULL DEFAULT '{}',
+    -- Whether this supplier's automatic drafts are emailed to them by
+    -- themselves, after the hold. Off unless the owner says so. See 019.
+    "auto_send"               BOOLEAN     NOT NULL DEFAULT false,
     "status"                  TEXT        NOT NULL DEFAULT 'ENABLED',
     "notes"                   TEXT,
     "created_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -180,6 +186,15 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     -- when it went with the payment email. (Also in 009.)
     "proforma_payment_proof_media_id" TEXT,
     "proforma_proof_sent_at" TIMESTAMPTZ,
+    -- When somebody said they had checked the bank details on a proforma that
+    -- arrived by email flagged as revised or disagreeing. Warnings filed before
+    -- it are answered; one filed after it is live again. See 017.
+    "proforma_warning_cleared_at" TIMESTAMPTZ,
+    -- A warning on a proforma sent through the supplier's own link that
+    -- replaced one already on the order, and when. Answered by the same check
+    -- as the ones from email. See 017.
+    "proforma_warning"    TEXT,
+    "proforma_warning_at" TIMESTAMPTZ,
     -- The supplier's own order acknowledgement, attached when they confirm.
     "ack_media_id"        TEXT,
     "ack_ref"             TEXT,
@@ -187,6 +202,16 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     "cancel_reason"       TEXT,
     "closed_at"           TIMESTAMPTZ,
     "close_reason"        TEXT,
+    -- The automatic queue: NULL for an order never in it, else QUEUED, SENT,
+    -- HELD (a person changed it) or REFUSED, with the sentence. The claim, the
+    -- failed tries and the report keep the job honest. `approved_automatically`
+    -- is an order the job sent, which approves it with no person's name. See 019.
+    "auto_send_state"     TEXT,
+    "auto_send_note"      TEXT,
+    "auto_send_claimed_at" TIMESTAMPTZ,
+    "auto_send_attempts"  INTEGER     NOT NULL DEFAULT 0,
+    "auto_send_reported_at" TIMESTAMPTZ,
+    "approved_automatically" BOOLEAN  NOT NULL DEFAULT false,
     "created_by_user_id"  TEXT,
     "updated_by_user_id"  TEXT,
     "created_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -197,11 +222,19 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     CONSTRAINT "po_orders_ship_to_kind_check" CHECK ("ship_to_kind" IN ('WAREHOUSE','CUSTOMER','OTHER')),
     CONSTRAINT "po_orders_source_kind_check" CHECK ("source_kind" IN ('MANUAL','FROM_ORDER','REORDER')),
     CONSTRAINT "po_orders_tax_mode_check" CHECK ("tax_mode" IN ('EXCLUSIVE','INCLUSIVE')),
+    CONSTRAINT "po_orders_auto_send_state_check"
+        CHECK ("auto_send_state" IS NULL OR "auto_send_state" IN ('QUEUED','SENT','HELD','REFUSED')),
     CONSTRAINT "po_orders_supplier_fk" FOREIGN KEY ("supplier_id") REFERENCES "po_suppliers" ("id") ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS "po_orders_supplier_idx" ON "po_orders" ("supplier_id");
 CREATE INDEX IF NOT EXISTS "po_orders_status_idx" ON "po_orders" ("status");
 CREATE INDEX IF NOT EXISTS "po_orders_expected_date_idx" ON "po_orders" ("expected_date");
+CREATE INDEX IF NOT EXISTS "po_orders_auto_send_queued_idx"
+    ON "po_orders" ("created_at") WHERE "auto_send_state" = 'QUEUED';
+CREATE INDEX IF NOT EXISTS "po_orders_auto_send_unreported_idx"
+    ON "po_orders" ("updated_at") WHERE "auto_send_state" = 'REFUSED' AND "auto_send_reported_at" IS NULL;
+CREATE INDEX IF NOT EXISTS "po_orders_auto_send_claimed_idx"
+    ON "po_orders" ("auto_send_claimed_at") WHERE "auto_send_claimed_at" IS NOT NULL;
 
 -- ---------------------------------------------------------------------------
 -- Order lines
@@ -393,7 +426,8 @@ CREATE TABLE IF NOT EXISTS "po_bills" (
     -- worth a flag; overwriting one with the other is how it disappears. Also
     -- in 011, for installs that predate it.
     "stated_total"            NUMERIC(12,2),
-    -- Who filed it: somebody here, or a supplier through their own link.
+    -- Who filed it: somebody here, a supplier through their own link, or the
+    -- inbox reading their emailed invoice (017).
     "source"                  TEXT        NOT NULL DEFAULT 'ADMIN',
     "status"                  TEXT        NOT NULL DEFAULT 'DRAFT',
     "match_status"            TEXT        NOT NULL DEFAULT 'NOT_MATCHED',
@@ -406,13 +440,16 @@ CREATE TABLE IF NOT EXISTS "po_bills" (
     -- The supplier's own PDF, in core Media. No foreign key, exactly as core's
     -- own optional image references do it.
     "attachment_media_id"     TEXT,
+    -- One line about that file where it is more than this invoice: "page 2 of
+    -- 3 in the attached file". See 017.
+    "attachment_note"         TEXT,
     "created_by_user_id"      TEXT,
     "created_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),
     "updated_at"              TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_bills_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "po_bills_status_check" CHECK ("status" IN ('DRAFT','QUERIED','APPROVED','POSTED','VOID')),
     CONSTRAINT "po_bills_match_status_check" CHECK ("match_status" IN ('NOT_MATCHED','MATCHED','VARIANCE')),
-    CONSTRAINT "po_bills_source_check" CHECK ("source" IN ('ADMIN','PORTAL')),
+    CONSTRAINT "po_bills_source_check" CHECK ("source" IN ('ADMIN','PORTAL','INBOX')),
     CONSTRAINT "po_bills_order_fk" FOREIGN KEY ("order_id") REFERENCES "po_orders" ("id") ON DELETE SET NULL,
     CONSTRAINT "po_bills_supplier_fk" FOREIGN KEY ("supplier_id") REFERENCES "po_suppliers" ("id") ON DELETE RESTRICT
 );
@@ -517,17 +554,44 @@ CREATE TABLE IF NOT EXISTS "po_shipments" (
     "tracking_ref"       TEXT,
     "tracking_url"       TEXT,
     "notes"              TEXT,
+    -- Who filed it: the supplier through their own link, somebody here typing
+    -- it in, or an email carrying the tracking (see 018).
     "source"             TEXT        NOT NULL DEFAULT 'PORTAL',
     "token_id"           TEXT,
     "created_by_user_id" TEXT,
+    -- For a despatch from email: the parcel's number with its spaces out, or
+    -- the follow-my-parcel code where there is no number (one despatch per
+    -- parcel per order, by the unique index below); that code; the day and
+    -- slot the carrier gave; the email; and a fingerprint of what the rest of
+    -- the site was last told about it, and whether it still has to be told.
+    -- All in 018 for installs that predate it.
+    "tracking_key"       TEXT,
+    "tracking_code"      TEXT,
+    "delivery_date"      DATE,
+    "delivery_slot_start" TEXT,
+    "delivery_slot_end"  TEXT,
+    "source_message_id"  TEXT,
+    "announced"          TEXT,
+    "announce_pending"   BOOLEAN     NOT NULL DEFAULT false,
+    "announce_attempts"  INTEGER     NOT NULL DEFAULT 0,
+    "announce_tried_at"  TIMESTAMPTZ,
     "created_at"         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "updated_at"         TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT "po_shipments_pkey" PRIMARY KEY ("id"),
     CONSTRAINT "po_shipments_number_unique" UNIQUE ("number"),
-    CONSTRAINT "po_shipments_source_check" CHECK ("source" IN ('PORTAL','ADMIN')),
+    CONSTRAINT "po_shipments_source_check" CHECK ("source" IN ('PORTAL','ADMIN','INBOX')),
     CONSTRAINT "po_shipments_order_fk" FOREIGN KEY ("order_id") REFERENCES "po_orders" ("id") ON DELETE CASCADE,
     CONSTRAINT "po_shipments_token_fk" FOREIGN KEY ("token_id") REFERENCES "po_portal_tokens" ("id") ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS "po_shipments_order_idx" ON "po_shipments" ("order_id", "despatched_date");
+CREATE UNIQUE INDEX IF NOT EXISTS "po_shipments_order_tracking_key_unique"
+    ON "po_shipments" ("order_id", "tracking_key") WHERE "tracking_key" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "po_shipments_tracking_key_idx"
+    ON "po_shipments" ("tracking_key") WHERE "tracking_key" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "po_shipments_tracking_code_idx"
+    ON "po_shipments" ("tracking_code") WHERE "tracking_code" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "po_shipments_announce_pending_idx"
+    ON "po_shipments" ("announce_tried_at") WHERE "announce_pending";
 
 CREATE TABLE IF NOT EXISTS "po_shipment_lines" (
     "id"            TEXT NOT NULL DEFAULT gen_random_uuid()::text,
@@ -541,6 +605,110 @@ CREATE TABLE IF NOT EXISTS "po_shipment_lines" (
 );
 CREATE INDEX IF NOT EXISTS "po_shipment_lines_shipment_idx" ON "po_shipment_lines" ("shipment_id");
 CREATE INDEX IF NOT EXISTS "po_shipment_lines_order_line_idx" ON "po_shipment_lines" ("order_line_id");
+
+-- ---------------------------------------------------------------------------
+-- Supplier paperwork arriving by email (017)
+--
+-- A PDF from a supplier's address, queued by the inbox handler and read on the
+-- half-hourly job. page_from 0 is the file as it arrived; each document found
+-- in it gets a row keyed by its first page. The unique key is the idempotency:
+-- the inbox may offer one email twice, and every insert is ON CONFLICT DO
+-- NOTHING. See 017 for the rest.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS "po_inbound_documents" (
+    "id"                 TEXT        NOT NULL DEFAULT gen_random_uuid()::text,
+    -- The inbox's own ids, kept as plain text: the message, its conversation
+    -- (for a link back to it) and the attachment.
+    "message_id"         TEXT        NOT NULL,
+    "thread_id"          TEXT,
+    "attachment_id"      TEXT        NOT NULL,
+    -- The file as the inbox stored it. NULL when the inbox could not fetch it
+    -- from the mail server, which is said on the Paperwork list rather than
+    -- guessed round.
+    "source_media_id"    TEXT,
+    "filename"           TEXT        NOT NULL DEFAULT '',
+    "subject"            TEXT        NOT NULL DEFAULT '',
+    "from_address"       TEXT        NOT NULL DEFAULT '',
+    -- The date on the email.
+    "received_at"        TIMESTAMPTZ,
+    -- Every supplier the sender could be. Usually one; two where two suppliers
+    -- share a domain, and the purchase order number on the document decides.
+    "supplier_ids"       TEXT[]      NOT NULL DEFAULT '{}',
+    -- 0 for the file as a whole, else the first page of the document this row
+    -- is about (1-based).
+    "page_from"          INTEGER     NOT NULL DEFAULT 0,
+    "page_to"            INTEGER,
+    "page_count"         INTEGER,
+    -- What was read off it. Kind is proforma, acknowledgement, invoice,
+    -- credit-note or unknown, as lib/supplier-document.ts names them.
+    "kind"               TEXT,
+    "supplier_ref"       TEXT,
+    "our_po_numbers"     TEXT[]      NOT NULL DEFAULT '{}',
+    "total"              NUMERIC(12,2),
+    "doc_date"           DATE,
+    -- The file could not be read page by page, so this document is all of it.
+    "whole_file"         BOOLEAN     NOT NULL DEFAULT false,
+    -- Where it went.
+    "order_id"           TEXT,
+    "filed_as"           TEXT,
+    "filed_media_id"     TEXT,
+    "bill_id"            TEXT,
+    -- Something about a filed document worth a person's eye: their proforma
+    -- comes to more than the order does, or its total could not be read.
+    "flag"               TEXT,
+    -- Whether that flag is worth an email: a total that disagrees, a revised
+    -- proforma replacing one already on the order, a bill with nothing
+    -- attached. A total that merely could not be read is said on the order and
+    -- is not.
+    "flag_alert"         BOOLEAN     NOT NULL DEFAULT false,
+    -- For a proforma: what the order held BEFORE this one replaced it, taken
+    -- once, before the replacing write. A retry after a failure part way
+    -- through compares with this rather than with the order - which by then
+    -- holds this very document and would find nothing to warn about.
+    "prior_captured_at"      TIMESTAMPTZ,
+    "prior_proforma_media_id" TEXT,
+    "prior_proforma_ref"     TEXT,
+    "prior_proforma_amount"  NUMERIC(12,2),
+    -- QUEUED waiting to be read or filed; READ for a file whose documents now
+    -- have rows of their own; FILED; NEEDS_EYES with `reason` the sentence
+    -- saying why; IGNORED by a person, with `reason` saying which way.
+    "outcome"            TEXT        NOT NULL DEFAULT 'QUEUED',
+    "reason"             TEXT,
+    -- Who is working on it, so two runs never file one document twice, and how
+    -- often it has been tried, so a file that breaks the reader stops being
+    -- tried.
+    "claimed_at"         TIMESTAMPTZ,
+    "attempts"           INTEGER     NOT NULL DEFAULT 0,
+    -- When the problem report email mentioned it, so it is mentioned once.
+    "reported_at"        TIMESTAMPTZ,
+    "handled_by_user_id" TEXT,
+    -- A tracking row (kind 'tracking'): what was read out of the email, and
+    -- the despatch it became. See 018.
+    "tracking"           JSONB,
+    "shipment_id"        TEXT,
+    "created_at"         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "handled_at"         TIMESTAMPTZ,
+    CONSTRAINT "po_inbound_documents_pkey" PRIMARY KEY ("id"),
+    CONSTRAINT "po_inbound_documents_outcome_check"
+        CHECK ("outcome" IN ('QUEUED','READ','FILED','NEEDS_EYES','IGNORED')),
+    CONSTRAINT "po_inbound_documents_order_fk" FOREIGN KEY ("order_id") REFERENCES "po_orders" ("id") ON DELETE SET NULL,
+    CONSTRAINT "po_inbound_documents_bill_fk" FOREIGN KEY ("bill_id") REFERENCES "po_bills" ("id") ON DELETE SET NULL,
+    CONSTRAINT "po_inbound_documents_shipment_fk" FOREIGN KEY ("shipment_id") REFERENCES "po_shipments" ("id") ON DELETE SET NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "po_inbound_documents_attachment_page_unique"
+    ON "po_inbound_documents" ("attachment_id", "page_from");
+CREATE INDEX IF NOT EXISTS "po_inbound_documents_message_idx" ON "po_inbound_documents" ("message_id");
+CREATE INDEX IF NOT EXISTS "po_inbound_documents_order_idx" ON "po_inbound_documents" ("order_id");
+-- The cron's first question, answered off this alone: is anything waiting?
+CREATE INDEX IF NOT EXISTS "po_inbound_documents_queued_idx"
+    ON "po_inbound_documents" ("created_at") WHERE "outcome" = 'QUEUED';
+CREATE INDEX IF NOT EXISTS "po_inbound_documents_needs_eyes_idx"
+    ON "po_inbound_documents" ("created_at") WHERE "outcome" = 'NEEDS_EYES';
+-- The problem report's question, so it is not a whole-table UPDATE every
+-- half hour: what is worth telling somebody and has not been told yet.
+CREATE INDEX IF NOT EXISTS "po_inbound_documents_unreported_idx"
+    ON "po_inbound_documents" ("created_at")
+    WHERE "reported_at" IS NULL AND ("outcome" = 'NEEDS_EYES' OR "flag_alert");
 
 -- ---------------------------------------------------------------------------
 -- Audit log (append-only)

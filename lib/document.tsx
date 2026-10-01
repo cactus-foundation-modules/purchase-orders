@@ -14,6 +14,7 @@ import { injectPoDocContext, type PoDocContext, type PoDocParty } from '@/module
 import { docPageSetupFromLayout, type DocPageSetup } from '@/modules/purchase-orders/lib/doc-page-settings'
 import { PO_DOCUMENT_FALLBACK_DATA } from '@/modules/purchase-orders/lib/starterLayouts'
 import { chargedSubtotal } from '@/modules/purchase-orders/lib/totals'
+import { SENT_AUTOMATICALLY } from '@/modules/purchase-orders/lib/auto-send'
 import { PO_STATUS_LABELS, type PoOrder, type PoStatus, type PoSupplier } from '@/modules/purchase-orders/lib/types'
 import type { PoAddress } from '@/modules/purchase-orders/lib/config'
 
@@ -132,6 +133,9 @@ export async function loadPoDocContext(
      *  going out with nobody's name under "Authorised by". Ignored on an order
      *  that already has an approver. */
     approvingUserId?: string
+    /** The same, for an order the automatic job is about to send: drawn with
+     *  "Sent automatically" where a person's name would be. */
+    approvingAutomatically?: boolean
   },
 ): Promise<PoDocContext | null> {
   const order = await getOrder(orderId)
@@ -155,6 +159,9 @@ export async function loadPoDocContext(
 
   const approverId = people.approvedByUserId ?? opts?.approvingUserId ?? null
   const names = await userNames([people.createdByUserId, approverId])
+  // Sent by the job, or about to be: nobody to name, and the truth printed
+  // instead of the empty line 013 got rid of. A person's approval always wins.
+  const approvedAutomatically = !approverId && (order.approvedAutomatically || Boolean(opts?.approvingAutomatically))
   const live = supplierParty(supplier)
 
   return {
@@ -213,9 +220,9 @@ export async function loadPoDocContext(
         instructions: order.shipTo.instructions,
       },
       raisedByName: people.createdByUserId ? (names[people.createdByUserId] ?? '') : '',
-      approvedByName: approverId ? (names[approverId] ?? '') : '',
+      approvedByName: approverId ? (names[approverId] ?? '') : approvedAutomatically ? SENT_AUTOMATICALLY : '',
       // Today, on a copy drawn for a send that is about to approve it.
-      approvedAt: order.approvedAt ?? (approverId ? new Date().toISOString() : null),
+      approvedAt: order.approvedAt ?? (approverId || approvedAutomatically ? new Date().toISOString() : null),
     },
     buyer,
     // The frozen copy wins once there is one. A supplier renamed or deleted after

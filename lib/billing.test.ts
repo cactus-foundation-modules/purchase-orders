@@ -445,6 +445,18 @@ describe('closing an order once it is done', () => {
     expect(closeOutcome('PENDING_CLOSE', [line], 0, 0)).toBeNull()
   })
 
+  it('treats a fully invoiced drop-ship order that has gone out as arrived', () => {
+    // Nothing is ever booked in from a supplier who delivers to the customer.
+    expect(closeOutcome('ACKNOWLEDGED', [line], 0, 1, true)).toBe('PENDING_CLOSE')
+    expect(closeOutcome('SENT', [line], 0, 1, true)).toBe('PENDING_CLOSE')
+    expect(closeOutcome('ACKNOWLEDGED', [line], 0, 0, true)).toBe('CLOSED')
+    // Part invoiced, owed a credit, held, or not a drop-shipper: unchanged.
+    expect(closeOutcome('ACKNOWLEDGED', [{ ...line, qtyInvoiced: '1' }], 0, 1, true)).toBeNull()
+    expect(closeOutcome('ACKNOWLEDGED', [line], 1, 1, true)).toBeNull()
+    expect(closeOutcome('ON_HOLD', [line], 0, 1, true)).toBeNull()
+    expect(closeOutcome('ACKNOWLEDGED', [line], 0, 1, false)).toBeNull()
+  })
+
   it('never settles an order with a line still to invoice', () => {
     expect(closeOutcome('RECEIVED', [{ ...line, qtyInvoiced: '9' }], 0, 0)).toBeNull()
   })

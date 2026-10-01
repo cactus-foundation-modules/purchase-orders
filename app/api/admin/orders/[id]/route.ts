@@ -9,7 +9,11 @@ import { orderRevisionSnapshot } from '@/modules/purchase-orders/lib/document'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { OrderBody, toOrderInput } from '@/modules/purchase-orders/lib/order-body'
 import { listAudit, recordAudit } from '@/modules/purchase-orders/lib/audit'
-import { orderDocuments } from '@/modules/purchase-orders/lib/proforma'
+import { mediaLink, orderDocuments } from '@/modules/purchase-orders/lib/proforma'
+import { inboundForOrder, liveProformaWarnings } from '@/modules/purchase-orders/lib/inbound-run'
+import { holdAutoSend, personName } from '@/modules/purchase-orders/lib/auto-send-queue'
+import { BEING_SENT_AUTOMATICALLY } from '@/modules/purchase-orders/lib/auto-send'
+import { getSiteTimezone } from '@/lib/config/timezone.server'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -27,12 +31,28 @@ export async function GET(_request: NextRequest, { params }: Params) {
   // order row carries a Media id and nothing else - core owns that table - so
   // the link is looked up here rather than being a column somebody could let
   // drift out of step with the library.
-  const [history, revisions, documents] = await Promise.all([
+  //
+  // And whatever was filed on it from a supplier's email, each with the file it
+  // left and the conversation it came on - the "where did this come from" a
+  // document filed by a machine has to be able to answer.
+  const [history, revisions, documents, emailed, warned, siteTimezone] = await Promise.all([
     listAudit('order', id),
     listOrderRevisions(id),
     orderDocuments(order),
+    inboundForOrder(id),
+    liveProformaWarnings(id),
+    getSiteTimezone(),
   ])
-  return NextResponse.json({ order, history, revisions, documents })
+  const fromEmail = await Promise.all(
+    emailed.map(async (doc) => ({ ...doc, file: await mediaLink(doc.filedMediaId) })),
+  )
+  return NextResponse.json({
+    order, history, revisions, documents, fromEmail,
+    proformaWarnings: warned.warnings,
+    proformaWarningsAt: warned.newestAt,
+    // For "sends automatically at 14:30": the clock on the wall, not the server's.
+    siteTimezone,
+  })
 }
 
 export async function PUT(request: NextRequest, { params }: Params) {
@@ -108,6 +128,11 @@ export async function PUT(request: NextRequest, { params }: Params) {
   // failure between the two leaves the order unchanged rather than changed with
   // no record of what it used to say. The unique index on (order_id, revision) is
   // what stops two people amending at once and both writing revision 2.
+  // A person is changing it, so a person sends it: out of the automatic queue
+  // for good, if it was ever in it - and BEFORE the write, so the job can never
+  // be emailing the old lines while these are saved over them.
+  if ((await holdAutoSend(existing, personName(user))) === 'busy') return errorResponse(BEING_SENT_AUTOMATICALLY, 409)
+
   let revision = existing.revision
   if (mode === 'amend') {
     revision = await bumpOrderRevision(id, orderRevisionSnapshot(existing), reason, user.id)
@@ -144,6 +169,9 @@ export async function DELETE(_request: NextRequest, { params }: Params) {
   if (existing.status !== 'DRAFT') {
     return errorResponse('Only a draft can be deleted. Cancel this one instead.', 409)
   }
+
+  // Not out from under the job while it is emailing it.
+  if ((await holdAutoSend(existing, personName(user))) === 'busy') return errorResponse(BEING_SENT_AUTOMATICALLY, 409)
 
   await deleteOrder(id)
   await recordAudit('order', id, 'order.deleted', { number: existing.number }, user.id)

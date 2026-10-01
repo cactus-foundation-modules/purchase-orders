@@ -31,7 +31,7 @@ import { emptyForm, formBody, formFromOrder, type Form, type FormDefaults } from
 import { OrderActionBar, type BarAction, type BarNote } from './order/OrderActionBar'
 import { OrderEditForm } from './order/OrderEditForm'
 import { OrderView } from './order/OrderView'
-import { NO_DOCUMENTS, type PortalState, type SupplierDocuments } from './order/shared'
+import { NO_DOCUMENTS, type EmailedDocument, type PortalState, type SupplierDocuments } from './order/shared'
 import { StepModal } from './order/StepModals'
 import { SUPPLIER_LINK_CARD_ID } from './order/SupplierLinkCard'
 import { formatWhen, Money, OrderStatusBadge } from './ui'
@@ -79,6 +79,10 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   // arithmetic and getting a different answer on a stale page.
   const [despatchable, setDespatchable] = useState<PoDespatchableLine[]>([])
   const [documents, setDocuments] = useState<SupplierDocuments>(NO_DOCUMENTS)
+  const [fromEmail, setFromEmail] = useState<EmailedDocument[]>([])
+  const [proformaWarnings, setProformaWarnings] = useState<string[]>([])
+  const [proformaWarningsAt, setProformaWarningsAt] = useState<string | null>(null)
+  const [siteTimezone, setSiteTimezone] = useState('UTC')
   // The supplier's link, and what they have said through it. Its own request
   // again: most orders never have a link at all, and the join would be earning
   // its keep on a minority of order screens.
@@ -143,6 +147,10 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
             setHistory(data.history ?? [])
             setRevisions(data.revisions ?? [])
             setDocuments(data.documents ?? NO_DOCUMENTS)
+            setFromEmail(data.fromEmail ?? [])
+            setProformaWarnings(data.proformaWarnings ?? [])
+            setProformaWarningsAt(data.proformaWarningsAt ?? null)
+            setSiteTimezone(data.siteTimezone ?? 'UTC')
             setForm(formFromOrder(data.order))
           }
           setReceipts(deliveries?.receipts ?? [])
@@ -240,7 +248,9 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
       const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: note.trim() || undefined }),
+        // What this screen says about when it was last sent, so an order the
+        // automatic job sent a moment ago is not sent again behind it.
+        body: JSON.stringify({ note: note.trim() || undefined, seenSentAt: order?.sentAt ?? null }),
       })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
@@ -332,16 +342,24 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
   // The proforma. Marking it paid is what releases the supplier's own confirm
   // button, so it is a decision somebody makes rather than something inferred
   // from a bank feed nobody has connected.
-  async function payProforma(paymentRef: string, sendProof: boolean) {
+  async function payProforma(paymentRef: string, sendProof: boolean, acknowledgedWarning: boolean) {
     setError(null)
     const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/proforma`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paymentRef: paymentRef.trim() || undefined, sendProof }),
+      body: JSON.stringify({
+        paymentRef: paymentRef.trim() || undefined,
+        sendProof,
+        acknowledgedWarning: acknowledgedWarning || undefined,
+        warningsSeenUpTo: acknowledgedWarning && proformaWarningsAt ? proformaWarningsAt : undefined,
+      }),
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       setError(data.error ?? 'Could not mark that as paid.')
+      // Refused over a warning this screen may not be showing yet: reload, so
+      // the warning and its tick box are in front of them.
+      if (res.status === 409) await loadOrder()
       return
     }
     // The payment is in either way. If the supplier could not be told, say so
@@ -830,6 +848,9 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           step={openStep}
           order={order}
           documents={documents}
+          proformaWarnings={proformaWarnings}
+          proformaWarningsAt={proformaWarningsAt}
+          onReload={() => void loadOrder()}
           fullFormHref={`/${adminPath}/m/purchase-orders/bills/new?orderId=${order.id}`}
           canConfirmOrder={access.canCreate}
           onClose={() => setOpenStep(null)}
@@ -865,6 +886,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
             formatWhen,
           )}
           history={history}
+          siteTimezone={siteTimezone}
           revisions={revisions}
           receipts={receipts}
           returns={returns}
@@ -885,6 +907,9 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           despatchOpen={despatchOpen}
           onDespatchOpenChange={setDespatchOpen}
           documents={documents}
+          fromEmail={fromEmail}
+          proformaWarnings={proformaWarnings}
+          proformaWarningsAt={proformaWarningsAt}
           onPayProforma={access.canApprove || access.canBills ? payProforma : null}
           onUnpayProforma={access.canApprove || access.canBills ? unpayProforma : null}
           onSetProformaTerms={access.canCreate ? setProformaTerms : null}

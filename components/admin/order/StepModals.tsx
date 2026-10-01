@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
-import { billTotals } from '@/modules/purchase-orders/lib/billing'
+import { billTotals, firstInvoiceCharges, highestTaxRate } from '@/modules/purchase-orders/lib/billing'
 import { withUnit } from '@/modules/purchase-orders/lib/money'
 import type { PoPaperworkStep } from '@/modules/purchase-orders/lib/next-step'
 import type { PoBillableLine, PoOrder } from '@/modules/purchase-orders/lib/types'
 import { Field, input, localToday, Money, muted, table, td, tdRight, th, thRight } from '../ui'
 import type { SupplierDocuments } from './shared'
+import { BankDetailsCheck } from './BankDetailsCheck'
 
 // The four pieces of paperwork an order collects, each as a small window over
 // the order rather than a card to scroll to.
@@ -26,6 +27,13 @@ export type StepDone = (message: string, problem?: boolean) => void
 type StepProps = {
   order: PoOrder
   documents: SupplierDocuments
+  /** Warnings standing on a proforma that arrived by email. Paying needs the
+   *  bank details ticked as checked while there are any. */
+  proformaWarnings?: string[]
+  /** When the newest of them was raised, sent back with the tick. */
+  proformaWarningsAt?: string | null
+  /** Read the order again - after a refusal over a warning not yet shown. */
+  onReload?: () => void
   onClose: () => void
   onDone: StepDone
 }
@@ -226,7 +234,10 @@ function ProformaModal({ order, onClose, onDone }: StepProps) {
 
 /** The proof that it was paid, and saying so - which is what releases the
  *  supplier's own confirm button and, in practice, the goods. */
-function PaymentModal({ order, documents, onClose, onDone }: StepProps) {
+function PaymentModal({
+  order, documents, proformaWarnings = [], proformaWarningsAt = null, onReload, onClose, onDone,
+}: StepProps) {
+  const [checkedBank, setCheckedBank] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [paymentRef, setPaymentRef] = useState('')
   const [send, setSend] = useState(true)
@@ -254,10 +265,21 @@ function PaymentModal({ order, documents, onClose, onDone }: StepProps) {
       const paid = await fetch(`/api/m/purchase-orders/admin/orders/${order.id}/proforma`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paymentRef: paymentRef.trim() || undefined, sendProof: hasProof && send }),
+        body: JSON.stringify({
+          paymentRef: paymentRef.trim() || undefined,
+          sendProof: hasProof && send,
+          acknowledgedWarning: proformaWarnings.length > 0 && checkedBank ? true : undefined,
+          warningsSeenUpTo: proformaWarnings.length > 0 && checkedBank && proformaWarningsAt ? proformaWarningsAt : undefined,
+        }),
       })
       if (!paid.ok) {
         setError(await readError(paid, 'Could not mark that as paid.'))
+        // Refused over a warning not on this screen yet: fetch it, so the tick
+        // box appears here.
+        if (paid.status === 409) {
+          setCheckedBank(false)
+          onReload?.()
+        }
         return
       }
       const data = (await paid.json().catch(() => ({}))) as { emailProblem?: string | null; proofProblem?: string | null }
@@ -287,10 +309,11 @@ function PaymentModal({ order, documents, onClose, onDone }: StepProps) {
       busy={busy}
       submitLabel={hasProof && send ? 'Mark it paid and send the proof' : 'Mark it as paid'}
       busyLabel="Sending…"
-      blocked={null}
+      blocked={proformaWarnings.length > 0 && !checkedBank ? 'Tick that you have checked the bank details first.' : null}
       onSubmit={() => void submit()}
       onClose={onClose}
     >
+      <BankDetailsCheck warnings={proformaWarnings} checked={checkedBank} onChange={setCheckedBank} disabled={busy} />
       <FileField
         label="Proof of payment"
         hint={
@@ -483,12 +506,15 @@ function InvoiceModal({
           defaultVatRateCode: data.defaultVatRateCode ?? null,
           paymentTermsDays: typeof data.paymentTermsDays === 'number' ? data.paymentTermsDays : null,
         })
-        // Carriage is charged once. If anything on this order has been invoiced
-        // already, it has very probably been charged already too. The surcharge
-        // is the same: one figure on the order, billed once.
-        const invoicedBefore = billable.some((line) => Number(line.qtyInvoiced) > 0)
-        setCarriage(invoicedBefore ? '0' : order.carriageAmount)
-        setSurcharge(invoicedBefore ? '0' : order.surchargeAmount)
+        // Carriage and the surcharge are charged once, on the first invoice
+        // (lib/billing.ts firstInvoiceCharges - the same rule the supplier's
+        // link and an invoice from their email follow).
+        const charges = firstInvoiceCharges(
+          { carriageAmount: order.carriageAmount, surchargeAmount: order.surchargeAmount },
+          billable,
+        )
+        setCarriage(charges.carriageAmount)
+        setSurcharge(charges.surchargeAmount)
       })
       .catch(() => {
         if (!live) return
@@ -542,10 +568,7 @@ function InvoiceModal({
   const live = useMemo(() => (lines ?? []).filter((line) => Number(line.qty) > 0), [lines])
   // The highest rate on the bill, which is the treatment HMRC expect when
   // delivery is ancillary to the goods - and what the bill screen defaults to.
-  const carriageRate = useMemo(
-    () => String(live.reduce((max, line) => Math.max(max, Number(line.taxRatePercent) || 0), 0)),
-    [live],
-  )
+  const carriageRate = useMemo(() => highestTaxRate(live), [live])
   const totals = useMemo(
     () =>
       billTotals({

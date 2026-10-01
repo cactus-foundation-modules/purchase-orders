@@ -163,7 +163,7 @@ export async function listBills(filters: BillFilters = {}): Promise<PoBillSummar
 export async function getBill(id: string): Promise<PoBill | null> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT ${SUMMARY_SELECT}, b."fx_rate", b."subtotal", b."carriage_amount", b."surcharge_amount", b."tax_amount",
-           b."query_note", b."approved_by_user_id", b."approved_at", b."posted_at",
+           b."query_note", b."attachment_note", b."approved_by_user_id", b."approved_at", b."posted_at",
            b."books_outcome", b."updated_at",
            COALESCE(a."displayName", a."username") AS "approved_by_name",
            m."url" AS "media_url", m."originalName" AS "media_name", m."key" AS "media_key",
@@ -216,6 +216,7 @@ export async function getBill(id: string): Promise<PoBill | null> {
     postedAt: stamp(r.posted_at),
     booksOutcome: (r.books_outcome as Record<string, unknown> | null) ?? {},
     attachment,
+    attachmentNote: (r.attachment_note as string | null) ?? null,
     updatedAt: stamp(r.updated_at) ?? '',
     lines: lineRows.map(mapLine),
   }
@@ -526,9 +527,12 @@ export async function setBillBooksOutcome(
   `
 }
 
-export async function setBillAttachment(id: string, mediaId: string | null): Promise<void> {
+/** `note` goes with the file and only with it: attaching a different file, or
+ *  none, takes the old file's note away rather than leaving "page 2 of 3" on a
+ *  document it no longer describes. */
+export async function setBillAttachment(id: string, mediaId: string | null, note: string | null = null): Promise<void> {
   await prisma.$executeRaw`
-    UPDATE "po_bills" SET "attachment_media_id" = ${mediaId}, "updated_at" = now()
+    UPDATE "po_bills" SET "attachment_media_id" = ${mediaId}, "attachment_note" = ${note}, "updated_at" = now()
      WHERE "id" = ${id}
   `
 }

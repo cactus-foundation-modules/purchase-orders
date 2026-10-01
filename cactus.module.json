@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.45",
+  "version": "0.1.46",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
@@ -39,6 +39,14 @@
     {
       "path": "/api/m/purchase-orders/cron/chase",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/m/purchase-orders/cron/inbound-documents",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/m/purchase-orders/cron/auto-send",
+      "schedule": "*/30 * * * *"
     }
   ],
   "extensionPoints": [
@@ -69,6 +77,13 @@
       "id": "purchase-orders-draft-on-paid",
       "import": "./lib/order-paid-provider",
       "component": "purchaseOrdersOrderPaidObserver"
+    },
+    {
+      "point": "unified-inbox.message-received",
+      "id": "purchase-orders-inbound-paperwork",
+      "serverOnly": true,
+      "import": "./lib/inbound-handler",
+      "component": "purchaseOrdersInboundHandler"
     }
   ],
   "settingsTabs": [
@@ -86,6 +101,7 @@
     "export": "purchaseOrdersEmailTemplates"
   },
   "teardown": [
+    "po_inbound_documents",
     "po_catalogue_items",
     "po_supplier_catalogues",
     "po_shipment_lines",

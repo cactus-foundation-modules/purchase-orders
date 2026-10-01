@@ -42,7 +42,15 @@ export async function PUT(request: NextRequest, { params }: Params) {
     'supplier',
     id,
     'supplier.updated',
-    { name: parsed.data.name, previousName: existing.name },
+    {
+      name: parsed.data.name,
+      previousName: existing.name,
+      // Who switched automatic sending on, and when, is a question somebody
+      // will ask the first time a wrong price goes out by itself.
+      ...(parsed.data.autoSend !== undefined && parsed.data.autoSend !== existing.autoSend
+        ? { autoSend: parsed.data.autoSend }
+        : {}),
+    },
     user.id,
   )
   return NextResponse.json({ ok: true })

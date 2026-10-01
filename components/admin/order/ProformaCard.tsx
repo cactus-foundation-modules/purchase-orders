@@ -5,11 +5,12 @@ import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kind
 import type { PoOrder } from '@/modules/purchase-orders/lib/types'
 import { card, formatWhen, input, linkButton, Money, muted, table, td } from '../ui'
 import type { FiledDocumentKind, SupplierDocument, SupplierDocuments } from './shared'
+import { BankDetailsCheck } from './BankDetailsCheck'
 
 type ProformaCardProps = {
   order: PoOrder
   documents: SupplierDocuments
-  onPay: ((paymentRef: string, sendProof: boolean) => void) | null
+  onPay: ((paymentRef: string, sendProof: boolean, acknowledgedWarning: boolean) => void) | null
   onUnpay: (() => void) | null
   onSetTerms: ((required: boolean) => void) | null
   /** Filing what the supplier sent. Null for anybody who may not buy. */
@@ -19,6 +20,13 @@ type ProformaCardProps = {
   onFileProof: ((file: File) => Promise<boolean>) | null
   /** Their own numbers, typed in or corrected. Null for anybody who may not buy. */
   onSaveRefs: ((body: Record<string, string>) => Promise<boolean>) | null
+  /** Warnings standing on a proforma that arrived by email - above all that a
+   *  revised or second one replaced the first. Paying needs the bank details
+   *  ticked as checked while there are any. */
+  proformaWarnings?: string[]
+  /** When the newest of them was raised. A tick belongs to the warnings it was
+   *  given for: a newer one arriving unticks it. */
+  proformaWarningsAt?: string | null
 }
 
 /** One filed document, as a link or as a sentence saying there is not one. */
@@ -158,8 +166,12 @@ export function proformaCardShows(order: PoOrder): boolean {
  * money up front, or the other way about.
  */
 export function ProformaCard({
-  order, documents, onPay, onUnpay, onSetTerms, onFile, onFileProof, onSaveRefs,
+  order, documents, onPay, onUnpay, onSetTerms, onFile, onFileProof, onSaveRefs, proformaWarnings = [],
+  proformaWarningsAt = null,
 }: ProformaCardProps) {
+  const [checkedFor, setCheckedFor] = useState<string | null>(null)
+  const checkedBank = checkedFor !== null && checkedFor === (proformaWarningsAt ?? '')
+  const setCheckedBank = (checked: boolean) => setCheckedFor(checked ? (proformaWarningsAt ?? '') : null)
   const [paymentRef, setPaymentRef] = useState('')
   const [busy, setBusy] = useState<FiledDocumentKind | null>(null)
   // Ticked by default the moment there is something to send, because a supplier
@@ -221,6 +233,11 @@ export function ProformaCard({
 
       {order.proformaRequired ? (
         <>
+          {!paid && (
+            // Where somebody about to pay will see it: a proforma replaced by
+            // email is how invoice fraud with new bank details is done.
+            <BankDetailsCheck warnings={proformaWarnings} checked={checkedBank} onChange={setCheckedBank} />
+          )}
           <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>
             This supplier invoices before they confirm. Until the proforma is marked paid here, their own link tells
             them so and holds their confirm button back.
@@ -302,7 +319,7 @@ export function ProformaCard({
                       {order.proformaPaymentRef && <div style={muted}>Reference {order.proformaPaymentRef}</div>}
                       {onPay && hasProof && (
                         <div style={{ marginTop: '0.375rem' }}>
-                          <button className="btn btn-secondary btn-sm" onClick={() => onPay('', true)}>
+                          <button className="btn btn-secondary btn-sm" onClick={() => onPay('', true, false)}>
                             {order.proformaProofSentAt ? 'Send the proof again' : 'Email them the proof'}
                           </button>
                         </div>
@@ -325,7 +342,11 @@ export function ProformaCard({
                           onChange={(e) => setPaymentRef(e.target.value)}
                           maxLength={120}
                         />
-                        <button className="btn btn-primary btn-sm" onClick={() => onPay(paymentRef, hasProof && attachProof)}>
+                        <button
+                          className="btn btn-primary btn-sm"
+                          disabled={proformaWarnings.length > 0 && !checkedBank}
+                          onClick={() => onPay(paymentRef, hasProof && attachProof, proformaWarnings.length > 0 && checkedBank)}
+                        >
                           {hasProof && attachProof ? 'Mark it paid and send the proof' : 'Mark the proforma as paid'}
                         </button>
                       </div>

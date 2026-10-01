@@ -25,3 +25,25 @@ export type PortalState = {
 }
 
 export type FiledDocumentKind = 'proforma' | 'acknowledgement' | 'payment-proof'
+
+/** A document filed on the order from a supplier's email, as the order's GET
+ *  hands it over: what it was filed as, the file it left, and the conversation
+ *  it came on. */
+export type EmailedDocument = {
+  id: string
+  filedAs: 'proforma' | 'acknowledgement' | 'invoice'
+  supplierRef: string | null
+  receivedAt: string | null
+  fromAddress: string
+  threadId: string | null
+  billId: string | null
+  /** Something worth a look: their proforma disagrees with the order, or its
+   *  total could not be read. */
+  flag: string | null
+  /** The flag is a warning worth putting in front of somebody about to pay. */
+  flagAlert: boolean
+  handledAt: string | null
+  /** Filed by somebody on the Paperwork list rather than by itself. */
+  byPerson: boolean
+  file: SupplierDocument | null
+}

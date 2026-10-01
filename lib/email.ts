@@ -472,6 +472,58 @@ export async function sendAutoDraftReport(to: string, report: AutoDraftReportEma
   }
 }
 
+/** The paperwork report as this file needs it, built by lib/inbound-report.ts. */
+export type PaperworkReportEmail = { whatHappened: string; lines: string }
+
+/**
+ * Tells the buyer that a supplier's emailed paperwork needs a person: a
+ * document that could not be filed, or a proforma that disagrees with its
+ * order. Sent only when there is something to say.
+ *
+ * Best-effort and never throws. Everything it mentions is on the Paperwork
+ * list, or on the order, whether this sends or not.
+ */
+export async function sendPaperworkReport(to: string, report: PaperworkReportEmail): Promise<void> {
+  if (!isEmailConfigured() || !to.includes('@')) return
+  try {
+    const rendered = await renderEmailTemplate('purchase-orders.paperwork', {
+      whatHappened: report.whatHappened,
+      lines: report.lines,
+      siteName: await siteName(),
+    })
+    if (!rendered) return
+    await sendEmail({ moduleName: 'purchase-orders', to, subject: rendered.subject, html: rendered.html, text: rendered.text })
+  } catch (error) {
+    console.error('[purchase-orders] could not send the paperwork report', error)
+  }
+}
+
+/** The automatic-send report as this file needs it, built by
+ *  lib/auto-send-report.ts. */
+export type AutoSendReportEmail = { whatHappened: string; lines: string }
+
+/**
+ * Tells the buyer that the automatic job would not send a draft, and why. Sent
+ * only when there is something to say.
+ *
+ * Best-effort and never throws. The drafts are on the Orders tab, each with
+ * its sentence, whether this sends or not.
+ */
+export async function sendAutoSendReport(to: string, report: AutoSendReportEmail): Promise<void> {
+  if (!isEmailConfigured() || !to.includes('@')) return
+  try {
+    const rendered = await renderEmailTemplate('purchase-orders.auto-send', {
+      whatHappened: report.whatHappened,
+      lines: report.lines,
+      siteName: await siteName(),
+    })
+    if (!rendered) return
+    await sendEmail({ moduleName: 'purchase-orders', to, subject: rendered.subject, html: rendered.html, text: rendered.text })
+  } catch (error) {
+    console.error('[purchase-orders] could not send the automatic send report', error)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Returns
 // ---------------------------------------------------------------------------

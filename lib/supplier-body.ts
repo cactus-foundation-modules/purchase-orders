@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { catalogueNameKey } from './catalogue-import'
+import { normaliseSender, senderProblem } from './inbound-filing'
 import type { SupplierInput } from './db'
 
 // The supplier form, validated once and shared by the create and the update
@@ -86,6 +87,21 @@ export const SupplierBody = z.object({
   // What this supplier reads at the top of their own portal page. Bounded like
   // everything else, and defaulted so a form written before it existed saves.
   portalNote: z.string().max(2000).nullable().default(null),
+  // Extra addresses or domains their emailed paperwork comes from. Each one is
+  // checked here as well as on the form: a free-mail domain on this list would
+  // make every gmail user in the country this supplier.
+  inboundSenders: z
+    .array(z.string().max(254))
+    .max(50, 'That is a lot of senders. Fifty is the most one supplier can have.')
+    .default([])
+    .superRefine((senders, ctx) => {
+      for (const sender of senders) {
+        const problem = senderProblem(sender)
+        if (problem) ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem })
+      }
+    }),
+  // Left out, the supplier keeps what it had - see `SupplierInput.autoSend`.
+  autoSend: z.boolean().optional(),
   status: z.enum(['ENABLED', 'DISABLED', 'ON_HOLD']).default('ENABLED'),
   notes: z.string().max(5000).nullable().default(null),
 })
@@ -137,6 +153,8 @@ export function toSupplierInput(body: SupplierBodyInput): SupplierInput {
     taxRegistrationNumber: orNull(body.taxRegistrationNumber),
     deliveryInstructions: orNull(body.deliveryInstructions),
     portalNote: orNull(body.portalNote),
+    inboundSenders: [...new Set(body.inboundSenders.map(normaliseSender).filter((s): s is string => s !== null))],
+    autoSend: body.autoSend,
     status: body.status,
     notes: orNull(body.notes),
   }

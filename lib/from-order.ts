@@ -83,6 +83,9 @@ export type ShopOrderFacts = {
   /** `SALE` or `REPLACEMENT` once shop's replacement orders exist. */
   kind: string
   status: string
+  /** Shop's `payment_status`. Optional so a caller building one by hand need
+   *  not invent it; the automatic send reads it to be sure the money is here. */
+  paymentStatus?: string | null
   customerName: string
   customerPhone: string | null
   /** The organisation the checkout collected as a CONTACT detail, on its own
@@ -136,7 +139,7 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
     // filled in. `to_jsonb(o) ->> 'missing_key'` is NULL, so an older shop
     // answers "nothing said" and everything else carries on.
     const orders = await prisma.$queryRaw<Record<string, unknown>[]>`
-      SELECT o."id", o."order_number", o."status", o."customer_name", o."customer_phone", o."customer_organisation",
+      SELECT o."id", o."order_number", o."status", o."payment_status", o."customer_name", o."customer_phone", o."customer_organisation",
              o."currency", o."shipping_address",
              to_jsonb(o) ->> 'delivery_instructions' AS "delivery_instructions",
              COALESCE(to_jsonb(o) ->> 'kind', ${SHOP_ORDER_KIND_SALE}) AS "kind"
@@ -182,6 +185,7 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
       orderNumber: order.order_number as string,
       kind: (order.kind as string | null) ?? SHOP_ORDER_KIND_SALE,
       status: order.status as string,
+      paymentStatus: textOrNull(order.payment_status),
       customerName: (order.customer_name as string | null) ?? '',
       customerPhone: textOrNull(order.customer_phone),
       customerOrganisation: textOrNull(order.customer_organisation),
@@ -266,6 +270,9 @@ export type PoRaisedFromShopOrder = {
    *  a session behind it. Worth saying on the screen: a draft that appeared by
    *  itself is one nobody has read yet. */
   raisedAutomatically: boolean
+  /** Its place in the automatic queue - see lib/auto-send.ts. */
+  autoSendState: string | null
+  autoSendNote: string | null
 }
 
 /**
@@ -276,7 +283,8 @@ export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFrom
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT o."id", o."number", o."status", o."supplier_id", o."currency", o."total", o."created_at",
            o."created_by_user_id", s."name" AS "supplier_name",
-           o."proforma_required", o."proforma_media_id", o."proforma_received_at", o."proforma_paid_at"
+           o."proforma_required", o."proforma_media_id", o."proforma_received_at", o."proforma_paid_at",
+           o."auto_send_state", o."auto_send_note"
       FROM "po_orders" o
       LEFT JOIN "po_suppliers" s ON s."id" = o."supplier_id"
      WHERE o."source_kind" = 'FROM_ORDER'
@@ -296,6 +304,8 @@ export async function listPosForShopOrder(orderId: string): Promise<PoRaisedFrom
     total: numOrNull(r.total) ?? '0',
     createdAt: (r.created_at as Date).toISOString(),
     raisedAutomatically: r.created_by_user_id == null,
+    autoSendState: (r.auto_send_state as string | null) ?? null,
+    autoSendNote: (r.auto_send_note as string | null) ?? null,
   }))
 }
 

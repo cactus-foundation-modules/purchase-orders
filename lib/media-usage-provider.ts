@@ -12,6 +12,12 @@ import { prisma } from '@/lib/db/prisma'
 // for six years, and a proforma and its proof of payment are the evidence behind
 // money that left the building before any goods did. The media clean-up is not
 // allowed to be the thing that loses any of them.
+//
+// A fifth: the copy of a supplier's emailed document filed on an order by the
+// inbox job (lib/inbound-run.ts) - one invoice cut out of their daily batch, or
+// an earlier proforma a revision has since replaced on the order, which is
+// still the record of what they first asked for. The email's own attachment is
+// the inbox's to vouch for, not this module's.
 export async function purchaseOrdersMediaUsageProvider(): Promise<string[]> {
   const rows = await prisma.$queryRaw<{ ref: string | null }[]>`
     SELECT "attachment_media_id" AS ref FROM "po_bills" WHERE "attachment_media_id" IS NOT NULL
@@ -21,6 +27,8 @@ export async function purchaseOrdersMediaUsageProvider(): Promise<string[]> {
     SELECT "ack_media_id" AS ref FROM "po_orders" WHERE "ack_media_id" IS NOT NULL
     UNION
     SELECT "proforma_payment_proof_media_id" AS ref FROM "po_orders" WHERE "proforma_payment_proof_media_id" IS NOT NULL
+    UNION
+    SELECT "filed_media_id" AS ref FROM "po_inbound_documents" WHERE "filed_media_id" IS NOT NULL
   `
   return rows.map((r) => r.ref).filter((r): r is string => !!r)
 }

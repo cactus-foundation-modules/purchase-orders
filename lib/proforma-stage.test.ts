@@ -36,15 +36,29 @@ describe('proformaStage', () => {
   it('stands aside for every other status', () => {
     expect(orderStatusLabel({ ...proforma, status: 'DRAFT' })).toBe('Draft')
     expect(orderStatusLabel({ ...proforma, status: 'ON_HOLD' })).toBe('On hold')
-    // Acknowledged is the more useful fact, and on these terms it cannot happen
-    // until the money has moved anyway.
+    // Once the proforma is paid, acknowledged is the more useful fact.
     expect(orderStatusLabel({ ...proforma, status: 'ACKNOWLEDGED', proformaPaid: true })).toBe('Acknowledged')
     expect(orderStatusLabel({ ...proforma, status: 'PART_RECEIVED' })).toBe('Part received')
+    // And an order on their account never mentions a proforma at all.
+    expect(orderStatusLabel({ ...onAccount, status: 'ACKNOWLEDGED' })).toBe('Acknowledged')
+  })
+
+  it('keeps an unpaid proforma in sight once they have acknowledged the order', () => {
+    // Their emailed sales order acknowledges an order whether or not we have
+    // paid yet. The badge must still say money is owed.
+    const acknowledged: PoStageFacts = { ...proforma, status: 'ACKNOWLEDGED' }
+    expect(proformaStage({ ...acknowledged, proformaReceived: true })).toBe('RECEIVED')
+    expect(orderStatusLabel({ ...acknowledged, proformaReceived: true })).toBe('Acknowledged, proforma to pay')
+    expect(orderStatusLabel(acknowledged)).toBe('Acknowledged, proforma awaited')
+    expect(proformaStage({ ...acknowledged, proformaReceived: true, proformaPaid: true })).toBe('NONE')
   })
 
   it('marks only the stage that is ours to move', () => {
     expect(proformaWaitsOnUs(proforma)).toBe(false)
     expect(proformaWaitsOnUs({ ...proforma, proformaReceived: true })).toBe(true)
     expect(proformaWaitsOnUs({ ...proforma, proformaReceived: true, proformaPaid: true })).toBe(false)
+    expect(proformaWaitsOnUs({ ...proforma, status: 'ACKNOWLEDGED', proformaReceived: true })).toBe(true)
+    expect(proformaWaitsOnUs({ ...proforma, status: 'ACKNOWLEDGED' })).toBe(false)
+    expect(proformaWaitsOnUs({ ...proforma, status: 'ACKNOWLEDGED', proformaReceived: true, proformaPaid: true })).toBe(false)
   })
 })

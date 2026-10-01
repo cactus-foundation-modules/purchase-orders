@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
 import { PO_STATUSES, PO_STATUS_LABELS, type PoOrderSummary, type PoStatus } from '@/modules/purchase-orders/lib/types'
 import { formatDay, input, Money, OrderStatusBadge, table, td, tdRight, th, thRight } from './ui'
+import { PaperworkPanel } from './PaperworkPanel'
 
 type StatusFilter = PoStatus | 'ALL' | 'OPEN'
 
@@ -48,6 +49,8 @@ export function OrdersScreen({ canCreate }: { canCreate: boolean }) {
           </Link>
         )}
       </div>
+
+      <PaperworkPanel onFiled={() => void refresh()} />
 
       <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
         <select

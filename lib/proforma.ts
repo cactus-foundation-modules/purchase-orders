@@ -13,20 +13,67 @@ import { downloadMedia } from '@/lib/media/upload'
 // at the same moment, and one of the two is often not in this building.
 
 /** The supplier's proforma, filed against the order. `mediaId` is a plain Media
- *  id and never a foreign key - core owns that table. */
+ *  id and never a foreign key - core owns that table. `receivedAt` is when it
+ *  actually arrived, where that is known and is not now: the date on the email
+ *  it came on, filed half an hour later by the inbox job. */
 export async function setProformaDocument(
   orderId: string,
   mediaId: string,
   ref: string | null,
   amount: string | null,
+  receivedAt: string | null = null,
 ): Promise<void> {
   await prisma.$executeRaw`
     UPDATE "po_orders"
        SET "proforma_media_id" = ${mediaId},
            "proforma_ref" = COALESCE(NULLIF(${ref ?? ''}, ''), "proforma_ref"),
            "proforma_amount" = COALESCE(${amount}::numeric, "proforma_amount"),
-           "proforma_received_at" = now(),
+           "proforma_received_at" = COALESCE(${receivedAt}::timestamptz, now()),
            "updated_at" = now()
+     WHERE "id" = ${orderId}
+  `
+}
+
+/**
+ * A proforma replacing whatever the order had - from a supplier's email, or a
+ * second one through their own link.
+ *
+ * Deliberately not setProformaDocument's COALESCE: a replacement's reference
+ * and amount become the NEW document's, blank where they could not be read,
+ * because the old figures left beside a new file are exactly how a fraudulent
+ * "revised" proforma borrows a legitimate one's credibility. And guarded in the
+ * WHERE clause on the proforma being unpaid: a payment recorded between the
+ * caller deciding and this write wins, and false comes back. `client` is a
+ * transaction where the caller needs this and its own record of it to land
+ * together or not at all.
+ */
+export async function replaceProformaDocument(
+  orderId: string,
+  mediaId: string,
+  ref: string | null,
+  amount: string | null,
+  receivedAt: string | null,
+  client: Pick<typeof prisma, '$executeRaw'> = prisma,
+): Promise<boolean> {
+  const count = await client.$executeRaw`
+    UPDATE "po_orders"
+       SET "proforma_media_id" = ${mediaId},
+           "proforma_ref" = NULLIF(${ref ?? ''}, ''),
+           "proforma_amount" = ${amount}::numeric,
+           "proforma_received_at" = COALESCE(${receivedAt}::timestamptz, now()),
+           "updated_at" = now()
+     WHERE "id" = ${orderId} AND "proforma_paid_at" IS NULL
+  `
+  return count > 0
+}
+
+/** A replacement proforma sent through the supplier's own link, and why it is
+ *  worth a check before paying. Read by the same pay gate as the warnings on
+ *  proformas from email (lib/inbound-run.ts liveProformaWarnings). */
+export async function setProformaWarning(orderId: string, warning: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE "po_orders"
+       SET "proforma_warning" = ${warning}, "proforma_warning_at" = now(), "updated_at" = now()
      WHERE "id" = ${orderId}
   `
 }

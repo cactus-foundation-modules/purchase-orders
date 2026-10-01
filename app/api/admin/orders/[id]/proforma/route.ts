@@ -4,10 +4,13 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, getSupplier } from '@/modules/purchase-orders/lib/db'
+import { holdAutoSend, personName } from '@/modules/purchase-orders/lib/auto-send-queue'
+import { BEING_SENT_AUTOMATICALLY } from '@/modules/purchase-orders/lib/auto-send'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { proformaPaidRecipients, sendProformaPaid } from '@/modules/purchase-orders/lib/email'
 import { formatMoney } from '@/modules/purchase-orders/lib/money'
 import { mintPortalLink } from '@/modules/purchase-orders/lib/portal'
+import { clearProformaWarnings, liveProformaWarnings } from '@/modules/purchase-orders/lib/inbound-run'
 import {
   clearProformaPayment, markProformaPaid, markProofSent, mediaAttachment, setProformaRequired,
 } from '@/modules/purchase-orders/lib/proforma'
@@ -20,6 +23,12 @@ const PayBody = z.object({
    *  email. Off unless asked for: not every payment has one, and a supplier who
    *  did not ask for one does not need it. */
   sendProof: z.boolean().optional(),
+  /** Somebody has ticked that they checked the bank details, answering a
+   *  warning on a proforma that arrived by email. Required while one stands. */
+  acknowledgedWarning: z.boolean().optional(),
+  /** The newest warning the screen showed when the box was ticked. A tick
+   *  given before a newer warning arrived answers nothing. */
+  warningsSeenUpTo: z.string().datetime().optional(),
 })
 
 const RequiredBody = z.object({
@@ -48,6 +57,28 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (!order) return errorResponse('That purchase order is not here any more.', 404)
   if (!order.proformaRequired) {
     return errorResponse('This order is not on proforma terms, so there is no proforma to pay.', 409)
+  }
+
+  // A proforma that arrived by email with a warning on it - revised, a second
+  // one, not the order's total - is not paid on a click. Somebody says they
+  // have checked the bank details with the supplier first, and that goes in
+  // the history with their name against it.
+  const { warnings, newestAt } = await liveProformaWarnings(id)
+  if (warnings.length > 0 && newestAt) {
+    const seen = parsed.data.warningsSeenUpTo
+    if (parsed.data.acknowledgedWarning !== true || !seen) {
+      return errorResponse(
+        `${warnings.join(' ')} Tick that you have checked the bank details with the supplier before marking it paid.`,
+        409,
+      )
+    }
+    if (new Date(newestAt).getTime() > new Date(seen).getTime()) {
+      return errorResponse(
+        'Another warning about this proforma has arrived since you ticked the box. Read it, and tick again once you have checked.',
+        409,
+      )
+    }
+    await clearProformaWarnings(id, warnings, seen, user.id)
   }
 
   const ref = (parsed.data.paymentRef ?? '').trim() || null
@@ -176,6 +207,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const order = await getOrder(id)
   if (!order) return errorResponse('That purchase order is not here any more.', 404)
 
+  if ((await holdAutoSend(order, personName(user))) === 'busy') return errorResponse(BEING_SENT_AUTOMATICALLY, 409)
   await setProformaRequired(id, parsed.data.required)
   await recordAudit(
     'order',

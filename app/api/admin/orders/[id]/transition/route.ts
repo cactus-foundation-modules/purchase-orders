@@ -8,6 +8,8 @@ import { canSend, checkTransition, closeBlockedReason, sendingApproves, TRANSITI
 import { unsettledBillCount } from '@/modules/purchase-orders/lib/bills'
 import { sendOrderCancelled, supplierRecipients } from '@/modules/purchase-orders/lib/email'
 import type { PoTransition } from '@/modules/purchase-orders/lib/lifecycle'
+import { holdAutoSend, personName } from '@/modules/purchase-orders/lib/auto-send-queue'
+import { BEING_SENT_AUTOMATICALLY } from '@/modules/purchase-orders/lib/auto-send'
 import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 
 type Params = { params: Promise<{ id: string }> }
@@ -61,6 +63,12 @@ export async function POST(request: NextRequest, { params }: Params) {
     const blocked = closeBlockedReason(order.status, await unsettledBillCount(id))
     if (blocked) return errorResponse(blocked, 409)
   }
+
+  // Any move a person makes on a queued draft - submitting it, holding it,
+  // cancelling it, marking it sent by hand - takes it out of the automatic
+  // queue for good, ahead of the move itself so the job is never part way
+  // through emailing an order that is being cancelled.
+  if ((await holdAutoSend(order, personName(user))) === 'busy') return errorResponse(BEING_SENT_AUTOMATICALLY, 409)
 
   await setOrderStatus(
     id,

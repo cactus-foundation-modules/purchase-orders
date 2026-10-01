@@ -1,7 +1,9 @@
 import type { EmailTemplateDef } from '@/lib/email/registry'
 
-// The emails this module sends: six to a supplier, and one to you when a
-// supplier answers back through their own link. Declared for core's single email
+// The emails this module sends: six to a supplier, and four to you - when a
+// supplier answers back through their own link, when an automatic draft could
+// not buy everything, when their emailed paperwork needs a look, and when an
+// automatic draft was not sent by itself. Declared for core's single email
 // editor (Settings > Emails), which owns the wording, the wrapper design and the
 // sending; this file is only the defaults.
 //
@@ -169,6 +171,45 @@ export const purchaseOrdersEmailTemplates: EmailTemplateDef[] = [
     requiredTags: ['orderNumber'],
     // The table is built in code with every value escaped as it goes - a product
     // name is whatever a supplier's spreadsheet called it.
+    rawTags: ['lines'],
+    transactional: true,
+  },
+  {
+    // The third that comes to YOU. Sent only when a supplier's emailed
+    // paperwork needs a person: a document that could not be filed on its own,
+    // or a proforma whose total disagrees with the order. Never to say it all
+    // went well.
+    key: 'purchase-orders.paperwork',
+    label: 'Supplier paperwork from email needs a look',
+    subject: 'Supplier paperwork needs a look',
+    bodyHtml:
+      '<p><strong>{{whatHappened}}</strong></p>' +
+      '{{lines}}' +
+      '<p>Anything that could not be filed is waiting under Purchasing, at the top of the Orders tab. ' +
+      'Nothing has been paid, approved or sent to anybody.</p>',
+    mergeTags: ['whatHappened', 'lines', 'siteName'],
+    requiredTags: ['whatHappened'],
+    // Built in code with every value escaped as it goes - a filename is
+    // whatever a supplier's system called it.
+    rawTags: ['lines'],
+    transactional: true,
+  },
+  {
+    // The fourth that comes to YOU. Sent only when the job that sends
+    // automatic drafts would not send one - each refusal once, never a
+    // half-hourly "all sent". The draft is still a draft, waiting for a person.
+    key: 'purchase-orders.auto-send',
+    label: 'An automatic draft was not sent',
+    subject: 'Purchasing did not send a draft by itself',
+    bodyHtml:
+      '<p><strong>{{whatHappened}}</strong></p>' +
+      '{{lines}}' +
+      '<p>Each one is still a draft on the Orders tab. Read it, put right whatever is wrong, and send it yourself - ' +
+      'it will not be sent automatically now.</p>',
+    mergeTags: ['whatHappened', 'lines', 'siteName'],
+    requiredTags: ['whatHappened'],
+    // Built in code with every value escaped as it goes - a line description is
+    // whatever a supplier's price list called it.
     rawTags: ['lines'],
     transactional: true,
   },

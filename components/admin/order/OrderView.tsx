@@ -3,6 +3,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import Link from 'next/link'
 import { withUnit } from '@/modules/purchase-orders/lib/money'
+import { autoSendLine, SENT_AUTOMATICALLY } from '@/modules/purchase-orders/lib/auto-send'
 import { appliedDiscount } from '@/modules/purchase-orders/lib/totals'
 import { isReceivable, outstanding } from '@/modules/purchase-orders/lib/receiving'
 import type { PoStanding } from '@/modules/purchase-orders/lib/standing'
@@ -33,16 +34,19 @@ import {
   thRight,
 } from '../ui'
 import { DespatchesCard } from './DespatchesCard'
+import { EmailedDocumentsCard } from './EmailedDocumentsCard'
 import { ProformaCard, proformaCardShows } from './ProformaCard'
 import { SupplierLinkCard } from './SupplierLinkCard'
 import { Totals } from './Totals'
-import type { FiledDocumentKind, PortalState, SupplierDocuments } from './shared'
+import type { EmailedDocument, FiledDocumentKind, PortalState, SupplierDocuments } from './shared'
 
 export type OrderViewProps = {
   order: PoOrder
   /** Where the order stands, worked out from the order - see lib/standing.ts. */
   standing: PoStanding
   history: PoAuditEntry[]
+  /** The business's own clock, for "sends automatically at 14:30". */
+  siteTimezone: string
   revisions: PoRevisionSummary[]
   receipts: PoReceiptSummary[]
   returns: PoReturnSummary[]
@@ -73,8 +77,14 @@ export type OrderViewProps = {
   onDespatchOpenChange: (open: boolean) => void
   /** Their proforma and their acknowledgement, where either has arrived. */
   documents: SupplierDocuments
+  /** What was filed on the order from their email, and where it came from. */
+  fromEmail: EmailedDocument[]
+  /** Warnings standing on its proforma from email, until somebody says they
+   *  have checked the bank details (lib/inbound-run.ts liveProformaWarnings). */
+  proformaWarnings: string[]
+  proformaWarningsAt: string | null
   /** Null for anybody without the permission to say money has moved. */
-  onPayProforma: ((paymentRef: string, sendProof: boolean) => void) | null
+  onPayProforma: ((paymentRef: string, sendProof: boolean, acknowledgedWarning: boolean) => void) | null
   onUnpayProforma: (() => void) | null
   onSetProformaTerms: ((required: boolean) => void) | null
   /** Filing what arrived by email or in the post. Buying for the supplier's own
@@ -153,10 +163,10 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
  * at - who, when, where to, the notes, and the trail of who did what.
  */
 export function OrderView({
-  order, standing, history, revisions, receipts, returns, bills, returnsBase, billsBase, shopOrdersBase,
+  order, standing, history, siteTimezone, revisions, receipts, returns, bills, returnsBase, billsBase, shopOrdersBase,
   onCancelLine, portal, newLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
   shipments, despatchable, onRecordDespatch, onDeleteDespatch, despatchOpen, onDespatchOpenChange,
-  documents, onPayProforma, onUnpayProforma, onSetProformaTerms,
+  documents, fromEmail, proformaWarnings, proformaWarningsAt, onPayProforma, onUnpayProforma, onSetProformaTerms,
   onFileDocument, onFileProof, onSaveSupplierRefs,
 }: OrderViewProps) {
   const totals = {
@@ -206,6 +216,8 @@ export function OrderView({
   // ask for the money before anything moves at all.
   const showBills = bills.length > 0 || Boolean(order.sentAt)
   const showProforma = proformaCardShows(order)
+  // A draft's place in the automatic queue, said once it is in it.
+  const autoSend = autoSendLine(order, new Date(), siteTimezone)
 
   return (
     <>
@@ -213,6 +225,12 @@ export function OrderView({
         <strong style={{ fontWeight: 600 }}>{standing.headline}</strong>
         {standing.detail && <> {standing.detail}</>}
       </div>
+
+      {autoSend && (
+        <div className={STANDING_ALERT[autoSend.tone]} style={{ marginBottom: '1rem' }} role="status">
+          {autoSend.text}
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
         {/* The wide column. `minWidth: 0` is what lets the tables inside it
@@ -408,6 +426,12 @@ export function OrderView({
             </Section>
           )}
 
+          {fromEmail.length > 0 && (
+            <Section title="Their paperwork">
+              <EmailedDocumentsCard documents={fromEmail} billsBase={billsBase} />
+            </Section>
+          )}
+
           {(showProforma || showBills) && (
             <Section title="Paying for it">
               <ProformaCard
@@ -419,6 +443,8 @@ export function OrderView({
                 onFile={onFileDocument}
                 onFileProof={onFileProof ? (chosen) => onFileProof('payment-proof', chosen) : null}
                 onSaveRefs={onSaveSupplierRefs}
+                proformaWarnings={proformaWarnings}
+                proformaWarningsAt={proformaWarningsAt}
               />
 
               {showBills && (
@@ -498,7 +524,10 @@ export function OrderView({
               {/* Who approved it is in the history below; this is the glance. An
                   order sent without ever being formally approved is approved by
                   the act of sending it, so a sent order always has a date here. */}
-              <Fact label="Approved">{order.approvedAt ? formatWhen(order.approvedAt) : 'Not yet'}</Fact>
+              <Fact label="Approved">
+                {order.approvedAt ? formatWhen(order.approvedAt) : 'Not yet'}
+                {order.approvedAutomatically && <div style={muted}>{SENT_AUTOMATICALLY}</div>}
+              </Fact>
               <Fact label="Payment terms">{order.paymentTerms ?? '—'}</Fact>
               {order.deliveryTerms && <Fact label="Delivery terms">{order.deliveryTerms}</Fact>}
               {order.currency !== order.baseCurrency && (
@@ -593,7 +622,8 @@ export function OrderView({
                       <div style={{ whiteSpace: 'pre-wrap' }}>{h.detail.note}</div>
                     )}
                     <div style={muted}>
-                      {h.userName ?? 'Somebody'}, {formatWhen(h.createdAt)}
+                      {h.userName ?? (h.detail.by === 'AUTO' || h.detail.raisedBy === 'AUTO' ? 'Automatically' : 'Somebody')},{' '}
+                      {formatWhen(h.createdAt)}
                     </div>
                   </li>
                 ))}

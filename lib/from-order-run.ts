@@ -1,4 +1,5 @@
 import { recordAudit } from './audit'
+import { queueAutoDraft } from './auto-send-queue'
 import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
 import { createOrder, type OrderInput, type OrderLineInput } from './db'
@@ -112,6 +113,14 @@ export async function raisePurchaseOrdersFromShopOrder(
     ordersCreated.push(await raiseOneOrder(order, group, plan.shipTo, config.baseCurrency, config, options.userId))
   }
 
+  // Raised by nobody: each draft may go into the automatic queue, where its
+  // supplier is switched on (lib/auto-send-queue.ts). A draft somebody pressed
+  // Raise for is theirs to send, exactly as before.
+  if (!options.userId) {
+    for (const po of ordersCreated) {
+      await queueAutoDraft(po.id, { skippedLines: plan.skipped.length, customerOrderNumber: order.orderNumber, config })
+    }
+  }
 
   return { ordersCreated, skipped: plan.skipped, refused: null }
 }

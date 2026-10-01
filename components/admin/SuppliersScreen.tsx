@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import type { PoAddress } from '@/modules/purchase-orders/lib/config'
+import { parseSenders, senderProblem } from '@/modules/purchase-orders/lib/inbound-filing'
 import type { PoSupplier, SupplierAccountTerms, SupplierStatus } from '@/modules/purchase-orders/lib/types'
+import { editRecordSentence, RECORD_SIZE } from '@/modules/purchase-orders/lib/auto-send'
 import { card, Field, input, linkButton, muted, table, td, th, thRight } from './ui'
 import { newSurchargeRate, SupplierSurchargeRates, type SurchargeRateRow } from './SupplierSurchargeRates'
 
@@ -34,6 +36,9 @@ type Form = {
   taxRegistrationNumber: string
   deliveryInstructions: string
   portalNote: string
+  /** One per line, as typed. Parsed and checked on save. */
+  inboundSenders: string
+  autoSend: boolean
   status: SupplierStatus
   notes: string
 }
@@ -66,6 +71,8 @@ const EMPTY_FORM: Form = {
   taxRegistrationNumber: '',
   deliveryInstructions: '',
   portalNote: '',
+  inboundSenders: '',
+  autoSend: false,
   status: 'ENABLED',
   notes: '',
 }
@@ -91,6 +98,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
   const [suppliers, setSuppliers] = useState<PoSupplier[]>([])
   const [shopSuppliers, setShopSuppliers] = useState<ShopSupplier[]>([])
   const [hasCatalogue, setHasCatalogue] = useState(false)
+  const [records, setRecords] = useState<Record<string, { drafts: number; changed: number }>>({})
   const [loaded, setLoaded] = useState(false)
   const [form, setForm] = useState<Form | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -108,6 +116,7 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
             setSuppliers(data.suppliers ?? [])
             setShopSuppliers(data.shopSuppliers ?? [])
             setHasCatalogue(Boolean(data.capabilities?.hasCatalogue))
+            setRecords(data.autoDraftRecord ?? {})
           }
           setLoaded(true)
         })
@@ -153,6 +162,8 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
       taxRegistrationNumber: supplier.taxRegistrationNumber ?? '',
       deliveryInstructions: supplier.deliveryInstructions ?? '',
       portalNote: supplier.portalNote ?? '',
+      inboundSenders: (supplier.inboundSenders ?? []).join('\n'),
+      autoSend: supplier.autoSend,
       status: supplier.status,
       notes: supplier.notes ?? '',
     })
@@ -164,6 +175,17 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
 
   async function save() {
     if (!form || saving) return
+    // A free-mail domain here would make every gmail user this supplier, so it
+    // is refused before anything is sent - and again by the route.
+    const senderRefusal = form.inboundSenders
+      .split(/[\s,;]+/)
+      .filter((entry) => entry.trim())
+      .map(senderProblem)
+      .find((problem) => problem !== null)
+    if (senderRefusal) {
+      setError(senderRefusal)
+      return
+    }
     setSaving(true)
     setError(null)
     try {
@@ -206,6 +228,8 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
         taxRegistrationNumber: textOrNull(form.taxRegistrationNumber),
         deliveryInstructions: textOrNull(form.deliveryInstructions),
         portalNote: textOrNull(form.portalNote),
+        inboundSenders: parseSenders(form.inboundSenders),
+        autoSend: form.autoSend,
         status: form.status,
         notes: textOrNull(form.notes),
       }
@@ -429,6 +453,27 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
                 </span>
               </label>
             </Field>
+            <Field label="Send their automatic drafts by themselves">
+              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'flex-start' }}>
+                <input
+                  type="checkbox"
+                  checked={form.autoSend}
+                  onChange={(e) => setForm({ ...form, autoSend: e.target.checked })}
+                  style={{ marginTop: '0.25rem' }}
+                />
+                <span style={muted}>
+                  A draft raised by itself when a customer pays is emailed to this supplier after the hold in
+                  settings, as though you had pressed Send - unless somebody changes it first, or something about it
+                  is not certain, in which case it waits for you and you are told why. Only while &ldquo;Send
+                  automatic drafts by themselves&rdquo; is on in settings as well.
+                </span>
+              </label>
+              {/* For information, never a lock: the owner decides. A record of
+                  drafts that keep being changed by hand is the reason not to. */}
+              <div style={{ ...muted, marginTop: '0.375rem', fontWeight: 600 }}>
+                {editRecordSentence(editingId ? records[editingId] : null, RECORD_SIZE)}
+              </div>
+            </Field>
             <Field label="Currency">
               <input style={input} maxLength={3} value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value.toUpperCase() })} />
             </Field>
@@ -543,6 +588,18 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
               hint="Shown to this supplier at the top of every purchase order link you send them, above everything else. Nowhere else - not on the order, not on a packing slip. The place for a standing instruction: quote the account number, ring before delivering, no pallets after three."
             >
               <textarea rows={3} style={input} value={form.portalNote} onChange={(e) => setForm({ ...form, portalNote: e.target.value })} maxLength={2000} />
+            </Field>
+            <Field
+              label="Their paperwork also comes from"
+              hint="Only matters when purchasing files supplier paperwork from email. Email from the address and copy-to above, or from anybody at the same domain, is already recognised as theirs. Add any other address or domain their proformas and invoices come from, one per line - an accounts system on a different domain, say. A free email service such as gmail.com is never accepted as a whole domain: put the person's full address instead."
+            >
+              <textarea
+                rows={2}
+                style={input}
+                value={form.inboundSenders}
+                onChange={(e) => setForm({ ...form, inboundSenders: e.target.value })}
+                placeholder={'accounts@their-billing-system.example\ntheir-other-name.example'}
+              />
             </Field>
             <Field label="Notes" hint="For you, not for them. Nothing here goes on a purchase order.">
               <textarea rows={3} style={input} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

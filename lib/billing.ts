@@ -101,6 +101,37 @@ export function billTotals(input: BillTotalsInput): BillTotals {
 }
 
 /**
+ * The order's own charges a bill for it carries: its carriage and its sale
+ * surcharge, on the FIRST invoice against the order and on no other.
+ *
+ * Carriage is charged once, and so is the surcharge - one figure each on the
+ * order. If anything on the order has been invoiced already, they have very
+ * probably been billed already too, so a later invoice carries neither. The
+ * one rule for every door a bill comes in by: the bill screen's "enter their
+ * invoice" step, the supplier's own link, and an invoice filed from their
+ * email. Leave these off the first bill and it comes in short of their
+ * document by exactly carriage, surcharge and the VAT on both - and so do the
+ * books.
+ *
+ * `lines` are the order's billable lines, where `qtyInvoiced` is what OTHER
+ * bills already hold.
+ */
+export function firstInvoiceCharges(
+  order: { carriageAmount: string | null | undefined; surchargeAmount: string | null | undefined },
+  lines: ReadonlyArray<{ qtyInvoiced: string | number }>,
+): { carriageAmount: string; surchargeAmount: string } {
+  const invoicedBefore = lines.some((line) => Number(line.qtyInvoiced) > 0)
+  if (invoicedBefore) return { carriageAmount: '0', surchargeAmount: '0' }
+  return { carriageAmount: order.carriageAmount || '0', surchargeAmount: order.surchargeAmount || '0' }
+}
+
+/** The highest VAT rate on a bill's lines: what its carriage is taxed at, the
+ *  treatment HMRC expect when delivery is ancillary to the goods. */
+export function highestTaxRate(lines: ReadonlyArray<{ taxRatePercent?: string | number | null }>): string {
+  return String(lines.reduce((max, line) => Math.max(max, Number(line.taxRatePercent) || 0), 0))
+}
+
+/**
  * When a bill falls due: the invoice date plus the supplier's terms.
  *
  * Off the INVOICE date rather than the day it was typed in. A supplier's invoice
@@ -561,14 +592,25 @@ export type CloseOutcome = 'CLOSED' | 'PENDING_CLOSE' | null
  * what a supplier filing their own through the portal leaves behind, and it goes
  * to PENDING_CLOSE instead: everything has happened, and somebody here still has
  * to agree that what the supplier says we owe is what we owe.
+ *
+ * `dropships`: the supplier delivers straight to the customer, so nothing is
+ * ever booked in and the order never reads RECEIVED. Their invoice for the lot
+ * is the nearest thing to "it has all arrived" there is, so a fully invoiced
+ * order of theirs that has gone out - sent, acknowledged, or part booked in by
+ * somebody anyway - is treated as arrived and takes the same path. Not one on
+ * hold: that is somebody here saying wait. Every other supplier is unchanged.
  */
+const DROPSHIP_ARRIVED: readonly string[] = ['SENT', 'ACKNOWLEDGED', 'PART_RECEIVED', 'RECEIVED']
+
 export function closeOutcome(
   status: string,
   lines: InvoicedLine[],
   openReturns: number,
   unsettledBills: number,
+  dropships = false,
 ): CloseOutcome {
-  if (status !== 'RECEIVED') return null
+  const arrived = status === 'RECEIVED' || (dropships && DROPSHIP_ARRIVED.includes(status))
+  if (!arrived) return null
   if (openReturns > 0) return null
   if (!fullyInvoiced(lines)) return null
   return unsettledBills > 0 ? 'PENDING_CLOSE' : 'CLOSED'

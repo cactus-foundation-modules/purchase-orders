@@ -116,6 +116,12 @@ export type PoSupplier = {
    *  document, not the packing slip, not an email. `notes` below is the
    *  opposite: internal, and never leaves this building. */
   portalNote: string | null
+  /** Extra addresses or domains their emailed paperwork comes from, beyond
+   *  `email` and `emailCc`. See lib/inbound-filing.ts. */
+  inboundSenders: string[]
+  /** Their automatic drafts are emailed to them by themselves, after the hold,
+   *  while the site-wide `autoSendEnabled` is on too. See lib/auto-send.ts. */
+  autoSend: boolean
   status: SupplierStatus
   notes: string | null
   orderCount: number
@@ -243,9 +249,22 @@ export type PoOrder = PoOrderSummary & {
   cancelReason: string | null
   closedAt: string | null
   closeReason: string | null
+  /** Sent by the automatic job, which approves it with nobody's name against
+   *  it - the document prints "Sent automatically" instead. */
+  approvedAutomatically: boolean
+  /** Where it stands in the automatic queue, or null for an order never in it.
+   *  See lib/auto-send.ts. */
+  autoSendState: PoAutoSendState | null
+  /** The sentence behind a HELD or REFUSED, or what happened to a SENT. */
+  autoSendNote: string | null
+  /** When a QUEUED draft becomes due, worked out from the hold in settings.
+   *  Null for anything not queued. */
+  autoSendDueAt: string | null
   updatedAt: string
   lines: PoOrderLine[]
 }
+
+export type PoAutoSendState = 'QUEUED' | 'SENT' | 'HELD' | 'REFUSED'
 
 /** One earlier version of an order, as the screen lists them. The snapshot
  *  itself is deliberately not here: it is the whole document, it is only read
@@ -365,7 +384,8 @@ export type PoReceipt = PoReceiptSummary & {
 // the conversation - "this much left us on Tuesday, here is the tracking" - and
 // it is what a packing slip is printed from.
 
-export const SHIPMENT_SOURCES = ['PORTAL', 'ADMIN'] as const
+// INBOX: read off an email carrying the tracking (lib/inbound-tracking.ts).
+export const SHIPMENT_SOURCES = ['PORTAL', 'ADMIN', 'INBOX'] as const
 export type PoShipmentSource = (typeof SHIPMENT_SOURCES)[number]
 
 export type PoShipmentLine = {
@@ -392,6 +412,11 @@ export type PoShipmentSummary = {
   trackingUrl: string | null
   notes: string | null
   source: PoShipmentSource
+  /** The day and window the carrier gave, where an email said. 'YYYY-MM-DD'
+   *  and 'HH:MM', never instants. */
+  deliveryDate: string | null
+  deliverySlotStart: string | null
+  deliverySlotEnd: string | null
   createdAt: string
 }
 
@@ -581,8 +606,9 @@ export const PO_BILL_STATUS_LABELS: Record<PoBillStatus, string> = {
 
 /** Who filed a bill. A draft that arrived through a supplier's own link, with
  *  nobody's login behind it, is not the same object as one somebody here typed -
- *  and the screen says so before anybody approves it. */
-export const BILL_SOURCES = ['ADMIN', 'PORTAL'] as const
+ *  and the screen says so before anybody approves it. INBOX is a draft written
+ *  from their emailed invoice by lib/inbound-run.ts. */
+export const BILL_SOURCES = ['ADMIN', 'PORTAL', 'INBOX'] as const
 export type PoBillSource = (typeof BILL_SOURCES)[number]
 
 export const MATCH_STATUSES = ['NOT_MATCHED', 'MATCHED', 'VARIANCE'] as const
@@ -661,6 +687,9 @@ export type PoBillAttachment = {
 }
 
 export type PoBill = PoBillSummary & {
+  /** One line about the attached file where it is more than this invoice: the
+   *  supplier's whole batch, with this invoice on page 2 of 3. */
+  attachmentNote: string | null
   fxRate: string
   subtotal: string
   carriageAmount: string

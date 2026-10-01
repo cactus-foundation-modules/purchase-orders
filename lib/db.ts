@@ -8,6 +8,7 @@ import type {
   PoOrder,
   PoOrderLine,
   PoOrderSummary,
+  PoAutoSendState,
   PoShipTo,
   PoStatus,
   PoSupplier,
@@ -17,7 +18,8 @@ import type {
   SupplierAccountTerms,
   SupplierStatus,
 } from './types'
-import type { PoAddress } from './config'
+import { getPoConfigCached, type PoAddress } from './config'
+import { autoSendDueAt } from './auto-send'
 import { getCapabilities } from './capabilities'
 import { hasSupplierSkuColumn } from './catalogues'
 
@@ -116,6 +118,10 @@ function mapSupplier(r: Record<string, unknown>): PoSupplier {
     deliveryInstructions: (r.delivery_instructions as string | null) ?? null,
     // A row written before 008 has no column to read, which is no note.
     portalNote: (r.portal_note as string | null) ?? null,
+    // A row written before 017 has no column to read, which is no extra senders.
+    inboundSenders: Array.isArray(r.inbound_senders) ? (r.inbound_senders as string[]) : [],
+    // A row written before 019 has no column to read, which is off.
+    autoSend: Boolean(r.auto_send),
     status: r.status as SupplierStatus,
     notes: (r.notes as string | null) ?? null,
     orderCount: Number(r.order_count ?? 0),
@@ -287,6 +293,11 @@ export type SupplierInput = {
   taxRegistrationNumber: string | null
   deliveryInstructions: string | null
   portalNote: string | null
+  inboundSenders: string[]
+  /** Optional, unlike its neighbours: left out, a new supplier is off and an
+   *  edited one keeps what it had. Only the supplier form sends it, so no
+   *  other writer of this row can switch automatic sending on by accident. */
+  autoSend?: boolean
   status: SupplierStatus
   notes: string | null
 }
@@ -317,7 +328,7 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
         "payment_terms", "payment_terms_days", "account_terms", "lead_time_days", "minimum_order_value",
         "carriage_paid_over", "carriage_charge", "surcharge_threshold", "discount_percent", "default_category_id",
         "default_vat_treatment", "default_vat_rate_code", "tax_registration_number",
-        "delivery_instructions", "portal_note", "status", "notes"
+        "delivery_instructions", "portal_note", "inbound_senders", "auto_send", "status", "notes"
       ) VALUES (
         ${input.name}, ${supplierNameKey(input.name)}, ${input.shopSupplierId}, ${input.shopSupplierName},
         ${input.accountNumber}, ${input.contactName}, ${input.phone}, ${input.email}, ${input.emailCc},
@@ -327,7 +338,8 @@ export async function createSupplier(input: SupplierInput): Promise<string> {
         ${input.minimumOrderValue}::numeric, ${input.carriagePaidOver}::numeric, ${input.carriageCharge}::numeric,
         ${input.surchargeThreshold}::numeric,
         ${input.discountPercent}::numeric, ${input.defaultCategoryId}, ${input.defaultVatTreatment}, ${input.defaultVatRateCode},
-        ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.portalNote}, ${input.status}, ${input.notes}
+        ${input.taxRegistrationNumber}, ${input.deliveryInstructions}, ${input.portalNote},
+        ${input.inboundSenders}::text[], ${input.autoSend ?? false}, ${input.status}, ${input.notes}
       )
       RETURNING "id"
     `
@@ -370,6 +382,8 @@ export async function updateSupplier(id: string, input: SupplierInput): Promise<
         "tax_registration_number" = ${input.taxRegistrationNumber},
         "delivery_instructions" = ${input.deliveryInstructions},
         "portal_note" = ${input.portalNote},
+        "inbound_senders" = ${input.inboundSenders}::text[],
+        "auto_send" = COALESCE(${input.autoSend ?? null}::boolean, "auto_send"),
         "status" = ${input.status},
         "notes" = ${input.notes},
         "updated_at" = now()
@@ -599,6 +613,8 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
      WHERE l."order_id" = ${id}
      ORDER BY l."position" ASC, l."created_at" ASC
   `
+  const autoSendState = (r.auto_send_state as PoAutoSendState | null) ?? null
+  const holdMinutes = autoSendState === 'QUEUED' ? (await getPoConfigCached()).autoSendHoldMinutes : 0
 
   return {
     id: r.id as string,
@@ -653,6 +669,10 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     cancelReason: (r.cancel_reason as string | null) ?? null,
     closedAt: stamp(r.closed_at),
     closeReason: (r.close_reason as string | null) ?? null,
+    approvedAutomatically: Boolean(r.approved_automatically),
+    autoSendState,
+    autoSendNote: (r.auto_send_note as string | null) ?? null,
+    autoSendDueAt: autoSendState === 'QUEUED' ? autoSendDueAt(stamp(r.created_at) ?? '', holdMinutes) : null,
     lineCount: lineRows.length,
     createdAt: stamp(r.created_at) ?? '',
     updatedAt: stamp(r.updated_at) ?? '',
@@ -848,6 +868,9 @@ export type StatusPatch = {
   approvedAt?: boolean
   approvalNote?: string | null
   sentAt?: boolean
+  /** A send by the automatic job, which approves an unapproved order with no
+   *  person's name - see `approved_automatically` in 019. */
+  approvedAutomatically?: boolean
   acknowledgedNote?: string | null
   cancelReason?: string | null
   closeReason?: string | null
@@ -885,6 +908,13 @@ export async function setOrderStatus(
     if (userId) {
       sets.push(
         Prisma.sql`"approved_by_user_id" = COALESCE("approved_by_user_id", ${userId})`,
+        Prisma.sql`"approved_at" = COALESCE("approved_at", now())`,
+      )
+    } else if (patch.approvedAutomatically) {
+      // The same, with nobody to name. Every right-hand side here reads the row
+      // as it was, so the flag is set only where nobody had approved it before.
+      sets.push(
+        Prisma.sql`"approved_automatically" = ("approved_automatically" OR "approved_at" IS NULL)`,
         Prisma.sql`"approved_at" = COALESCE("approved_at", now())`,
       )
     }

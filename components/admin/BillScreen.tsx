@@ -1108,6 +1108,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                     Unfile it
                   </button>
                 )}
+                {bill.attachmentNote && <div style={{ ...muted, flexBasis: '100%' }}>{bill.attachmentNote}</div>}
               </div>
             ) : (
               <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)' }}>

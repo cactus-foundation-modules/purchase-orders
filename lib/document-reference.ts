@@ -1,4 +1,4 @@
-import { pdfText } from '@/modules/purchase-orders/lib/pdf-text'
+import { pdfPages, pdfText } from '@/modules/purchase-orders/lib/pdf-text'
 
 // The supplier's own number, read off the document they sent.
 //
@@ -23,7 +23,7 @@ export type PoDocumentKind = 'proforma' | 'acknowledgement' | 'invoice'
 /** Labels, most specific first. Each is matched against a whole line, and the
  *  value may sit after it on that line or on the line below - which of the two
  *  depends entirely on how the document was drawn. */
-const LABELS: Record<PoDocumentKind, RegExp[]> = {
+export const REFERENCE_LABELS: Record<PoDocumentKind, readonly RegExp[]> = {
   proforma: [
     /\bpro[\s-]?forma\s+(?:invoice\s+)?(?:no|number|nr|num|ref(?:erence)?|#)\b/i,
     /\binvoice\s*(?:no|number|nr|num|#)\b/i,
@@ -54,6 +54,30 @@ const LABELS: Record<PoDocumentKind, RegExp[]> = {
  *  is the last thing we want. */
 const NOT_THEIRS = /\b(?:cust(?:omer)?|your|buyer|client|purchase\s+order|p\.?o\.?)\b/i
 
+/** Two or more spaces, or a tab: what separates two columns that happen to
+ *  share a line, as a two-column invoice reads once it is turned into text.
+ *  Every label below is judged within its own column, never by the whole line:
+ *  "Customer Order No.   PO-00028   Invoice No.   INV-5501" has our label on
+ *  the left and theirs on the right, and reading the line as one threw the
+ *  right-hand one away. */
+const COLUMN_GAP = /\s{2,}|\t/
+
+/** Every place a label appears on a line. */
+function labelHits(line: string, label: RegExp): RegExpExecArray[] {
+  const everywhere = new RegExp(label.source, `${label.flags.replace('g', '')}g`)
+  return [...line.matchAll(everywhere)] as RegExpExecArray[]
+}
+
+/** The words in front of a label, in its own column only. */
+function ownColumnBefore(line: string, index: number): string {
+  return line.slice(0, index).split(COLUMN_GAP).pop() ?? ''
+}
+
+/** Which column of its line a position sits in, counting from 0. */
+function columnAt(line: string, index: number): number {
+  return line.slice(0, index).split(COLUMN_GAP).length - 1
+}
+
 /** What a device calls a file it made itself. Whatever number is in one of these
  *  is a counter or a timestamp, and never a supplier's reference. */
 const CAMERA_NAME = /^(?:img|dsc[nf]?|photo|image|picture|pic|scan(?:ned)?(?:[\s_-]*document)?|screenshot|screen[\s_-]?shot|document|doc)[\s_-]*[\d\s_.:()-]*$/i
@@ -76,16 +100,26 @@ function looksLikeMoney(value: string): boolean {
   return /^[£$€]?\d{1,3}(?:,\d{3})*(?:\.\d{2})$/.test(value) || /^\d+\.\d{2}$/.test(value)
 }
 
-/** Is this a number a supplier would quote back at us? `ours` is our own order
- *  number, which appears on their paperwork under a label of its own and must
- *  never come back as theirs. */
-function acceptable(value: string, ours: string | null): boolean {
+/** Is this a number a supplier would quote back at us? `ours` holds our own
+ *  order numbers, lower-cased, which appear on their paperwork under a label of
+ *  their own and must never come back as theirs. */
+function acceptable(value: string, ours: ReadonlySet<string>): boolean {
   const trimmed = value.trim().replace(/^[:.\-\s]+/, '').replace(/[.,;:]+$/, '')
   if (!SHAPE.test(trimmed)) return false
   if (!/\d/.test(trimmed)) return false
   if (looksLikeADate(trimmed) || looksLikeMoney(trimmed)) return false
-  if (ours && trimmed.toLowerCase() === ours.trim().toLowerCase()) return false
+  if (ours.has(trimmed.toLowerCase())) return false
   return true
+}
+
+/** Our own numbers, in the form `acceptable` compares against. */
+export function ourNumbers(numbers: Iterable<string | null>): Set<string> {
+  const out = new Set<string>()
+  for (const number of numbers) {
+    const trimmed = number?.trim().toLowerCase()
+    if (trimmed) out.add(trimmed)
+  }
+  return out
 }
 
 function tidy(value: string): string {
@@ -106,15 +140,25 @@ export function referenceFromText(
   kind: PoDocumentKind,
   ours: string | null = null,
 ): string | null {
+  return referenceByLabels(text, REFERENCE_LABELS[kind], ourNumbers([ours]))
+}
+
+/**
+ * The reference beside the first of `labels` that has one, most specific label
+ * first. What referenceFromText does for a kind of document, for a caller with
+ * labels of its own (lib/supplier-document.ts, reading credit notes) and more
+ * than one number of ours to steer clear of.
+ */
+export function referenceByLabels(text: string, labels: readonly RegExp[], ours: ReadonlySet<string>): string | null {
   const lines = text.split(/[\r\n]+/).map((line) => line.trim())
 
-  for (const label of LABELS[kind]) {
+  for (const label of labels) {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]!
-      const found = label.exec(line)
+      // Whatever came before the label, in its own column, decides whose number
+      // this is. The first occurrence that is theirs is the one read.
+      const found = labelHits(line, label).find((hit) => !NOT_THEIRS.test(ownColumnBefore(line, hit.index)))
       if (!found) continue
-      // Whatever came before the label decides whose number this is.
-      if (NOT_THEIRS.test(line.slice(0, found.index))) continue
 
       const sameLine = tidy(line.slice(found.index + found[0].length))
       // The rest of the line can carry the value and then some: take the first
@@ -122,11 +166,20 @@ export function referenceFromText(
       const firstWord = sameLine.split(/\s+/)[0] ?? ''
       if (acceptable(firstWord, ours)) return tidy(firstWord)
 
+      // On the lines below, a value laid out in columns sits under its label:
+      // where the line below has as many columns, the one in the label's place
+      // is tried first.
+      const column = columnAt(line, found.index)
+      const columns = line.split(COLUMN_GAP).length
       for (let ahead = 1; ahead <= 3 && i + ahead < lines.length; ahead += 1) {
         const next = lines[i + ahead]!
         if (!next) continue
-        const word = next.split(/\s+/)[0] ?? ''
-        if (acceptable(word, ours)) return tidy(word)
+        const cells = next.split(COLUMN_GAP)
+        const underneath = cells.length === columns ? cells[column] : undefined
+        for (const cell of underneath === undefined ? [next] : [underneath, next]) {
+          const word = cell.trim().split(/\s+/)[0] ?? ''
+          if (acceptable(word, ours)) return tidy(word)
+        }
         // A line that is plainly another label is not a value, but it is also
         // not a reason to stop: labels and values interleave on a drawn page.
       }
@@ -147,6 +200,11 @@ export function referenceFromText(
  * such name yet seen.
  */
 export function referenceFromFilename(filename: string, ours: string | null = null): string | null {
+  return referenceFromFilenameAvoiding(filename, ourNumbers([ours]))
+}
+
+/** referenceFromFilename, steering clear of any number in `ours`. */
+export function referenceFromFilenameAvoiding(filename: string, ours: ReadonlySet<string>): string | null {
   const dot = filename.lastIndexOf('.')
   const stem = (dot === -1 ? filename : filename.slice(0, dot)).trim()
   // A camera, a scanner or a screenshot names its own files, and the number in
@@ -300,6 +358,12 @@ export function dateInText(fragment: string, now: Date = new Date()): string | n
  * lines. A label carrying somebody else's word in front of it - "due date",
  * "delivery date" - is skipped, because a due date read as a tax point puts the
  * payment terms on the bill twice.
+ *
+ * "In front of it" means in its own column. A two-column invoice reads as
+ * "Customer Order No.   PO-00028   Invoice Date      29/09/2026", and the
+ * "Order" belongs to the column on the left, not to the date: judging the whole
+ * line lost every date on that layout. Every place the label appears on a line
+ * is tried, for the same reason.
  */
 export function dateFromText(text: string, now: Date = new Date()): string | null {
   const lines = text.split(/[\r\n]+/).map((line) => line.trim())
@@ -307,14 +371,18 @@ export function dateFromText(text: string, now: Date = new Date()): string | nul
   for (const label of DATE_LABELS) {
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i]!
-      const found = label.exec(line)
-      if (!found) continue
-      const before = line.slice(0, found.index)
-      if (NOT_THE_INVOICE_DATE.test(before)) continue
-      // "Date due" and "Date of delivery" put the disqualifying word after the
-      // label rather than in front of it.
-      const after = line.slice(found.index + found[0].length)
-      if (NOT_THE_INVOICE_DATE.test(after.slice(0, 12))) continue
+      let after: string | null = null
+      for (const found of labelHits(line, label)) {
+        const before = ownColumnBefore(line, found.index)
+        if (NOT_THE_INVOICE_DATE.test(before)) continue
+        // "Date due" and "Date of delivery" put the disqualifying word after the
+        // label rather than in front of it.
+        const rest = line.slice(found.index + found[0].length)
+        if (NOT_THE_INVOICE_DATE.test((rest.split(COLUMN_GAP)[0] ?? '').slice(0, 12))) continue
+        after = rest
+        break
+      }
+      if (after === null) continue
 
       const sameLine = dateInText(after, now)
       if (sameLine) return sameLine
@@ -339,8 +407,15 @@ const TOTAL_LABELS: RegExp[] = [
   /\btotal\s+(?:to\s+pay|payable)\b/i,
   /\btotal\s*\(?\s*(?:inc|incl|including)\b[^)]*\)?/i,
   /\bamount\s+payable\b/i,
-  /\btotal\b/i,
 ]
+
+/** The plain word, last of all, and the only label that is also the heading
+ *  of an items table's last column. */
+const BARE_TOTAL = /\btotal\b/i
+
+/** A cell holding nothing but the currency - "Invoice Total   £   120.00" - is
+ *  stepped over on the way to the figure. */
+const CURRENCY_ONLY = /^(?:[£$€]|GBP|EUR|USD)$/i
 
 /** A label that is about part of the invoice rather than the whole of it. */
 const NOT_THE_TOTAL = /\b(?:sub[\s-]?total|net|goods|vat|tax|discount|carriage|delivery|weight|qty|quantity|lines?|items?|excl?(?:uding)?)\b/i
@@ -348,7 +423,14 @@ const NOT_THE_TOTAL = /\b(?:sub[\s-]?total|net|goods|vat|tax|discount|carriage|d
 /** Money as an invoice prints it: an optional symbol, thousands separators, and
  *  always the two pence. A figure with no decimal places is a quantity, a page
  *  number or a postcode far more often than it is a total. */
-const MONEY = /(?:[£$€]\s?)?(-?\d{1,3}(?:,\d{3})+|-?\d+)\.(\d{2})\b/g
+const MONEY = /(\()?(-)?(?:[£$€]\s?)?(-)?(\d{1,3}(?:,\d{3})+|\d+)\.(\d{2})\b(\))?/g
+
+/** A cell that is a figure and nothing else. */
+const MONEY_CELL = /^\(?-?(?:[£$€]\s?)?-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\)?$/
+
+/** Words after a "Total" that make it a part payment, not what is owed:
+ *  "Total Paid", "Total Payments", "Total Received", "Total Refunded". */
+const NOT_THE_TOTAL_AFTER = /\b(?:paid|payments?|received|refund(?:ed)?)\b/i
 
 /** Every money-looking figure in a fragment, in pounds, in the order printed. */
 function moneyIn(fragment: string): string[] {
@@ -356,7 +438,13 @@ function moneyIn(fragment: string): string[] {
   MONEY.lastIndex = 0
   let match: RegExpExecArray | null
   while ((match = MONEY.exec(fragment)) !== null) {
-    out.push(`${match[1]!.replace(/,/g, '')}.${match[2]}`)
+    const [, open, minusBefore, minusAfter, whole, pence, close] = match
+    // Negative written any of the three usual ways - "-120.00", "-£120.00",
+    // "£-120.00" or "(120.00)" - is negative, the same way each time. A hyphen
+    // straight after a letter or digit is joining words, not a minus sign.
+    const joined = minusBefore !== undefined && /[A-Za-z0-9]/.test(fragment[match.index + (open ? 1 : 0) - 1] ?? '')
+    const negative = ((minusBefore !== undefined && !joined) || minusAfter !== undefined) !== Boolean(open && close)
+    out.push(`${negative ? '-' : ''}${whole!.replace(/,/g, '')}.${pence}`)
   }
   return out
 }
@@ -371,35 +459,131 @@ function moneyIn(fragment: string): string[] {
  * two disagree the bill says so rather than either of them winning.
  */
 export function totalFromText(text: string): string | null {
+  for (const label of ALL_TOTAL_LABELS) {
+    const found = totalByLabel(text, label)
+    if (found) return found
+  }
+  return null
+}
+
+/** Every total label, most specific first, the bare word last. */
+const ALL_TOTAL_LABELS: readonly RegExp[] = [...TOTAL_LABELS, BARE_TOTAL]
+
+/** The figure beside or under one particular label, or null. */
+function totalByLabel(text: string, label: RegExp): string | null {
   const lines = text.split(/[\r\n]+/).map((line) => line.trim())
 
-  for (const label of TOTAL_LABELS) {
-    for (let i = 0; i < lines.length; i += 1) {
-      const line = lines[i]!
-      const found = label.exec(line)
-      if (!found) continue
-      const prefix = line.slice(0, found.index)
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]!
+    let after: string | null = null
+    let column = 0
+    for (const found of labelHits(line, label)) {
+      const prefix = ownColumnBefore(line, found.index)
       // "Sub-total" and "Subtotal" both contain a perfectly good \btotal\b -
       // a hyphen is a word boundary - so the character in front of the match
       // decides whether this is the word or the end of a longer one.
       if (/[A-Za-z-]$/.test(prefix)) continue
+      // "Sub Total" with a space is the same word written apart.
+      if (/\bsub\s*$/i.test(prefix)) continue
       if (NOT_THE_TOTAL.test(prefix)) continue
-
-      const after = line.slice(found.index + found[0].length)
+      const rest = line.slice(found.index + found[0].length)
       // "Total excluding VAT" and "Total VAT" are both real labels and neither
       // is the figure being asked for here.
-      if (NOT_THE_TOTAL.test(after.slice(0, 20))) continue
-
-      const here = moneyIn(after)
-      if (here.length > 0) return here[here.length - 1]!
-
-      for (let ahead = 1; ahead <= 3 && i + ahead < lines.length; ahead += 1) {
-        const next = lines[i + ahead]!
-        if (!next) continue
-        const ahead2 = moneyIn(next)
-        if (ahead2.length > 0) return ahead2[ahead2.length - 1]!
-      }
+      const ownRest = (rest.split(COLUMN_GAP)[0] ?? '').slice(0, 20)
+      if (NOT_THE_TOTAL.test(ownRest)) continue
+      // "Total Paid 50.00" is what has been paid, not what is owed.
+      if (NOT_THE_TOTAL_AFTER.test(ownRest)) continue
+      // The figure is in the label's own column or, across a gap, the next
+      // column that is more than a currency sign. Past that is somebody
+      // else's figure - unless everything past it is figures, which is a
+      // row of net, VAT and gross, and the last of those is the total.
+      // (A two-figure "Total 100.00 20.00" row stays ambiguous: the last is
+      // taken, as it always was, and is the VAT on a VAT analysis.)
+      const cells = rest.split(COLUMN_GAP)
+      const following = cells.slice(1).map((cell) => cell.trim()).filter((cell) => cell && !CURRENCY_ONLY.test(cell))
+      const allFigures = following.length > 0 && following.every((cell) => MONEY_CELL.test(cell))
+      if (allFigures && (!cells[0]!.trim() || MONEY_CELL.test(cells[0]!.trim()))) after = following[following.length - 1]!
+      else after = moneyIn(cells[0]!).length ? cells[0]! : (following[0] ?? '')
+      column = columnAt(line, found.index)
+      break
     }
+    if (after === null) continue
+
+    const here = moneyIn(after)
+    if (here.length > 0) return here[here.length - 1]!
+    const columns = line.split(COLUMN_GAP).length
+    // A bare "Total" with no figure beside it on a line of several columns is
+    // the heading of an items table - "Qty   Price   Total" - and the line
+    // below it is the first item's total, not the invoice's. A more specific
+    // label in a row of headings - "Net   VAT   Grand Total" - is not.
+    if (label === BARE_TOTAL && columns > 1) continue
+
+    for (let ahead = 1; ahead <= 3 && i + ahead < lines.length; ahead += 1) {
+      const next = lines[i + ahead]!
+      if (!next) continue
+      // Under a row of headings with as many values, the figure sits in the
+      // label's own column; the others are somebody else's figures. Anywhere
+      // else, the last figure on the line, as it always was.
+      const cells = next.split(COLUMN_GAP).filter((cell) => !CURRENCY_ONLY.test(cell.trim()))
+      const candidates = columns > 1 && cells.length === columns ? moneyIn(cells[column]!) : moneyIn(next)
+      if (candidates.length > 0) return candidates[candidates.length - 1]!
+    }
+  }
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// Several documents in one file
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the documents in a multi-page file begin and end, from each page's own
+ * reference: 1-based page ranges, inclusive, in order.
+ *
+ * A new document starts on a page whose reference differs from the one the
+ * document so far carries. A page with no reference of its own - the second
+ * page of a long invoice - belongs to the document before it, and pages with
+ * no reference before the first one that has one belong with that first one.
+ * One reference across every page is one document.
+ */
+export function segmentByReference(references: ReadonlyArray<string | null>): Array<[number, number]> {
+  const ranges: Array<[number, number]> = []
+  let start = 1
+  let current: string | null = null
+  references.forEach((reference, index) => {
+    const page = index + 1
+    const key = reference?.trim().toLowerCase() || null
+    if (key && current && key !== current) {
+      ranges.push([start, page - 1])
+      start = page
+    }
+    if (key) current = key
+  })
+  if (references.length) ranges.push([start, references.length])
+  return ranges
+}
+
+/** How many pages the first invoice in a file runs to. */
+function firstDocumentPageCount(pages: readonly string[], ours: string | null): number {
+  const ranges = segmentByReference(pages.map((page) => referenceFromText(page, 'invoice', ours)))
+  return ranges[0]?.[1] ?? pages.length
+}
+
+/**
+ * A document's total, given its pages. A long invoice prints a running "Total"
+ * at the foot of every page and the one that counts at the foot of the last,
+ * so for each label the last page is asked first and the whole document only
+ * if it has none.
+ */
+export function documentTotal(pages: readonly string[]): string | null {
+  const last = pages[pages.length - 1]
+  const all = pages.join('\n')
+  // Label by label, so a specific label anywhere - "Invoice Total" on page one -
+  // beats the bare word on the last page, which on a page of terms is "total
+  // liability limited to 1.00 per item".
+  for (const label of ALL_TOTAL_LABELS) {
+    const found = (pages.length > 1 && last ? totalByLabel(last, label) : null) ?? totalByLabel(all, label)
+    if (found) return found
   }
   return null
 }
@@ -427,8 +611,16 @@ export function guessInvoiceDetails(
   now: Date = new Date(),
 ): GuessedInvoice {
   let text: string | null = null
+  let firstPages: string[] | null = null
   try {
-    text = pdfText(bytes)
+    // A file holding several invoices is read for the first of them only, as
+    // the screen this fills has room for one. lib/supplier-document.ts is what
+    // reads the rest.
+    const pages = pdfPages(bytes)
+    firstPages = pages ? pages.slice(0, firstDocumentPageCount(pages, ours)) : null
+    const first = firstPages?.join('\n') ?? ''
+    if (!first.trim()) firstPages = null
+    text = firstPages ? first : pdfText(bytes)
   } catch (error) {
     // Reading somebody else's PDF is best-effort by definition, and a file that
     // breaks the reader must not break the upload it arrived on.
@@ -438,6 +630,6 @@ export function guessInvoiceDetails(
   return {
     reference: (text ? referenceFromText(text, 'invoice', ours) : null) ?? referenceFromFilename(filename, ours),
     date: text ? dateFromText(text, now) : null,
-    total: text ? totalFromText(text) : null,
+    total: firstPages ? documentTotal(firstPages) : text ? totalFromText(text) : null,
   }
 }

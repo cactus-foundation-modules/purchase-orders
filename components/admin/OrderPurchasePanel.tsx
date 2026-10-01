@@ -12,6 +12,9 @@ import { formatMoney } from '@/modules/purchase-orders/lib/money'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { orderTotals } from '@/modules/purchase-orders/lib/totals'
 import { orderStatusLabel } from '@/modules/purchase-orders/lib/proforma-stage'
+import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
+import { autoSendDueAt, autoSendLine } from '@/modules/purchase-orders/lib/auto-send'
+import { getSiteTimezone } from '@/lib/config/timezone.server'
 import { RaisePurchaseOrders } from './RaisePurchaseOrders'
 
 // Contributed to shop's `shop.order-detail-panels` point, which hands us
@@ -57,22 +60,58 @@ export async function OrderPurchasePanel({
 
   const adminPath = (await headers()).get('x-cactus-admin-path') ?? ''
 
+  // Only read where a draft is actually in the automatic queue, or was.
+  const queued = raised.some((po) => po.autoSendState)
+  const [timezone, config] = queued ? await Promise.all([getSiteTimezone(), getPoConfigCached()]) : ['UTC', null]
+  const now = new Date()
+  const autoLines = new Map(
+    raised.map((po) => [
+      po.id,
+      config
+        ? autoSendLine(
+            {
+              status: po.status,
+              autoSendState: po.autoSendState,
+              autoSendNote: po.autoSendNote,
+              autoSendDueAt: po.autoSendState === 'QUEUED' ? autoSendDueAt(po.createdAt, config.autoSendHoldMinutes) : null,
+            },
+            now,
+            timezone,
+          )
+        : null,
+    ]),
+  )
+
   return (
     <section className="sox-card">
       <div className="sox-card-head"><h2>Purchasing</h2></div>
       <div className="sox-card-body" style={{ display: 'grid', gap: '1rem' }}>
         {raised.length > 0 && (
           <div style={{ display: 'grid', gap: '0.375rem' }}>
-            {raised.map((po) => (
-              <div key={po.id} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
-                <a href={`/${adminPath}/m/purchase-orders/orders/${po.id}`} style={{ fontWeight: 600 }}>{po.number}</a>
-                <span>{po.supplierName}</span>
-                <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8125rem' }}>
-                  {orderStatusLabel(po)} · {formatMoney(po.total, po.currency)}
-                  {po.raisedAutomatically && ' · drafted automatically when this order was paid'}
-                </span>
-              </div>
-            ))}
+            {raised.map((po) => {
+              const auto = autoLines.get(po.id)
+              return (
+                <div key={po.id} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'baseline' }}>
+                  <a href={`/${adminPath}/m/purchase-orders/orders/${po.id}`} style={{ fontWeight: 600 }}>{po.number}</a>
+                  <span>{po.supplierName}</span>
+                  <span style={{ color: 'var(--color-text-secondary)', fontSize: '0.8125rem' }}>
+                    {orderStatusLabel(po)} · {formatMoney(po.total, po.currency)}
+                    {po.raisedAutomatically && ' · drafted automatically when this order was paid'}
+                  </span>
+                  {auto && (
+                    <span
+                      style={{
+                        flexBasis: '100%',
+                        fontSize: '0.8125rem',
+                        color: auto.tone === 'warning' ? 'var(--color-warning)' : 'var(--color-text-secondary)',
+                      }}
+                    >
+                      {auto.text}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 

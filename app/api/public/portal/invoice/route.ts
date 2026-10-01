@@ -12,7 +12,7 @@ import { portalInvoiceLines } from '@/modules/purchase-orders/lib/portal-invoice
 import {
   DuplicateInvoiceError, createBill, listBillableLines, refreshBillMatch, setBillAttachment,
 } from '@/modules/purchase-orders/lib/bills'
-import { billTotals, dueDateFor } from '@/modules/purchase-orders/lib/billing'
+import { billTotals, dueDateFor, firstInvoiceCharges, highestTaxRate } from '@/modules/purchase-orders/lib/billing'
 import { settleOrder } from '@/modules/purchase-orders/lib/order-settle'
 import { portalNoticeRecipient, recordPortalEvent, resolvePortalToken } from '@/modules/purchase-orders/lib/portal'
 import { hashPortalIp } from '@/modules/purchase-orders/lib/portal-token'
@@ -102,7 +102,16 @@ export async function POST(request: NextRequest) {
   const invoiceDate = fields.date ?? guess.date ?? new Date().toISOString().slice(0, 10)
   const statedTotal = (fields.total ?? '').trim() || guess.total || null
 
-  const totals = billTotals({ lines: drafted.lines })
+  // The order's carriage and surcharge on its first invoice, as on the bill
+  // screen (lib/billing.ts firstInvoiceCharges). Without them the draft came in
+  // short of their document by both, and the VAT on them.
+  const charges = firstInvoiceCharges(order, billable)
+  const totals = billTotals({
+    lines: drafted.lines,
+    carriageAmount: charges.carriageAmount,
+    carriageTaxRatePercent: highestTaxRate(drafted.lines),
+    surchargeAmount: charges.surchargeAmount,
+  })
 
   // The file goes up BEFORE the bill is written, and on purpose. A duplicate
   // invoice number is the one failure that actually happens here - a supplier

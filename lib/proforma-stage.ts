@@ -14,10 +14,14 @@ import { PO_STATUS_LABELS, type PoStatus } from '@/modules/purchase-orders/lib/t
 // fortnight is true and useless; "Proforma received" is the same fact with the
 // bit somebody can act on left in.
 //
-// It applies to SENT and nothing else. Once a supplier has acknowledged an order
-// - which on these terms they cannot do until the money has moved - the
-// acknowledgement is the more useful fact, and the proforma card on the order
-// carries the detail either way.
+// It applies to SENT, and to ACKNOWLEDGED while the proforma is unpaid. The
+// supplier's own link will not let them confirm an order on these terms until
+// the money has moved, but their emailed sales order does exactly that whenever
+// they send it - and a supplier who has accepted the order has acknowledged it
+// (lib/inbound-run.ts moves it straight away). Dropping the stage there would
+// lose the one badge that says money is owed, so an acknowledged order with its
+// proforma unpaid says both. Once the proforma is paid the acknowledgement is
+// the more useful fact on its own, and the proforma card carries the detail.
 
 export type PoProformaStage =
   /** Not on proforma terms, or not at a point where the proforma is the story. */
@@ -41,7 +45,12 @@ export type PoStageFacts = {
 }
 
 export function proformaStage(order: PoStageFacts): PoProformaStage {
-  if (!order.proformaRequired || order.status !== 'SENT') return 'NONE'
+  if (!order.proformaRequired) return 'NONE'
+  if (order.status === 'ACKNOWLEDGED') {
+    if (order.proformaPaid) return 'NONE'
+    return order.proformaReceived ? 'RECEIVED' : 'AWAITED'
+  }
+  if (order.status !== 'SENT') return 'NONE'
   if (order.proformaPaid) return 'PAID'
   return order.proformaReceived ? 'RECEIVED' : 'AWAITED'
 }
@@ -52,11 +61,20 @@ const STAGE_LABELS: Record<Exclude<PoProformaStage, 'NONE'>, string> = {
   PAID: 'Proforma paid',
 }
 
+/** The same stages on an order they have already acknowledged. PAID never
+ *  appears here: paid and acknowledged is plain "Acknowledged". */
+const ACKNOWLEDGED_LABELS: Record<Exclude<PoProformaStage, 'NONE' | 'PAID'>, string> = {
+  AWAITED: 'Acknowledged, proforma awaited',
+  RECEIVED: 'Acknowledged, proforma to pay',
+}
+
 /** What the badge says: the ordinary status label, or where the order stands in
  *  the proforma dance while that is the only thing happening to it. */
 export function orderStatusLabel(order: PoStageFacts): string {
   const stage = proformaStage(order)
-  return stage === 'NONE' ? PO_STATUS_LABELS[order.status] : STAGE_LABELS[stage]
+  if (stage === 'NONE') return PO_STATUS_LABELS[order.status]
+  if (order.status === 'ACKNOWLEDGED' && stage !== 'PAID') return ACKNOWLEDGED_LABELS[stage]
+  return STAGE_LABELS[stage]
 }
 
 /** Whether the next move is OURS. Exactly one stage qualifies: their invoice is
