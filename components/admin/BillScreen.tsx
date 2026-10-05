@@ -11,7 +11,7 @@ import {
   PO_VAT_RATE_CODES, PO_VAT_RATE_LABELS, PO_VAT_TREATMENTS, PO_VAT_TREATMENT_LABELS,
 } from '@/modules/purchase-orders/lib/types'
 import {
-  billTotals, dueDateFor, isBillEditable, isBillPostable, totalMismatch, varianceTotal,
+  billTotals, dueDateFor, hasApprovedBillVariance, isBillEditable, isBillPostable, totalMismatch, varianceTotal,
   type PoBillTransition,
 } from '@/modules/purchase-orders/lib/billing'
 import { readBooksOutcome } from '@/modules/purchase-orders/lib/books-outcome'
@@ -498,6 +498,7 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
   if (!isNew && !bill) return <div className="alert alert-danger">That bill is not here any more.</div>
 
   const flags = bill?.variance ?? []
+  const approvedVariance = bill !== null && hasApprovedBillVariance(bill.status)
 
   return (
     <div>
@@ -1063,7 +1064,9 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                   <strong>
                     <Money value={varianceTotal(flags)} currency={bill.currency} />
                   </strong>{' '}
-                  of this invoice does not agree with the order:
+                  {approvedVariance
+                    ? 'of this invoice was approved despite differing from the order:'
+                    : 'of this invoice does not agree with the order:'}
                 </p>
                 <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
                   {flags.map((flag, index) => (
@@ -1078,8 +1081,9 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
                   ))}
                 </ul>
                 <p style={{ ...muted, margin: '0.75rem 0 0' }}>
-                  None of this stops you approving the invoice. Sometimes the supplier is right and the extra two
-                  are being kept - what matters is that the decision is on the record rather than in somebody&rsquo;s head.
+                  {approvedVariance
+                    ? 'The difference was accepted when this bill was approved, and is kept here as part of that record.'
+                    : 'None of this stops you approving the invoice. Sometimes the supplier is right and the extra two are being kept - what matters is that the decision is on the record rather than in somebody&rsquo;s head.'}
                 </p>
               </>
             )}

@@ -404,6 +404,15 @@ export function varianceTotal(flags: PoBillVariance[]): string {
   return fromPence(flags.reduce((sum, flag) => sum + scaled(flag.amount, 2), 0))
 }
 
+/**
+ * A variance never becomes a match merely because somebody agrees to pay it.
+ * This is a separate answer for the screen: after approval, the remaining
+ * warning is the record of that decision rather than an outstanding task.
+ */
+export function hasApprovedBillVariance(status: PoBillStatus): boolean {
+  return status === 'APPROVED' || status === 'POSTED'
+}
+
 // ---------------------------------------------------------------------------
 // The state machine
 // ---------------------------------------------------------------------------

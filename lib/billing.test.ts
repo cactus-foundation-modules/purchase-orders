@@ -5,6 +5,7 @@ import {
   checkBillTransition,
   dueDateFor,
   fullyInvoiced,
+  hasApprovedBillVariance,
   isBillEditable,
   isMatchLive,
   closeOutcome,
@@ -344,6 +345,19 @@ describe('matchBill', () => {
     )
     // 100 of price drift, 220 of goods nobody has seen, 18 nobody ordered.
     expect(varianceTotal(match.flags)).toBe('338.00')
+  })
+})
+
+describe('hasApprovedBillVariance', () => {
+  it('keeps an approved exception visible as a recorded decision', () => {
+    expect(hasApprovedBillVariance('APPROVED')).toBe(true)
+    expect(hasApprovedBillVariance('POSTED')).toBe(true)
+  })
+
+  it('leaves a draft, query or voided bill as something not yet accepted', () => {
+    expect(hasApprovedBillVariance('DRAFT')).toBe(false)
+    expect(hasApprovedBillVariance('QUERIED')).toBe(false)
+    expect(hasApprovedBillVariance('VOID')).toBe(false)
   })
 })
 
