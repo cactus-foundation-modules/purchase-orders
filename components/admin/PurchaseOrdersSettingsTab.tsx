@@ -18,11 +18,19 @@ const HOSTED_EMAIL_SLOT = 'purchase-orders.settings-emails'
 
 const rowGrid = { display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' } as const
 
+export const PURCHASE_ORDER_SETTINGS_TABS = [
+  { id: 'buying', label: 'Buying basics' },
+  { id: 'documents', label: 'Documents' },
+  { id: 'automation', label: 'Automation' },
+] as const
+type SettingsTab = (typeof PURCHASE_ORDER_SETTINGS_TABS)[number]['id']
+
 export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSettingsTabProps = {}) {
   const [config, setConfig] = useState<PoConfig | null>(null)
   const [capabilities, setCapabilities] = useState<PoCapabilities | null>(null)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<SettingsTab>('buying')
 
   useEffect(() => {
     fetch('/api/m/purchase-orders/admin/settings')
@@ -91,6 +99,22 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       )}
 
+      <nav aria-label="Purchase Orders settings" style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '1rem', borderBottom: '1px solid var(--color-border)' }}>
+        {PURCHASE_ORDER_SETTINGS_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            aria-current={activeTab === tab.id ? 'page' : undefined}
+            className={activeTab === tab.id ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
+            style={{ borderRadius: '6px 6px 0 0', marginBottom: '-1px' }}
+            onClick={() => setActiveTab(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      {activeTab === 'buying' && <>
       <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Numbering</h3>
         <div style={rowGrid}>
@@ -267,6 +291,9 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
+      </>}
+
+      {activeTab === 'documents' && <>
       <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Who is buying</h3>
         <p style={{ ...muted, marginTop: 0, marginBottom: '0.75rem' }}>
@@ -370,6 +397,9 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
+      </>}
+
+      {activeTab === 'automation' && <>
       <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Reordering</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -630,6 +660,8 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
           asks nothing else about it. Whatever the panel needs - its own fetch,
           its own save, its own permission check - is its own module's business. */}
       {hostedSettingsSlots?.[HOSTED_EMAIL_SLOT]}
+
+      </>}
 
       <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
         <button className="btn btn-primary btn-sm" onClick={save}>
