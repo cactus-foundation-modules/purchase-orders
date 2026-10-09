@@ -22,6 +22,8 @@ import { isFreeMailDomain } from './inbound-filing'
 //  - parcel carriers' deep links, named off a short table of their hosts, and
 //    DPD's follow-my-parcel link with its code;
 //  - Multidrop-style links, /<code>/<postcode>, used by several delivery firms;
+//  - AIT Home Delivery's short link, aithd.com/<code> (or aithd.de), whose code
+//    is the parcel and may be letters only;
 //  - a number written beside a "Consignment", "Tracking number" or "Parcel"
 //    label, spaces and all ("Your parcel: 1234 5678 901 234");
 //  - any other link whose address mentions "track" AND carries something that
@@ -127,7 +129,17 @@ const CARRIER_HOSTS: ReadonlyArray<[RegExp, string]> = [
   [/(^|\.)tuffnells\.co\.uk$/, 'Tuffnells'],
   [/(^|\.)palletways\.com$/, 'Palletways'],
   [/(^|\.)gfsdeliver\.com$/, 'GFS'],
+  [/(^|\.)(aithd\.(com|de)|aitworldwide\.com)$/, 'AIT'],
 ]
+
+/** AIT Home Delivery's short link: 'https://aithd.com/kz0vkrz', or aithd.de for
+ *  their German site. The code is the parcel - their own page asks their feed
+ *  with it - and is often letters only, so it is read here by shape rather
+ *  than left to the "names a parcel" test below, which wants a digit. The
+ *  same pattern as shop's lib/tracking/ait-link.ts; their long
+ *  '/<client>/<order>' address is not a key their feed takes, and is refused. */
+const AIT_HOST = /^(?:www\.)?aithd\.(com|de)$/
+const AIT_CODE = /^[A-Za-z0-9]{5,16}$/
 
 /** Links that are never tracking whatever they say: pixels, click counters,
  *  redirect wrappers (a link carrying another link - an advertising
@@ -203,6 +215,14 @@ export function readTrackingLink(raw: string): LinkFind | null {
   const dpdParcel = /track\.dpd\.co\.uk\/parcels\/(\d{8,20})/i.exec(href)
   if (dpdParcel) {
     return { carrier: 'DPD', trackingNumber: dpdParcel[1]!, trackingUrl: href, shortCode: null, postcode: null }
+  }
+  // AIT's short link, stored in the one shape shop keeps it in: no 'www.', no
+  // query, whichever of their two sites it was given.
+  const ait = AIT_HOST.exec(host)
+  if (ait) {
+    const code = segments.length === 1 ? segments[0]! : ''
+    if (!AIT_CODE.test(code)) return null
+    return { carrier: 'AIT', trackingNumber: null, trackingUrl: `https://aithd.${ait[1]!}/${code}`, shortCode: code, postcode: null }
   }
   // Multidrop-style: /<code>/<postcode>, the postcode with no space.
   if (host === 'multidrop.link' || host.endsWith('.multidrop.link')) {
@@ -460,6 +480,9 @@ export function linkFamily(url: string | null | undefined): string | null {
   const host = parsed.hostname.toLowerCase()
   if (/(^|\.)dpd(local)?\.(co\.uk|com|ie)$/.test(host)) return 'dpd'
   if (host === 'multidrop.link' || host.endsWith('.multidrop.link')) return 'multidrop'
+  // Their two sites answer from different feeds, so a code is AIT's per site.
+  const ait = AIT_HOST.exec(host)
+  if (ait) return `aithd.${ait[1]!}`
   return host
 }
 
@@ -490,7 +513,8 @@ export function trackingKeyOf(
 // Whose links to believe
 // ---------------------------------------------------------------------------
 
-/** Hosts known to belong to a carrier: the host table above, the
+/** Hosts known to belong to a carrier: the host table above (AIT's aithd
+ *  links included), the
  *  Multidrop-style service, and the GFS scan page shop already reads. A link
  *  to one of these goes where it says. */
 const KNOWN_TRACKING_HOSTS: readonly RegExp[] = [

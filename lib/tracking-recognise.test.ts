@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  dayIn, isBarePublicSuffix, isTrustedTrackingLink, linkFamily, normalisePostcode, ownLines, readTrackingLink, recogniseTracking,
+  carrierForHost, dayIn, isBarePublicSuffix, isTrustedTrackingLink, linkFamily, normalisePostcode, ownLines, readTrackingLink, recogniseTracking,
   registrableDomain, slotIn, trackingKeyOf,
 } from './tracking-recognise'
 
@@ -184,6 +184,50 @@ describe('links', () => {
   it('reads a Multidrop-style link with or without its postcode', () => {
     expect(readTrackingLink('https://multidrop.link/Z1Y2X3/SW1A1AA')).toMatchObject({ shortCode: 'Z1Y2X3', postcode: 'SW1A 1AA' })
     expect(readTrackingLink('https://multidrop.link/Z1Y2X3')).toMatchObject({ shortCode: 'Z1Y2X3', postcode: null })
+  })
+})
+
+describe('AIT Home Delivery', () => {
+  const aitDespatch = `
+Your order from Example Furniture Ltd is on its way
+Our partner AIT Home Delivery will be in touch to book a day.
+Track your delivery: https://aithd.com/kzqvwrx?utm_source=email
+Kind regards
+`
+
+  it('reads their short link, a code with no digits in it, as the parcel', () => {
+    expect(readTrackingLink('https://aithd.com/kzqvwrx')).toEqual({
+      carrier: 'AIT', trackingNumber: null, trackingUrl: 'https://aithd.com/kzqvwrx', shortCode: 'kzqvwrx', postcode: null,
+    })
+    expect(readTrackingLink('https://aithd.com/kz0vkrz')).toMatchObject({ shortCode: 'kz0vkrz' })
+    // The German site keeps its own address; 'www.' and a query come off.
+    expect(readTrackingLink('https://www.aithd.de/AbCdEfG/?ref=sms')).toMatchObject({ trackingUrl: 'https://aithd.de/AbCdEfG', shortCode: 'AbCdEfG' })
+  })
+
+  it('refuses their long address, a code too short, and the survey', () => {
+    expect(readTrackingLink('https://aithd.com/exampleclient/123456789')).toBeNull()
+    expect(readTrackingLink('https://aithd.com/abc')).toBeNull()
+    expect(readTrackingLink('https://aithd.com/')).toBeNull()
+    expect(readTrackingLink('https://aithd.com/kzqvwrx?rate=5')).toBeNull()
+  })
+
+  it('reads a despatch email from their own domain, and believes the link', () => {
+    const read = recogniseTracking({ subject: 'Your delivery', bodyText: aitDespatch, today: TODAY })
+    expect(read.candidates).toEqual([
+      { carrier: 'AIT', trackingNumber: null, trackingUrl: 'https://aithd.com/kzqvwrx', shortCode: 'kzqvwrx' },
+    ])
+    expect(isTrustedTrackingLink('https://aithd.com/kzqvwrx', 'noreply@aitworldwide.com')).toBe(true)
+    // Their despatch emails come from their parent company's domain: named AIT too.
+    expect(carrierForHost('mail.aitworldwide.com')).toBe('AIT')
+    // A known carrier, so believed whoever forwards it on.
+    expect(isTrustedTrackingLink('https://aithd.de/kzqvwrx', 'despatch@supplier.example')).toBe(true)
+    expect(isTrustedTrackingLink('https://aithd.com.evil.example/kzqvwrx', 'noreply@aitworldwide.com')).toBe(false)
+  })
+
+  it('keys a code per site', () => {
+    expect(linkFamily('https://www.aithd.com/kzqvwrx')).toBe('aithd.com')
+    expect(linkFamily('https://aithd.de/kzqvwrx')).toBe('aithd.de')
+    expect(trackingKeyOf({ trackingNumber: null, shortCode: 'kzqvwrx', trackingUrl: 'https://aithd.com/kzqvwrx' })).toBe('CODE:aithd.com:kzqvwrx')
   })
 })
 
