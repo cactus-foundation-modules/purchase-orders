@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import type { ModuleSettingsTabProps } from '@/lib/modules/hosted-settings'
 import type { PoConfig } from '@/modules/purchase-orders/lib/config'
 import type { PoCapabilities } from '@/modules/purchase-orders/lib/capabilities'
+import { TabStrip } from '@/components/admin/TabStrip'
+import { SettingsHeaderActions, SettingsHeaderStatus } from '@/components/admin/SettingsHeaderActions'
 import { card, Field, input, muted } from './ui'
 
 // Purchase Orders' own settings tab. Nothing here belongs on a core settings
@@ -92,29 +94,23 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
   if (!config) return <p>Loading…</p>
 
   return (
-    <div style={{ maxWidth: 760 }}>
+    <div>
       {error && (
         <div className="alert alert-danger" style={{ marginBottom: '1rem' }}>
           {error}
         </div>
       )}
 
-      <nav aria-label="Purchase Orders settings" style={{ display: 'flex', gap: '0.375rem', flexWrap: 'wrap', marginBottom: '1rem', borderBottom: '1px solid var(--color-border)' }}>
-        {PURCHASE_ORDER_SETTINGS_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            aria-current={activeTab === tab.id ? 'page' : undefined}
-            className={activeTab === tab.id ? 'btn btn-primary btn-sm' : 'btn btn-secondary btn-sm'}
-            style={{ borderRadius: '6px 6px 0 0', marginBottom: '-1px' }}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <TabStrip
+        items={PURCHASE_ORDER_SETTINGS_TABS.map((tab) => ({
+          key: tab.id,
+          label: tab.label,
+          active: activeTab === tab.id,
+          onClick: () => setActiveTab(tab.id),
+        }))}
+      />
 
-      {activeTab === 'buying' && <>
+      {activeTab === 'buying' && <div className="settings-masonry">
       <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Numbering</h3>
         <div style={rowGrid}>
@@ -291,9 +287,9 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      </>}
+      </div>}
 
-      {activeTab === 'documents' && <>
+      {activeTab === 'documents' && <div className="settings-masonry">
       <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Who is buying</h3>
         <p style={{ ...muted, marginTop: 0, marginBottom: '0.75rem' }}>
@@ -397,9 +393,9 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
-      </>}
+      </div>}
 
-      {activeTab === 'automation' && <>
+      {activeTab === 'automation' && <div className="settings-masonry">
       <div style={card}>
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Reordering</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -661,14 +657,14 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
           its own save, its own permission check - is its own module's business. */}
       {hostedSettingsSlots?.[HOSTED_EMAIL_SLOT]}
 
-      </>}
+      </div>}
 
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-        <button className="btn btn-primary btn-sm" onClick={save}>
-          Save settings
+      <SettingsHeaderActions>
+        <SettingsHeaderStatus message={saved ? 'Saved' : null} />
+        <button className="btn btn-primary" onClick={save}>
+          Save changes
         </button>
-        {saved && <span style={{ color: 'var(--color-success)', fontSize: 'var(--text-sm)' }}>Saved</span>}
-      </div>
+      </SettingsHeaderActions>
     </div>
   )
 }
