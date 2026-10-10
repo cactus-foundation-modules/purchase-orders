@@ -6,7 +6,7 @@ import type { PoConfig } from '@/modules/purchase-orders/lib/config'
 import type { PoCapabilities } from '@/modules/purchase-orders/lib/capabilities'
 import { TabStrip } from '@/components/admin/TabStrip'
 import { SettingsHeaderActions, SettingsHeaderStatus } from '@/components/admin/SettingsHeaderActions'
-import { card, Field, input, muted } from './ui'
+import { Field, input, muted } from './ui'
 
 // Purchase Orders' own settings tab. Nothing here belongs on a core settings
 // page, and nothing core owns belongs here.
@@ -18,7 +18,7 @@ import { card, Field, input, muted } from './ui'
 // without one, and an empty slot renders nothing at all - no heading, no gap.
 const HOSTED_EMAIL_SLOT = 'purchase-orders.settings-emails'
 
-const rowGrid = { display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' } as const
+const rowGrid = { display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, max(18rem, calc(50% - 0.75rem))), 1fr))' } as const
 
 export const PURCHASE_ORDER_SETTINGS_TABS = [
   { id: 'buying', label: 'Buying basics' },
@@ -111,7 +111,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
       />
 
       {activeTab === 'buying' && <div className="settings-masonry">
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Numbering</h3>
         <div style={rowGrid}>
           <Field label="Order number prefix">
@@ -132,7 +132,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Approvals</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
           <input type="checkbox" checked={config.approvalRequired} onChange={(e) => set('approvalRequired', e.target.checked)} />
@@ -155,7 +155,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         )}
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Checking what arrives</h3>
         <div style={rowGrid}>
           <Field label="Over-delivery allowed (%)" hint="More than this over what you ordered gets flagged.">
@@ -207,7 +207,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         )}
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Where goods normally go</h3>
         <Field label="Default delivery">
           <select
@@ -256,7 +256,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Money</h3>
         <div style={rowGrid}>
           <Field label="Your own currency" hint="What you keep your books in. Suppliers may of course bill you in theirs.">
@@ -290,7 +290,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
       </div>}
 
       {activeTab === 'documents' && <div className="settings-masonry">
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Who is buying</h3>
         <p style={{ ...muted, marginTop: 0, marginBottom: '0.75rem' }}>
           What prints at the top of a purchase order as your own details. Leave a box empty and, where you run the Shop
@@ -328,7 +328,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Wording on the order</h3>
         <div style={{ display: 'grid', gap: '0.75rem' }}>
           <Field label="Heading">
@@ -346,7 +346,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Wording on a returns note</h3>
         <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
           Its own wording, because &ldquo;please supply the following&rdquo; on a note about goods going back is quite the mixed message.
@@ -369,7 +369,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Wording on a packing slip</h3>
         <p style={{ margin: '0 0 0.75rem', color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
           The sheet that goes in the box. On an order you have drop-shipped, the person who opens that box is your
@@ -396,7 +396,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
       </div>}
 
       {activeTab === 'automation' && <div className="settings-masonry">
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Reordering</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -414,7 +414,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Buying for customer orders</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -437,7 +437,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Sending those drafts by themselves</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -480,7 +480,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Supplier paperwork by email</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -510,7 +510,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Delivery tracking by email</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -558,7 +558,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </div>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Suppliers&rsquo; price lists</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
@@ -576,7 +576,7 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         </p>
       </div>
 
-      <div style={card}>
+      <div className="card">
         <h3 style={{ margin: '0 0 0.75rem', fontSize: 'var(--text-base)' }}>Chasing and the supplier link</h3>
         <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input type="checkbox" checked={config.chaseEnabled} onChange={(e) => set('chaseEnabled', e.target.checked)} />
