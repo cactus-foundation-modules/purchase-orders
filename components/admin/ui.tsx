@@ -294,10 +294,10 @@ export function localToday(): string {
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
-    <label style={{ display: 'block' }}>
-      <span style={{ display: 'block', marginBottom: '0.25rem', fontSize: 'var(--text-sm)' }}>{label}</span>
+    <label className="settings-field" style={{ display: 'block' }}>
+      <span style={{ display: 'block', marginBottom: '0.375rem', fontSize: 'var(--text-sm)', fontWeight: 'var(--font-medium)', color: 'var(--color-text)' }}>{label}</span>
       {children}
-      {hint && <span style={{ display: 'block', marginTop: '0.25rem', ...muted }}>{hint}</span>}
+      {hint && <span className="field-hint" style={{ display: 'block', marginTop: '0.25rem' }}>{hint}</span>}
     </label>
   )
 }
