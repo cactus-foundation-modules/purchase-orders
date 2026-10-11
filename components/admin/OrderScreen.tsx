@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAdminPath } from '@/components/admin/AdminPathContext'
+import { useAdminConfirm } from '@/components/admin/useAdminConfirm'
 import {
   availableTransitions, canSend, closeBlockedReason, editMode, TRANSITION_ACTIONS,
 } from '@/modules/purchase-orders/lib/lifecycle'
@@ -59,6 +60,7 @@ function scrollToCard(id: string) {
 }
 
 export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) {
+  const [askConfirm, confirmNode] = useAdminConfirm()
   const router = useRouter()
   const adminPath = useAdminPath()
   const base = `/${adminPath}/m/purchase-orders/orders`
@@ -768,8 +770,8 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         danger: drastic,
         disabled: t === 'close' && closeBlocked !== null,
         title: t === 'close' && closeBlocked ? closeBlocked : undefined,
-        onClick: () => {
-          if (drastic && !window.confirm(`Cancel ${o.number}? The supplier is not told - that is still yours to do.`)) return
+        onClick: async () => {
+          if (drastic && !(await askConfirm({ title: `Cancel ${o.number}?`, message: 'The supplier is not told - that is still yours to do.', confirmLabel: 'Cancel order' }))) return
           void runTransition(t)
         },
       })
@@ -780,8 +782,8 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
         label: 'Delete this draft',
         placement: 'menu',
         danger: true,
-        onClick: () => {
-          if (window.confirm(`Delete ${o.number}? A draft that is deleted is gone for good.`)) void deleteOrder()
+        onClick: async () => {
+          if (await askConfirm({ title: `Delete ${o.number}?`, message: 'A draft that is deleted is gone for good.' })) void deleteOrder()
         },
       })
     }
@@ -818,6 +820,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
 
   return (
     <div>
+      {confirmNode}
       <OrderActionBar
         backHref={base}
         backLabel="Orders"
