@@ -4,6 +4,7 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, getSupplier, setOrderStatus } from '@/modules/purchase-orders/lib/db'
+import { notifyPurchaseOrderSent, shopSourceOf } from '@/modules/purchase-orders/lib/sent-hooks'
 import { canSend, checkTransition, closeBlockedReason, sendingApproves, TRANSITIONS } from '@/modules/purchase-orders/lib/lifecycle'
 import { unsettledBillCount } from '@/modules/purchase-orders/lib/bills'
 import { sendOrderCancelled, supplierRecipients } from '@/modules/purchase-orders/lib/email'
@@ -90,6 +91,13 @@ export async function POST(request: NextRequest, { params }: Params) {
   }
 
   await recordAudit('order', id, `order.${transition}`, { from: order.status, to: check.to, note: note ?? null }, user.id)
+
+  // Marked sent by hand is as good as emailed for the customer waiting on it:
+  // the goods are ordered. The first send only - a later "mark as sent" on an
+  // order that already went out is not news.
+  if (transition === 'send' && !order.sentAt) {
+    await notifyPurchaseOrderSent({ purchaseOrderNumber: order.number, source: shopSourceOf(order.sourceRef) })
+  }
 
   // A supplier holding an order that has been cancelled needs telling, and
   // telling promptly - the alternative is a lorry. Best-effort and after the

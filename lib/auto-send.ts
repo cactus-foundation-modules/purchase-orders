@@ -130,11 +130,12 @@ export type SendFacts = {
 }
 
 /** Customer-order statuses in which buying the goods in is right: paid for and
- *  being got ready, on its way, done, or refunded only in part (the shortfall
- *  check below covers the part). An allow-list rather than a block-list, so
+ *  being got ready (PROCESSING, or PREPARING once a purchase order has gone),
+ *  on its way, done, or refunded only in part (the shortfall check below
+ *  covers the part). An allow-list rather than a block-list, so
  *  PENDING (not paid), ON_HOLD, and any status shop adds later are refused
  *  until somebody decides otherwise. Shop's `shp_orders.status` values. */
-const BUYABLE_CUSTOMER_STATUSES = new Set(['PROCESSING', 'SHIPPED', 'COMPLETED', 'PARTIALLY_REFUNDED'])
+const BUYABLE_CUSTOMER_STATUSES = new Set(['PROCESSING', 'PREPARING', 'SHIPPED', 'COMPLETED', 'PARTIALLY_REFUNDED'])
 
 /** Shop's `payment_status` values that mean the money is here. */
 const PAID_CUSTOMER_STATUSES = new Set(['PAID', 'PARTIALLY_REFUNDED'])

@@ -6,6 +6,7 @@ import { recordAudit } from './audit'
 import { mintPortalLink } from './portal'
 import { canSend, sendingApproves } from './lifecycle'
 import { BEING_SENT_AUTOMATICALLY, CLAIM_MINUTES } from './auto-send'
+import { notifyPurchaseOrderSent, shopSourceOf } from './sent-hooks'
 import { recordRefusalAudit, takeOutOfQueue } from './auto-send-queue'
 
 // Emailing a purchase order to its supplier: the one implementation behind the
@@ -200,6 +201,13 @@ export async function sendOrderRun(options: SendRunOptions): Promise<SendRunResu
       },
       userId,
     )
+
+    // The customer waiting on this order hears about it from whoever owns that
+    // customer. Only the first send is news, and never allowed to fail the
+    // send: it has gone and is recorded.
+    if (kind === 'sent') {
+      await notifyPurchaseOrderSent({ purchaseOrderNumber: order.number, source: shopSourceOf(order.sourceRef) })
+    }
   }
 
   if (by === 'AUTO') {
