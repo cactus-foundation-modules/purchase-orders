@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest'
 import {
   CLOSED_SHOP_ORDER_STATUSES,
   carriageFor,
+  expandKitItems,
   livePos,
   netTotalFor,
   planFromOrder,
   serviceCostFor,
+  serviceCostShare,
   serviceNameFor,
   shipToFromShopOrder,
   spendTowardThreshold,
   surchargeFor,
+  type KitPartFacts,
   type PoRaisedFromShopOrder,
   type ShopOrderFacts,
   type ShopOrderItemFacts,
@@ -446,5 +449,77 @@ describe('the customer orders that have stopped being worth buying for', () => {
     for (const status of ['PENDING', 'PROCESSING', 'SHIPPED', 'COMPLETED', 'PARTIALLY_REFUNDED', 'ON_HOLD']) {
       expect(CLOSED_SHOP_ORDER_STATUSES.has(status)).toBe(false)
     }
+  })
+})
+
+// A kit is bought as its parts. The customer's line stays the line they bought
+// (so a despatch is news about it), but the purchase order goes to whoever
+// supplies each PART, at that part's own code and cost.
+describe('kits', () => {
+  const seat: KitPartFacts = { productId: 'part-seat', name: 'Chair seat', quantity: 1, sku: 'P-SEAT', supplierSku: 'S-100', supplierName: 'Dynamic Office Solutions', costPrice: '30.00' }
+  const base: KitPartFacts = { productId: 'part-base', name: 'Chair base', quantity: 2, sku: 'P-BASE', supplierSku: null, supplierName: 'Other Supplier Ltd', costPrice: '12.50' }
+  const kits = new Map([['prod-kit', [seat, base]]])
+  const kitItem = (patch: Partial<ShopOrderItemFacts> = {}) =>
+    item({ itemId: 'line-kit', productId: 'prod-kit', productName: 'Kit chair', sku: null, supplierName: null, costPrice: null, unitPrice: '99.00', ...patch })
+
+  it('leaves an ordinary line exactly as it was', () => {
+    const plain = item()
+    expect(expandKitItems([plain], kits)).toEqual([plain])
+    expect(expandKitItems([kitItem()], new Map())).toEqual([kitItem()])
+  })
+
+  it('turns a kit line into one line per part, scaled by the kits bought', () => {
+    const out = expandKitItems([kitItem({ quantity: 3 })], kits)
+    expect(out.map((l) => [l.itemId, l.productId, l.productName, l.quantity, l.sku, l.supplierName, l.costPrice])).toEqual([
+      ['line-kit', 'part-seat', 'Chair seat', 3, 'P-SEAT', 'Dynamic Office Solutions', '30.00'],
+      ['line-kit', 'part-base', 'Chair base', 6, 'P-BASE', 'Other Supplier Ltd', '12.50'],
+    ])
+    // What the customer paid is nobody's cost, and a kit's sale code names the kit.
+    expect(out.every((l) => l.unitPrice === '0' && l.saleSku === null)).toBe(true)
+  })
+
+  it('buys each part from its own supplier, in separate draft orders', () => {
+    const plan = planFromOrder(
+      order({ items: expandKitItems([kitItem({ quantity: 2 })], kits) }),
+      [supplier(), supplier({ id: 'sup-other', name: 'Other Supplier Ltd', nameKey: 'other supplier ltd' })],
+    )
+    expect(plan.skipped).toEqual([])
+    const byName = new Map(plan.groups.map((g) => [g.supplierName, g.lines]))
+    expect(byName.get('Dynamic Office Solutions')?.map((l) => [l.productName, l.qty, l.supplierSku, l.unitCost, l.itemId])).toEqual([
+      ['Chair seat', 2, 'S-100', '30.00', 'line-kit'],
+    ])
+    // No supplier code on the part: falls back to our own, as any line does.
+    expect(byName.get('Other Supplier Ltd')?.map((l) => [l.productName, l.qty, l.supplierSku, l.unitCost])).toEqual([
+      ['Chair base', 4, 'P-BASE', '12.50'],
+    ])
+  })
+
+  it('says which part has nobody to buy it from, and carries on with the rest', () => {
+    const noSupplier: KitPartFacts = { ...base, supplierName: null }
+    const plan = planFromOrder(order({ items: expandKitItems([kitItem()], new Map([['prod-kit', [seat, noSupplier]]])) }), [supplier()])
+    expect(plan.groups[0]?.lines.map((l) => l.productName)).toEqual(['Chair seat'])
+    expect(plan.skipped).toHaveLength(1)
+    expect(plan.skipped[0]?.productName).toBe('Chair base')
+  })
+
+  it('charges a kit\'s delivery once, on its first part, per unit of that part', () => {
+    const meta = { charges: [{ label: 'Delivery', amount: 24 }], data: { ashDelivery: { tierText: 'Next day' } } }
+    const twoSeats: KitPartFacts = { ...seat, quantity: 2 }
+    const out = expandKitItems([kitItem({ quantity: 3, lineMeta: meta })], new Map([['prod-kit', [twoSeats, { ...base, supplierName: 'Dynamic Office Solutions' }]]]))
+    const plan = planFromOrder(order({ items: out }), [supplier()])
+    const lines = plan.groups[0]!.lines
+    // 3 kits x 2 seats = 6 seats at 12.00 each is the 3 x 24.00 the customer paid for.
+    expect(lines[0]?.serviceCost).toBe('12.0000')
+    expect(lines[1]?.serviceCost).toBeNull()
+    // The instruction itself goes with every part.
+    expect(lines.map((l) => l.serviceName)).toEqual(['Next day', 'Next day'])
+    expect(plan.groups[0]?.carriageAmount).toBe('72.00')
+  })
+
+  it('serviceCostShare leaves the ordinary case alone', () => {
+    expect(serviceCostShare('24.0000', undefined)).toBe('24.0000')
+    expect(serviceCostShare(null, 2)).toBeNull()
+    expect(serviceCostShare('24.0000', null)).toBeNull()
+    expect(serviceCostShare('10.0000', 3)).toBe('3.3333')
   })
 })

@@ -71,6 +71,16 @@ export type ShopOrderItemFacts = {
   supplierName: string | null
   costPrice: string | null
   lineMeta: Record<string, unknown> | null
+  /** Set on a line that is one PART of a kit the customer bought (shop's
+   *  `shp_product_components`): the units of this part that go into ONE kit.
+   *  `quantity` above is already scaled by it - 3 kits of 2 seats is 6 - and
+   *  `itemId` is still the customer's kit line, which is why several lines can
+   *  share one. Absent on an ordinary product. */
+  kitPartQty?: number
+  /** What the delivery service costs per unit of THIS line, as a divisor of the
+   *  customer line's figure. Absent means 1. Null means this line carries none:
+   *  a kit's delivery is bought once, on its first part, not once per part. */
+  serviceCostDivisor?: number | null
 }
 
 /** Shop's `shp_orders.kind`. Absent on older installs, read as `SALE`. */
@@ -180,6 +190,8 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
        ORDER BY oi."product_name" ASC
     `
 
+    const kits = await readKitParts(items.flatMap((r) => (typeof r.product_id === 'string' ? [r.product_id] : [])))
+
     return {
       id: order.id as string,
       orderNumber: order.order_number as string,
@@ -192,23 +204,120 @@ export async function readShopOrder(orderId: string): Promise<ShopOrderFacts | n
       currency: (order.currency as string | null) ?? 'GBP',
       shippingAddress: bag(order.shipping_address),
       deliveryInstructions: textOrNull(order.delivery_instructions),
-      items: items.map((r) => ({
-        itemId: r.id as string,
-        productId: (r.product_id as string | null) ?? null,
-        productName: (r.product_name as string | null) ?? '',
-        quantity: Number(r.quantity ?? 0),
-        unitPrice: numOrNull(r.unit_price) ?? '0',
-        sku: textOrNull(r.sku),
-        supplierSku: textOrNull(r.supplier_sku),
-        saleSku: textOrNull(r.sale_sku),
-        supplierName: textOrNull(r.supplier),
-        costPrice: numOrNull(r.cost_price),
-        lineMeta: bag(r.line_meta),
-      })),
+      items: expandKitItems(
+        items.map((r) => ({
+          itemId: r.id as string,
+          productId: (r.product_id as string | null) ?? null,
+          productName: (r.product_name as string | null) ?? '',
+          quantity: Number(r.quantity ?? 0),
+          unitPrice: numOrNull(r.unit_price) ?? '0',
+          sku: textOrNull(r.sku),
+          supplierSku: textOrNull(r.supplier_sku),
+          saleSku: textOrNull(r.sale_sku),
+          supplierName: textOrNull(r.supplier),
+          costPrice: numOrNull(r.cost_price),
+          lineMeta: bag(r.line_meta),
+        })),
+        kits,
+      ),
     }
   } catch {
     return null
   }
+}
+
+/** One part of a kit, with everything the purchase order needs to buy it. */
+export type KitPartFacts = {
+  productId: string
+  name: string
+  quantity: number
+  sku: string | null
+  supplierSku: string | null
+  supplierName: string | null
+  costPrice: string | null
+}
+
+/**
+ * The parts behind any kit among these products, keyed by the kit's product id.
+ *
+ * A product made up of other products has no SKU, supplier or cost of its own to
+ * buy against - the parts do - so a sale of one is bought as its parts. Shop's
+ * `shp_product_components` arrives with its migration 075 and the two modules are
+ * pinned independently, so a shop without it answers "no kits" rather than
+ * throwing: the order then reads exactly as it always did.
+ */
+async function readKitParts(productIds: string[]): Promise<Map<string, KitPartFacts[]>> {
+  const kits = new Map<string, KitPartFacts[]>()
+  const ids = [...new Set(productIds)]
+  if (ids.length === 0) return kits
+  try {
+    const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
+      SELECT pc."product_id" AS "kit_id", pc."component_product_id", pc."quantity",
+             c."name", c."sku", c."supplier_sku", c."supplier", c."cost_price"
+        FROM "shp_product_components" pc
+        JOIN "shp_products" c ON c."id" = pc."component_product_id"
+       WHERE pc."product_id" = ANY(${ids}::text[])
+       ORDER BY pc."product_id", pc."position" ASC, c."name" ASC
+    `
+    for (const r of rows) {
+      const list = kits.get(r.kit_id as string) ?? []
+      list.push({
+        productId: r.component_product_id as string,
+        name: (r.name as string | null) ?? '',
+        quantity: Math.max(Math.trunc(Number(r.quantity ?? 1)), 1),
+        sku: textOrNull(r.sku),
+        supplierSku: textOrNull(r.supplier_sku),
+        supplierName: textOrNull(r.supplier),
+        costPrice: numOrNull(r.cost_price),
+      })
+      kits.set(r.kit_id as string, list)
+    }
+  } catch {
+    // No shp_product_components: nothing is a kit.
+  }
+  return kits
+}
+
+/**
+ * Swap each kit line for one line per part.
+ *
+ * Pure. Every part keeps the customer's line as its `itemId` (a despatch of the
+ * part is news about that line) and buys `quantity x per-kit` of itself. The
+ * delivery service NAME rides on every part, because it is an instruction the
+ * supplier has to see whoever supplies which part; its COST is carried by the
+ * first part alone, scaled back to per-unit-of-that-part, so a kit of four
+ * parts is not charged carriage four times.
+ *
+ * A line whose product is not a kit passes through untouched, and so does a
+ * kit with no parts (shop never lets one exist, but an empty list must not
+ * make a line vanish).
+ */
+export function expandKitItems(
+  items: ShopOrderItemFacts[],
+  kits: ReadonlyMap<string, readonly KitPartFacts[]>,
+): ShopOrderItemFacts[] {
+  return items.flatMap((item) => {
+    const parts = item.productId ? kits.get(item.productId) : undefined
+    if (!parts || parts.length === 0) return [item]
+    return parts.map((part, index) => ({
+      itemId: item.itemId,
+      productId: part.productId,
+      productName: part.name,
+      quantity: item.quantity * part.quantity,
+      // Recorded for the screen, never used as a cost - and a part has no price
+      // of its own on this sale.
+      unitPrice: '0',
+      sku: part.sku,
+      supplierSku: part.supplierSku,
+      // The kit's clearance code names the kit, not any one part.
+      saleSku: null,
+      supplierName: part.supplierName,
+      costPrice: part.costPrice,
+      lineMeta: item.lineMeta,
+      kitPartQty: part.quantity,
+      serviceCostDivisor: index === 0 ? part.quantity : null,
+    }))
+  })
 }
 
 /** The supplier list, in the shape the planner and the reorder arithmetic both
@@ -363,6 +472,17 @@ export function serviceNameFor(lineMeta: Record<string, unknown> | null): string
   // The column is TEXT, but the order form caps a typed service at 200 and a
   // sentence longer than that has stopped being an instruction anyway.
   return text.length > 200 ? `${text.slice(0, 197)}...` : text
+}
+
+/**
+ * A kit part's share of the customer line's delivery cost, per unit of that part.
+ * No divisor is the ordinary case and changes nothing; null means this part
+ * carries none (another part of the same kit has it).
+ */
+export function serviceCostShare(cost: string | null, divisor: number | null | undefined): string | null {
+  if (cost == null || divisor === undefined) return cost
+  if (divisor === null || !(divisor > 0)) return null
+  return (Math.round((Number(cost) / divisor) * 10_000) / 10_000).toFixed(4)
 }
 
 /**
@@ -632,7 +752,7 @@ export function planFromOrder(
       catalogueDescription: listed?.description?.trim() || null,
       discontinued: listed?.discontinued ?? false,
       serviceName: serviceNameFor(item.lineMeta),
-      serviceCost: serviceCostFor(item.lineMeta),
+      serviceCost: serviceCostShare(serviceCostFor(item.lineMeta), item.serviceCostDivisor),
       onSale: item.saleSku != null,
       category: listed?.category ?? null,
     })

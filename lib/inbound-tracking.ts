@@ -10,6 +10,7 @@ import {
   type DespatchRecordedObserver,
 } from './despatch-hooks'
 import { domainOf, matchSender, type SenderSupplier } from './inbound-filing'
+import { kitAwareDespatchLines } from './kit-despatch'
 import { carrierForHost, normalisePostcode, ownLines, recogniseTracking, trackingKeyOf } from './tracking-recognise'
 import type { RecognisedTracking, TrackingCandidate } from './tracking-recognise'
 import {
@@ -495,9 +496,13 @@ export async function announceDespatch(
       change: claimed.change,
       purchaseOrderNumber: row.order_number,
       source: { module: 'shop', orderId: claimed.orderId },
-      lines: lines
-        .map((l) => ({ sourceOrderItemId: l.source_order_item_id, qty: Math.round(Number(l.qty)) }))
-        .filter((l) => l.qty > 0),
+      // A kit is bought as its parts, so a parcel's lines are in part units;
+      // the observer wants the customer's, which is what this turns them into.
+      lines: (await kitAwareDespatchLines(
+        despatchId,
+        orderId,
+        lines.map((l) => ({ sourceOrderItemId: l.source_order_item_id, qty: Math.round(Number(l.qty)) })),
+      )).filter((l) => l.qty > 0),
       carrier: row.carrier,
       trackingNumber: row.tracking_ref,
       trackingUrl: row.tracking_url,

@@ -161,10 +161,17 @@ export async function gatherSendFacts(orderId: string, config: PoConfig): Promis
     if (!shopOrder) {
       customer = { readable: false, orderNumber: customerOrderNumber }
     } else {
-      const owed = new Map(shopOrder.items.map((item) => [item.itemId, item.quantity]))
+      // Keyed by the customer's line AND the product on it, because a kit line
+      // reads as several (one per part) that share the same line id. A line
+      // with no product of its own falls back to the line alone.
+      const owed = new Map<string, number>()
+      for (const item of shopOrder.items) {
+        owed.set(`${item.itemId}|${item.productId ?? ''}`, item.quantity)
+        if (!owed.has(item.itemId)) owed.set(item.itemId, item.quantity)
+      }
       const shortfall = order.lines
         .filter((line) => line.sourceOrderItemId)
-        .filter((line) => (owed.get(line.sourceOrderItemId!) ?? 0) < Number(line.qty) - Number(line.qtyCancelled))
+        .filter((line) => (owed.get(`${line.sourceOrderItemId}|${line.productId ?? ''}`) ?? owed.get(line.sourceOrderItemId!) ?? 0) < Number(line.qty) - Number(line.qtyCancelled))
         .map((line) => line.productName ?? line.description)
       customer = {
         readable: true,
