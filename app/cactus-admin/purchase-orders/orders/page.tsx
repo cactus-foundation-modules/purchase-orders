@@ -16,7 +16,7 @@ export default async function PurchaseOrdersPage() {
   return (
     <div>
       <PurchaseOrdersNav />
-      <OrdersScreen canCreate={access.canCreate} />
+      <OrdersScreen canCreate={access.canCreate} canBills={access.canBills} />
     </div>
   )
 }

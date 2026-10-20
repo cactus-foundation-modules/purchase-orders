@@ -136,6 +136,17 @@ export const PoConfigSchema = z.object({
   // later without somebody saying so out loud.
   autoDraftFromPaidOrders: z.boolean().default(false),
 
+  // Whether a customer order finishing closes off the supplier's side of it.
+  //
+  // OFF by default, and this is the setting that APPROVES MONEY, so it is the
+  // strictest of the automatic ones: when the customer's order is marked
+  // Completed, every invoice on its purchase order must be a draft that the
+  // match calls clean, and together they must come to exactly what the order
+  // said, to the penny. Then, and only then, they are approved and the order is
+  // closed. Anything else - a query, a variance, a total a penny out, a return
+  // still owed - is left for a person, exactly as it is today.
+  autoSettleCompletedOrders: z.boolean().default(false),
+
   // Whether those automatic drafts are SENT by themselves - the master switch
   // over each supplier's own (`po_suppliers.auto_send`). Both have to be on.
   //

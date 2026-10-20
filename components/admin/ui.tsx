@@ -2,8 +2,8 @@
 
 import type { CSSProperties, ReactNode } from 'react'
 import {
-  PO_BILL_STATUS_LABELS, PO_MATCH_STATUS_LABELS, PO_RETURN_STATUS_LABELS, PO_STATUS_LABELS,
-  type PoBillStatus, type PoMatchStatus, type PoReturnStatus, type PoStatus,
+  customerOrderStatusLabel, PO_BILL_STATUS_LABELS, PO_MATCH_STATUS_LABELS, PO_RETURN_STATUS_LABELS, PO_STATUS_LABELS,
+  type PoBillStatus, type PoCustomerOrder, type PoMatchStatus, type PoReturnStatus, type PoStatus,
 } from '@/modules/purchase-orders/lib/types'
 import {
   orderStatusLabel, proformaWaitsOnUs, type PoStageFacts,
@@ -314,5 +314,25 @@ export function NotYet({ title, message }: { title: string; message: string }) {
       <h2 style={{ margin: '0 0 0.5rem', fontSize: 'var(--text-lg)' }}>{title}</h2>
       <p style={{ margin: 0, color: 'var(--color-text-secondary)', maxWidth: 480, marginInline: 'auto' }}>{message}</p>
     </div>
+  )
+}
+
+/**
+ * The customer's order a purchase order was raised for: their number, linked
+ * through to it, with where that order has got to underneath.
+ *
+ * The address is built, not imported - the shop's admin lives at a path of its
+ * own and this module never reaches into it. A purchase order raised by hand has
+ * no customer behind it, and says so quietly.
+ */
+export function CustomerOrderCell({ customerOrder, href }: { customerOrder: PoCustomerOrder | null | undefined; href: string }) {
+  if (!customerOrder) return <span style={muted}>None</span>
+  return (
+    <>
+      <a href={`${href}/${customerOrder.id}`} style={{ color: 'var(--color-primary)' }}>
+        {customerOrder.number}
+      </a>
+      <div style={muted}>{customerOrderStatusLabel(customerOrder.status)}</div>
+    </>
   )
 }

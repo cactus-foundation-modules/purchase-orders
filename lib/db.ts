@@ -7,6 +7,7 @@ import type {
   PoRevisionSummary,
   PoOrder,
   PoOrderLine,
+  PoOrderListRow,
   PoOrderSummary,
   PoAutoSendState,
   PoShipTo,
@@ -22,6 +23,7 @@ import { getPoConfigCached, type PoAddress } from './config'
 import { autoSendDueAt } from './auto-send'
 import { getCapabilities } from './capabilities'
 import { hasSupplierSkuColumn } from './catalogues'
+import { customerOrdersFor, unsettledBillsFor } from './order-list-facts'
 
 // Everything here is raw SQL. This module owns po_ tables and reads nothing
 // else's through Prisma's client, because the shop and bookkeeping models are
@@ -519,7 +521,7 @@ const OPEN_STATUSES: PoStatus[] = [
 
 export async function listOrders(
   filters: OrderFilters = {},
-): Promise<{ orders: PoOrderSummary[]; total: number }> {
+): Promise<{ orders: PoOrderListRow[]; total: number }> {
   const where: Prisma.Sql[] = []
 
   if (filters.status === 'OPEN' || !filters.status) {
@@ -558,6 +560,15 @@ export async function listOrders(
      ${whereSql}
   `
 
+  // Two more facts per row, each in one query for the whole page. The invoices
+  // are only asked about for orders waiting to close - they are what the Close
+  // button on that row turns on, and no other status has any use for them.
+  const orderIds = rows.map((r) => r.id as string)
+  const [customerOrders, unsettled] = await Promise.all([
+    customerOrdersFor(orderIds),
+    unsettledBillsFor(rows.filter((r) => r.status === 'PENDING_CLOSE').map((r) => r.id as string)),
+  ])
+
   return {
     orders: rows.map((r) => ({
       id: r.id as string,
@@ -574,6 +585,8 @@ export async function listOrders(
       lineCount: Number(r.line_count ?? 0),
       createdAt: stamp(r.created_at) ?? '',
       ...proformaFacts(r),
+      customerOrder: customerOrders.get(r.id as string) ?? null,
+      unsettledBills: unsettled.get(r.id as string) ?? [],
     })),
     total: Number(countRows[0]?.count ?? 0),
   }

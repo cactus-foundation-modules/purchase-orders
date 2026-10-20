@@ -198,6 +198,55 @@ export type PoOrderSummary = {
   proformaPaid: boolean
 }
 
+/** The customer's order a purchase order was raised for, read off the shop at
+ *  arm's length. Null on a purchase order raised by hand or by a reorder, and
+ *  on a site with no shop. */
+export type PoCustomerOrder = {
+  id: string
+  number: string
+  /** Shop's own status code, kept raw: this module does not own the list, and a
+   *  status a newer shop adds must still show up as something. */
+  status: string
+}
+
+/** Shop's order statuses as an admin reads them. Not imported from the shop -
+ *  that path does not exist on an install without one - so a status this does
+ *  not know falls back to its own code, lower-cased. */
+export const CUSTOMER_ORDER_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'Pending',
+  PROCESSING: 'Processing',
+  PREPARING: 'Preparing',
+  SHIPPED: 'Dispatched',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+  REFUNDED: 'Refunded',
+  PARTIALLY_REFUNDED: 'Partly refunded',
+  ON_HOLD: 'On hold',
+}
+
+export function customerOrderStatusLabel(status: string): string {
+  return CUSTOMER_ORDER_STATUS_LABELS[status] ?? status.toLowerCase().replace(/_/g, ' ')
+}
+
+/** An invoice on an order that nobody here has agreed to pay yet. */
+export type PoUnsettledBill = {
+  id: string
+  status: PoBillStatus
+  supplierInvoiceNumber: string
+  total: string
+  currency: string
+  matchStatus: PoMatchStatus
+  varianceCount: number
+}
+
+/** One row of the Orders tab: the order, plus what the row needs to say about
+ *  the customer's order and, for one waiting to close, the invoices holding it. */
+export type PoOrderListRow = PoOrderSummary & {
+  customerOrder: PoCustomerOrder | null
+  /** Only filled for an order at PENDING_CLOSE; empty for every other status. */
+  unsettledBills: PoUnsettledBill[]
+}
+
 export type PoOrder = PoOrderSummary & {
   /** The supplier's drop-ship switch, read LIVE off the supplier rather than
    *  frozen onto the order: it changes what the order screen offers, not what
@@ -675,6 +724,9 @@ export type PoBillSummary = {
   createdByUserId: string | null
   createdByName: string | null
   createdAt: string
+  /** The customer's order the bill's purchase order was raised for. Only the
+   *  Bills tab asks for it; every other caller leaves it off. */
+  customerOrder?: PoCustomerOrder | null
 }
 
 /** The supplier's own invoice, as it was uploaded. Null when nobody attached one. */

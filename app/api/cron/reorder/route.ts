@@ -17,11 +17,14 @@
 // and did not, plus any purchase order left standing against a customer order
 // that has since been refunded. Folded in here rather than given a cron entry of
 // its own - one more scheduled slot for a job measured in milliseconds is not
-// worth it, and both are "here is your paperwork this morning".
+// worth it, and both are "here is your paperwork this morning". A third pass,
+// closing off completed customer orders whose supplier bill agrees to the
+// penny, rides along on the same terms.
 import { NextRequest, NextResponse } from 'next/server'
 import { errorResponse } from '@/lib/utils'
 import { runReorder } from '@/modules/purchase-orders/lib/reorder-run'
 import { runPaidSweep } from '@/modules/purchase-orders/lib/paid-sweep'
+import { runAutoSettleSweep } from '@/modules/purchase-orders/lib/auto-settle-run'
 
 async function handle(request: NextRequest) {
   const secret = process.env.CRON_SECRET
@@ -41,7 +44,19 @@ async function handle(request: NextRequest) {
     paidOrders = { failed: (error as Error).message }
   }
 
-  return NextResponse.json({ ok: true, ...result, paidOrders })
+  // The same again for the other end of an order's life: a customer order that
+  // is Completed whose supplier bill agrees with the purchase order, picked up
+  // here when the bill arrived after the completion announcement. Inert unless
+  // the owner has switched it on.
+  let settledOrders
+  try {
+    settledOrders = await runAutoSettleSweep()
+  } catch (error) {
+    console.error('[purchase-orders] the completed-order sweep failed', error)
+    settledOrders = { failed: (error as Error).message }
+  }
+
+  return NextResponse.json({ ok: true, ...result, paidOrders, settledOrders })
 }
 
 export async function GET(request: NextRequest) {

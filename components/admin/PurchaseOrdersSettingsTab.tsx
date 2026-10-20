@@ -394,6 +394,16 @@ export function PurchaseOrdersSettingsTab({ hostedSettingsSlots }: ModuleSetting
         <label className="settings-check">
           <input
             type="checkbox"
+            checked={config.autoSettleCompletedOrders}
+            disabled={!capabilities?.hasCatalogue}
+            onChange={(e) => set('autoSettleCompletedOrders', e.target.checked)}
+          />
+          Approve the bill and close the order when the customer&rsquo;s order is completed
+          <InfoTip>{capabilities?.hasCatalogue ? 'Off, you approve each supplier bill and close each order yourself. On, once the customer\u2019s order is marked Completed, a bill that agrees with the purchase order is approved and the order closed for you. It is strict on purpose: the bill must be a draft that the match calls clean, the bills together must come to exactly the order total, to the penny, and the order must be fully delivered and invoiced with no return still open. A queried bill, a variance, or a total a penny out is left for you, as it is today. Bills that turn up after the customer order completed are picked up overnight, for orders from the last four months. Approving a bill sends it to the books as usual, where you have them.' : 'There is no shop on this site, so there are no customer orders to wait for. Install the Shop module and this switches on.'}</InfoTip>
+        </label>
+        <label className="settings-check">
+          <input
+            type="checkbox"
             checked={config.supplierCatalogues}
             onChange={(e) => set('supplierCatalogues', e.target.checked)}
           />

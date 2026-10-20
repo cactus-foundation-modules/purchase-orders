@@ -6,8 +6,9 @@ import { useAdminPath } from '@/components/admin/AdminPathContext'
 import {
   BILL_STATUSES, PO_BILL_STATUS_LABELS, type PoBillStatus, type PoBillSummary, type PoBillTotals,
 } from '@/modules/purchase-orders/lib/types'
+import { useAdminConfirm } from '@/components/admin/useAdminConfirm'
 import {
-  BillStatusBadge, card, formatDay, input, MatchBadge, Money, muted, table, td, tdRight, th, thRight,
+  BillStatusBadge, card, CustomerOrderCell, formatDay, input, MatchBadge, Money, muted, table, td, tdRight, th, thRight,
 } from './ui'
 
 // The Bills tab: what your suppliers say you owe, and how much of it nobody has
@@ -21,6 +22,8 @@ import {
 export function BillsScreen({ canBills }: { canBills: boolean }) {
   const adminPath = useAdminPath()
   const base = `/${adminPath}/m/purchase-orders`
+  const shopOrdersBase = `/${adminPath}/m/shop/orders`
+  const [askConfirm, confirmNode] = useAdminConfirm()
 
   const [bills, setBills] = useState<PoBillSummary[]>([])
   const [totals, setTotals] = useState<PoBillTotals>({
@@ -34,6 +37,9 @@ export function BillsScreen({ canBills }: { canBills: boolean }) {
   const [status, setStatus] = useState<PoBillStatus | 'ALL' | 'OPEN'>('ALL')
   const [varianceOnly, setVarianceOnly] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
 
   const refresh = useCallback(() => {
     const params = new URLSearchParams()
@@ -59,8 +65,56 @@ export function BillsScreen({ canBills }: { canBills: boolean }) {
     return () => clearTimeout(timer)
   }, [refresh])
 
+  /**
+   * Approve a draft bill from the list, through the same route the bill's own
+   * screen uses, so the approval, its audit line and the handoff to the books are
+   * the ones that screen has. Approving a bill the match dislikes is allowed
+   * there and allowed here, but never silently: the question names it.
+   */
+  async function approve(bill: PoBillSummary) {
+    const odd =
+      bill.matchStatus === 'VARIANCE'
+        ? ' It does not agree with the order it was entered against; approving it accepts that.'
+        : ''
+    const ok = await askConfirm({
+      title: `Approve ${bill.supplierInvoiceNumber}?`,
+      message: `This agrees to pay ${bill.supplierName} ${bill.currency === 'GBP' ? '£' : `${bill.currency} `}${bill.total}.${odd}`,
+      confirmLabel: 'Approve',
+      danger: false,
+    })
+    if (!ok) return
+
+    setError(null)
+    setMessage(null)
+    setBusyId(bill.id)
+    try {
+      const res = await fetch(`/api/m/purchase-orders/admin/bills/${bill.id}/transition`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transition: 'approve' }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setError(data.error ?? 'That did not work.')
+        return
+      }
+      const said: string[] = [`${bill.supplierInvoiceNumber} is approved.`]
+      if (data.orderClosed) said.push(`Order ${data.orderClosed} has been closed - everything is delivered and invoiced.`)
+      if (data.books?.message) said.push(data.books.message)
+      setMessage(said.join(' '))
+    } finally {
+      setBusyId(null)
+      await refresh()
+    }
+  }
+
+  // Only worth a column where there is something to put in it.
+  const showCustomer = bills.some((b) => b.customerOrder)
+  const showActions = canBills && bills.some((b) => b.status === 'DRAFT')
+
   return (
     <div>
+      {confirmNode}
       <div
         className="page-header"
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
@@ -129,6 +183,16 @@ export function BillsScreen({ canBills }: { canBills: boolean }) {
         </label>
       </div>
 
+      {(error || message) && (
+        <div
+          className={error ? 'alert alert-danger' : 'alert alert-success'}
+          role={error ? 'alert' : 'status'}
+          style={{ marginBottom: '1rem' }}
+        >
+          {error ?? message}
+        </div>
+      )}
+
       <div style={card}>
         {loaded && bills.length === 0 && (
           <p style={{ margin: 0, color: 'var(--color-text-secondary)' }}>
@@ -144,11 +208,13 @@ export function BillsScreen({ canBills }: { canBills: boolean }) {
                   <th style={th}>Their invoice</th>
                   <th style={th}>Supplier</th>
                   <th style={th}>Order</th>
+                  {showCustomer && <th style={th}>Customer order</th>}
                   <th style={th}>Dated</th>
                   <th style={th}>Due</th>
                   <th style={th}>Status</th>
                   <th style={th}>Against the order</th>
                   <th style={thRight}>Total</th>
+                  {showActions && <th style={th}></th>}
                 </tr>
               </thead>
               <tbody>
@@ -170,6 +236,11 @@ export function BillsScreen({ canBills }: { canBills: boolean }) {
                         <span style={muted}>None</span>
                       )}
                     </td>
+                    {showCustomer && (
+                      <td style={td}>
+                        <CustomerOrderCell customerOrder={b.customerOrder} href={shopOrdersBase} />
+                      </td>
+                    )}
                     <td style={td}>{formatDay(b.invoiceDate)}</td>
                     <td style={td}>{formatDay(b.dueDate)}</td>
                     <td style={td}>
@@ -181,6 +252,20 @@ export function BillsScreen({ canBills }: { canBills: boolean }) {
                     <td style={tdRight}>
                       <Money value={b.total} currency={b.currency} />
                     </td>
+                    {showActions && (
+                      <td style={{ ...td, whiteSpace: 'nowrap' }}>
+                        {b.status === 'DRAFT' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={busyId === b.id}
+                            onClick={() => void approve(b)}
+                          >
+                            {busyId === b.id ? 'Approving...' : 'Approve'}
+                          </button>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

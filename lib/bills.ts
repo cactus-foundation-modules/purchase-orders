@@ -5,6 +5,7 @@ import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
 import { getSupplier } from './db'
 import { matchBill } from './billing'
+import { customerOrdersFor } from './order-list-facts'
 import type {
   PoBill,
   PoBillAttachment,
@@ -157,7 +158,11 @@ export async function listBills(filters: BillFilters = {}): Promise<PoBillSummar
      ORDER BY b."invoice_date" DESC, b."created_at" DESC
      LIMIT ${Prisma.raw(String(limit))}
   `
-  return rows.map(mapSummary)
+  const bills = rows.map(mapSummary)
+
+  // Which customer each bill's order was raised for, in one query for the page.
+  const customerOrders = await customerOrdersFor(bills.map((b) => b.orderId ?? ''))
+  return bills.map((b) => ({ ...b, customerOrder: b.orderId ? (customerOrders.get(b.orderId) ?? null) : null }))
 }
 
 export async function getBill(id: string): Promise<PoBill | null> {
@@ -487,6 +492,24 @@ export async function setBillApprover(id: string, userId: string): Promise<void>
   await prisma.$executeRaw`
     UPDATE "po_bills" SET "approved_by_user_id" = ${userId} WHERE "id" = ${id}
   `
+}
+
+/**
+ * Approve a bill that is still a draft, and only if it still is.
+ *
+ * For the automatic close-off, which can be reached by the customer order
+ * completing and by the nightly sweep at the same moment: the guard in the
+ * WHERE makes the second of them a no-op instead of a second approval. Returns
+ * whether THIS call approved it. No approver is stamped - nobody here did it -
+ * and the audit line the caller writes says so.
+ */
+export async function approveDraftBill(id: string): Promise<boolean> {
+  const changed = await prisma.$executeRaw`
+    UPDATE "po_bills"
+       SET "status" = 'APPROVED', "approved_at" = now(), "updated_at" = now()
+     WHERE "id" = ${id} AND "status" = 'DRAFT'
+  `
+  return changed > 0
 }
 
 export async function saveBillMatch(
