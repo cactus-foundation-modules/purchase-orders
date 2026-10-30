@@ -43,6 +43,11 @@ vi.mock('@/modules/purchase-orders/lib/email', () => ({
 }))
 vi.mock('@/modules/purchase-orders/lib/audit', () => ({ recordAudit }))
 vi.mock('@/modules/purchase-orders/lib/portal', () => ({ mintPortalLink }))
+// A send tells observers on purchase-orders.sent, found in the generated server
+// registry - which imports every installed module's server code. Loading that
+// for real took the first test past its 5s timeout whenever the full suite ran
+// alongside; no test here is about observers, so the registry is empty.
+vi.mock('@/lib/modules/extension-points.server', () => ({ moduleServerExtensionPointComponents: {} }))
 
 const { POST } = await import('@/modules/purchase-orders/app/api/admin/orders/[id]/send/route')
 const { sendOrderRun } = await import('./send-run')
