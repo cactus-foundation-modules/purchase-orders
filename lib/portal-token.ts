@@ -17,6 +17,7 @@
 // token is scoped to one order and checked against the order being asked for, so
 // a link for PO-00147 cannot be pointed at PO-00148.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto'
+import { derivationSalt } from '@/lib/crypto/keyring'
 
 /** 32 bytes. A base64url token of this length is not guessable, which is the
  *  whole security of a link somebody can email. */
@@ -83,12 +84,14 @@ export function portalPath(orderNumber: string, token: string): string {
  * record of people's movements for no purchasing benefit at all. The hash is
  * enough to say "these three came from the same place".
  *
- * Keyed with the site's encryption key so the hashes cannot be rebuilt from a
+ * Keyed with the site's stable secret salt so the hashes cannot be rebuilt from a
  * list of every IPv4 address, which a bare sha256 of an address absolutely can
  * be. No key, no hash - null is honest, a reversible digest is not.
  */
 export function hashPortalIp(ip: string | null | undefined): string | null {
-  const key = process.env.ENCRYPTION_KEY
-  if (!key || !ip) return null
-  return createHmac('sha256', key).update(`purchase-order-portal:${ip}`).digest('hex')
+  // The site's stable id salt rather than the key itself, so the hashes still
+  // match up after the key is changed (core's derivationSalt).
+  const salt = derivationSalt()
+  if (!salt || !ip) return null
+  return createHmac('sha256', salt).update(`purchase-order-portal:${ip}`).digest('hex')
 }

@@ -17,20 +17,21 @@
 // aged out. Neither path is the supplier's: the supplier portal (a later
 // release) mints its own token, scoped to one order, stored as a hash and
 // revocable, and grants read through po_portal_tokens rather than through here.
-import { createHmac, timingSafeEqual } from 'crypto'
+import { createHmac } from 'crypto'
+import { signingKey, verifyWithAnyKey } from '@/lib/crypto/keyring'
 
 /** Long enough for a slow print on a cold serverless instance, short enough that
  *  a link pasted into a chat has stopped working by the time anybody clicks it. */
 export const PRINT_TOKEN_TTL_MINUTES = 30
 
+// Signed with the site's active key; checked against every key it has had, so a
+// link made just before a key rotation still opens (core's lib/crypto/keyring.ts).
 function getKey(): string {
-  const key = process.env.ENCRYPTION_KEY
-  if (!key) throw new Error('ENCRYPTION_KEY is not set - required for purchase order document links.')
-  return key
+  return signingKey('purchase order document links')
 }
 
-function digest(orderNumber: string, expiresAtMinute: number): string {
-  return createHmac('sha256', getKey())
+function digest(orderNumber: string, expiresAtMinute: number, key: string = getKey()): string {
+  return createHmac('sha256', key)
     .update(`purchase-order:${orderNumber}:${expiresAtMinute}`)
     .digest('base64url')
 }
@@ -57,14 +58,7 @@ export function verifyPoPrintToken(orderNumber: string, token: string | null | u
   if (!Number.isSafeInteger(expiresAtMinute)) return false
   // Checked BEFORE the comparison, so an expired token costs no HMAC at all.
   if (expiresAtMinute < Math.floor(Date.now() / 60_000)) return false
-  try {
-    const a = Buffer.from(token.slice(dot + 1))
-    const b = Buffer.from(digest(orderNumber, expiresAtMinute))
-    if (a.length !== b.length) return false
-    return timingSafeEqual(a, b)
-  } catch {
-    return false
-  }
+  return verifyWithAnyKey(token.slice(dot + 1), (key) => digest(orderNumber, expiresAtMinute, key))
 }
 
 /** The site-relative address of one order's document page, with no token on it.
@@ -87,8 +81,8 @@ export function poDocumentPath(orderNumber: string): string {
 // string, so a token minted for order PO-00147 cannot open return SRN-00014 even
 // if somebody works out that both are numbers in a URL.
 
-function returnDigest(returnNumber: string, expiresAtMinute: number): string {
-  return createHmac('sha256', getKey())
+function returnDigest(returnNumber: string, expiresAtMinute: number, key: string = getKey()): string {
+  return createHmac('sha256', key)
     .update(`purchase-return:${returnNumber}:${expiresAtMinute}`)
     .digest('base64url')
 }
@@ -108,14 +102,7 @@ export function verifyPoReturnPrintToken(returnNumber: string, token: string | n
   const expiresAtMinute = Number(token.slice(0, dot))
   if (!Number.isSafeInteger(expiresAtMinute)) return false
   if (expiresAtMinute < Math.floor(Date.now() / 60_000)) return false
-  try {
-    const a = Buffer.from(token.slice(dot + 1))
-    const b = Buffer.from(returnDigest(returnNumber, expiresAtMinute))
-    if (a.length !== b.length) return false
-    return timingSafeEqual(a, b)
-  } catch {
-    return false
-  }
+  return verifyWithAnyKey(token.slice(dot + 1), (key) => returnDigest(returnNumber, expiresAtMinute, key))
 }
 
 /** The site-relative address of one returns note's document page, with no token
@@ -143,8 +130,8 @@ export function poReturnDocumentPath(returnNumber: string): string {
 // than through this, exactly as they reach the order - see the packing slip's
 // own page.
 
-function packingDigest(shipmentNumber: string, expiresAtMinute: number): string {
-  return createHmac('sha256', getKey())
+function packingDigest(shipmentNumber: string, expiresAtMinute: number, key: string = getKey()): string {
+  return createHmac('sha256', key)
     .update(`purchase-packing-slip:${shipmentNumber}:${expiresAtMinute}`)
     .digest('base64url')
 }
@@ -164,14 +151,7 @@ export function verifyPoPackingSlipToken(shipmentNumber: string, token: string |
   const expiresAtMinute = Number(token.slice(0, dot))
   if (!Number.isSafeInteger(expiresAtMinute)) return false
   if (expiresAtMinute < Math.floor(Date.now() / 60_000)) return false
-  try {
-    const a = Buffer.from(token.slice(dot + 1))
-    const b = Buffer.from(packingDigest(shipmentNumber, expiresAtMinute))
-    if (a.length !== b.length) return false
-    return timingSafeEqual(a, b)
-  } catch {
-    return false
-  }
+  return verifyWithAnyKey(token.slice(dot + 1), (key) => packingDigest(shipmentNumber, expiresAtMinute, key))
 }
 
 /** The site-relative address of one packing slip's page, with no token on it.
