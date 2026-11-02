@@ -140,10 +140,28 @@ export async function setAcknowledgementReference(orderId: string, ref: string |
  * because the question asked six weeks later is "what did we send them", and the
  * answer needs to be somewhere other than one person's sent items.
  */
-export async function setPaymentProofDocument(orderId: string, mediaId: string): Promise<void> {
+export async function setPaymentProofDocument(orderId: string, mediaId: string, paidOn: string): Promise<void> {
   await prisma.$executeRaw`
     UPDATE "po_orders"
-       SET "proforma_payment_proof_media_id" = ${mediaId}, "updated_at" = now()
+       SET "proforma_payment_proof_media_id" = ${mediaId},
+           "proforma_proof_paid_on" = ${paidOn}::date,
+           "updated_at" = now()
+     WHERE "id" = ${orderId}
+  `
+}
+
+/**
+ * The day the money left, corrected by hand after the proof was filed.
+ *
+ * Kept apart from the upload because the date is the part people get wrong: a
+ * proof filed on Monday for a payment made on Friday. A bill raised against the
+ * order is dated to this when it is approved (lib/bills.ts
+ * dateBillToFirstPayment), so it is the tax point the books end up with.
+ */
+export async function setPaymentProofPaidOn(orderId: string, paidOn: string): Promise<void> {
+  await prisma.$executeRaw`
+    UPDATE "po_orders"
+       SET "proforma_proof_paid_on" = ${paidOn}::date, "updated_at" = now()
      WHERE "id" = ${orderId}
   `
 }

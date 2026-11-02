@@ -243,9 +243,15 @@ function PaymentModal({
   const [send, setSend] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The day the money left. Today unless somebody says otherwise, or the day
+  // already recorded where a proof is filed - a bill against this order is dated
+  // to it when approved, because a payment made first is the tax point.
+  const today = localToday()
+  const [paidOn, setPaidOn] = useState(order.proformaProofPaidOn ?? today)
 
   const alreadyFiled = documents.paymentProof
   const hasProof = Boolean(file) || Boolean(alreadyFiled)
+  const paidOnValid = /^\d{4}-\d{2}-\d{2}$/.test(paidOn) && paidOn <= today
 
   async function submit() {
     if (busy) return
@@ -256,9 +262,21 @@ function PaymentModal({
         const body = new FormData()
         body.set('kind', 'payment-proof')
         body.set('file', file)
+        body.set('paidOn', paidOn)
         const filed = await fetch(`/api/m/purchase-orders/admin/orders/${order.id}/documents`, { method: 'POST', body })
         if (!filed.ok) {
           setError(await readError(filed, 'That file was not saved.'))
+          return
+        }
+      } else if (alreadyFiled && paidOn !== order.proformaProofPaidOn) {
+        // The proof was filed earlier and only the date has changed.
+        const dated = await fetch(`/api/m/purchase-orders/admin/orders/${order.id}/documents`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ proofPaidOn: paidOn }),
+        })
+        if (!dated.ok) {
+          setError(await readError(dated, 'The date it was paid was not saved.'))
           return
         }
       }
@@ -309,7 +327,13 @@ function PaymentModal({
       busy={busy}
       submitLabel={hasProof && send ? 'Mark it paid and send the proof' : 'Mark it as paid'}
       busyLabel="Sending…"
-      blocked={proformaWarnings.length > 0 && !checkedBank ? 'Tick that you have checked the bank details first.' : null}
+      blocked={
+        proformaWarnings.length > 0 && !checkedBank
+          ? 'Tick that you have checked the bank details first.'
+          : hasProof && !paidOnValid
+            ? 'Pick the day it was paid, no later than today.'
+            : null
+      }
       onSubmit={() => void submit()}
       onClose={onClose}
     >
@@ -325,6 +349,21 @@ function PaymentModal({
         onFile={setFile}
         disabled={busy}
       />
+      {hasProof && (
+        <Field
+          label="Date it was paid"
+          hint="The day the money left. Any bill against this order is dated to it when approved, not to the date on their invoice."
+        >
+          <input
+            type="date"
+            style={input}
+            value={paidOn}
+            max={today}
+            disabled={busy}
+            onChange={(e) => setPaidOn(e.target.value)}
+          />
+        </Field>
+      )}
       <Field label="Your payment reference" hint="Optional. Whatever will find it on the bank statement.">
         <input style={input} value={paymentRef} onChange={(e) => setPaymentRef(e.target.value)} maxLength={120} />
       </Field>

@@ -96,6 +96,7 @@ function order(patch: Partial<PoOrder> = {}): PoOrder {
     proformaPaymentRef: null,
     proformaPaymentProofMediaId: null,
     proformaProofSentAt: null,
+    proformaProofPaidOn: null,
     ackMediaId: null,
     ackRef: null,
     cancelledAt: null,

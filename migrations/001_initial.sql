@@ -186,6 +186,10 @@ CREATE TABLE IF NOT EXISTS "po_orders" (
     -- when it went with the payment email. (Also in 009.)
     "proforma_payment_proof_media_id" TEXT,
     "proforma_proof_sent_at" TIMESTAMPTZ,
+    -- The day the money actually left, typed in beside the proof. A bill raised
+    -- against the order is dated to it when approved, because a payment made
+    -- before the invoice is the tax point. (Also in 020.)
+    "proforma_proof_paid_on" DATE,
     -- When somebody said they had checked the bank details on a proforma that
     -- arrived by email flagged as revised or disagreeing. Warnings filed before
     -- it are answered; one filed after it is live again. See 017.

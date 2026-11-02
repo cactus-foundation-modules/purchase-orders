@@ -34,9 +34,12 @@ function supplierOf(supplier: { name: string; accountNumber: string | null; taxR
   }
 }
 
-/** The supplier's own invoice as the books should file it: a reference to the
- *  one copy in the media library, never a second copy of the bytes. */
-async function documentOf(mediaId: string | null): Promise<PoBookDocument | undefined> {
+/** A filed document as the books should file it: a reference to the one copy in
+ *  the media library, never a second copy of the bytes. */
+async function documentOf(
+  mediaId: string | null,
+  fallbackName = 'supplier-invoice',
+): Promise<PoBookDocument | undefined> {
   if (!mediaId) return undefined
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT "id", "url", "key", "provider", "mimeType", "sizeBytes", "originalName"
@@ -48,12 +51,24 @@ async function documentOf(mediaId: string | null): Promise<PoBookDocument | unde
   return {
     mediaId: row.id as string,
     url: row.url as string,
-    filename: (row.originalName as string | null) || key.split('/').pop() || 'supplier-invoice',
+    filename: (row.originalName as string | null) || key.split('/').pop() || fallbackName,
     mimeType: (row.mimeType as string | null) ?? 'application/octet-stream',
     sizeBytes: Number(row.sizeBytes ?? 0),
     mediaProvider: (row.provider as string | null) ?? null,
     mediaKey: key || null,
   }
+}
+
+/** The proof of payment filed on the bill's order, where the order was paid up
+ *  front and somebody filed one. Read straight off the order rather than
+ *  carried on the bill: a proof replaced after the invoice was entered is the
+ *  one that should go. */
+async function paymentProofOf(orderId: string | null): Promise<PoBookDocument | undefined> {
+  if (!orderId) return undefined
+  const rows = await prisma.$queryRaw<{ media_id: string | null }[]>`
+    SELECT "proforma_payment_proof_media_id" AS "media_id" FROM "po_orders" WHERE "id" = ${orderId} LIMIT 1
+  `
+  return documentOf(rows[0]?.media_id ?? null, 'proof-of-payment')
 }
 
 const NOTHING_LISTENING: PoBooksOutcome = {
@@ -82,7 +97,10 @@ export async function sendBillToBooks(billId: string): Promise<{ outcome: PoBook
 
   const config = await getPoConfigCached()
   const supplier = await getSupplier(bill.supplierId)
-  const document = await documentOf(bill.attachment?.mediaId ?? null)
+  const [document, paymentProof] = await Promise.all([
+    documentOf(bill.attachment?.mediaId ?? null),
+    paymentProofOf(bill.orderId),
+  ])
 
   const lines = billLedgerLines({
     lines: bill.lines.map((line) => ({
@@ -120,6 +138,7 @@ export async function sendBillToBooks(billId: string): Promise<{ outcome: PoBook
       ? `Invoice ${bill.supplierInvoiceNumber} against order ${bill.orderNumber}`
       : `Invoice ${bill.supplierInvoiceNumber}`,
     ...(document ? { document } : {}),
+    ...(paymentProof ? { paymentProof } : {}),
   }
 
   const outcome = summariseResults(await dispatchBillApproved(payload))

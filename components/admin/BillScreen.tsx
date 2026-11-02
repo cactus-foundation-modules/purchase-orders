@@ -353,6 +353,9 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
       return
     }
     const said: string[] = []
+    if (data.invoiceDate) {
+      said.push(`Dated ${formatDay(data.invoiceDate)}, the day the order was first paid, rather than the date on their invoice.`)
+    }
     if (data.orderClosed) said.push(`Order ${data.orderClosed} has been closed - everything is delivered and invoiced.`)
     // What the books said travels back with the transition, because a bill that
     // was approved and then refused by a set of books is two things that
@@ -601,7 +604,14 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
               <div>{bill?.supplierInvoiceNumber}</div>
             )}
           </Field>
-          <Field label="Invoice date" hint="The date on their paperwork, not today.">
+          <Field
+            label="Invoice date"
+            hint={
+              bill?.orderFirstPaidOn && bill.orderFirstPaidOn !== bill.invoiceDate && editable
+                ? `The date on their paperwork. The order was paid up front on ${formatDay(bill.orderFirstPaidOn)}, so approving it dates the invoice to that day instead.`
+                : 'The date on their paperwork, not today.'
+            }
+          >
             {editable ? (
               <input type="date" style={input} value={invoiceDate} onChange={(e) => changeInvoiceDate(e.target.value)} />
             ) : (
@@ -1174,6 +1184,14 @@ export function BillScreen({ billId, orderId, canBills }: Props) {
             {bill.approvedAt && (
               <p style={{ ...muted, margin: '0 0 0.75rem' }}>
                 Approved by {bill.approvedByName ?? 'somebody'} {formatWhen(bill.approvedAt)}.
+              </p>
+            )}
+            {transitions.includes('approve') && bill.orderFirstPaidOn && bill.orderFirstPaidOn !== bill.invoiceDate && (
+              // Said before the button rather than after it: a date that moves on
+              // its own is a date somebody should see moving.
+              <p style={{ ...muted, margin: '0 0 0.75rem' }}>
+                This order was paid up front on {formatDay(bill.orderFirstPaidOn)}. Approving dates the invoice to that
+                day, because the payment is the tax point, and the books get the same date.
               </p>
             )}
             {transitions.includes('query') && (

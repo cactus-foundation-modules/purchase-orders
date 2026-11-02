@@ -44,7 +44,10 @@ things.
   the box is left empty, and is always yours to correct.
 - Proof of payment: file the screenshot or the remittance against the order and
   send it to the supplier as an attachment on the payment email, which marks the
-  proforma paid at the same time.
+  proforma paid at the same time. The date it was paid is recorded beside it
+  (today unless you say otherwise), and a bill against the order is dated to
+  that day when it is approved, because a payment made before the invoice is
+  the tax point. The proof goes into the books with the bill.
 - An accounts department address per supplier, and a switch that sends the
   payment note there instead of to the people who take the orders - which is
   where a proforma tells you to send it.

@@ -379,11 +379,14 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
    * comes back on the reloaded order, and is said out loud rather than quietly
    * appearing, because a number nobody typed is worth a glance.
    */
-  async function fileDocument(kind: 'proforma' | 'acknowledgement' | 'payment-proof', chosen: File) {
+  async function fileDocument(kind: 'proforma' | 'acknowledgement' | 'payment-proof', chosen: File, paidOn?: string) {
     setError(null)
     const body = new FormData()
     body.set('kind', kind)
     body.set('file', chosen)
+    // With a proof of payment: the day the money left, which becomes the date
+    // on the bill when it is approved. Left off, the server takes today.
+    if (kind === 'payment-proof' && paidOn) body.set('paidOn', paidOn)
     const res = await fetch(`/api/m/purchase-orders/admin/orders/${orderId}/documents`, { method: 'POST', body })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
@@ -919,6 +922,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
           onFileDocument={access.canCreate ? fileDocument : null}
           onFileProof={access.canApprove || access.canBills ? fileDocument : null}
           onSaveSupplierRefs={access.canCreate ? saveSupplierRefs : null}
+          onSaveProofPaidOn={access.canApprove || access.canBills ? saveSupplierRefs : null}
         />
       )}
     </div>

@@ -3,7 +3,7 @@ import { getSessionFromCookie } from '@/lib/auth/session'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import {
-  getBill, refreshBillMatch, setBillApprover, setBillStatus,
+  dateBillToFirstPayment, getBill, refreshBillMatch, setBillApprover, setBillStatus,
 } from '@/modules/purchase-orders/lib/bills'
 import { checkBillTransition, type PoBillTransition } from '@/modules/purchase-orders/lib/billing'
 import { BillTransitionBody, orNull } from '@/modules/purchase-orders/lib/bill-body'
@@ -56,6 +56,25 @@ export async function POST(request: NextRequest, { params }: Params) {
   })
   if (check.to === 'APPROVED') await setBillApprover(id, user.id)
 
+  // An order paid up front was paid on the tax point, so the bill is dated to
+  // the day the money first left rather than the date on their VAT invoice.
+  // Done before the books are handed it, so they get the same date the screen
+  // shows. Their own date goes into the history, where it can still be found.
+  const redated = check.to === 'APPROVED' ? await dateBillToFirstPayment(id) : null
+  if (redated) {
+    await recordAudit(
+      'bill',
+      id,
+      'bill.dated-to-payment',
+      {
+        from: redated.from,
+        to: redated.to,
+        note: `Invoice date set to ${redated.to}, the day the order was first paid, rather than ${redated.from} on their invoice.`,
+      },
+      user.id,
+    )
+  }
+
   await recordAudit(
     'bill',
     id,
@@ -96,6 +115,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     ok: true,
     status: after?.status ?? check.to,
     match,
+    invoiceDate: redated?.to ?? null,
     orderClosed: settled?.status === 'CLOSED' ? settled.number : null,
     orderPendingClose: settled?.status === 'PENDING_CLOSE' ? settled.number : null,
     books,

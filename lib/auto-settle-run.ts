@@ -3,7 +3,7 @@ import { prisma } from '@/lib/db/prisma'
 import { getCapabilities } from './capabilities'
 import { getPoConfigCached } from './config'
 import { getOrder, setOrderStatus } from './db'
-import { approveDraftBill, listBillsForOrder, openReturnCount, orderInvoicedLines, refreshBillMatch } from './bills'
+import { approveDraftBill, dateBillToFirstPayment, listBillsForOrder, openReturnCount, orderInvoicedLines, refreshBillMatch } from './bills'
 import { sendBillToBooks } from './book-handoff'
 import { closeOutcome } from './billing'
 import { recordAudit } from './audit'
@@ -75,6 +75,17 @@ async function settleOne(orderId: string): Promise<AutoSettled | null> {
       auto: true,
       note: 'Approved automatically: the customer order was completed and this bill agreed with the order.',
     })
+    // Exactly as for a person approving it: an order paid up front was paid on
+    // the tax point, and the books are handed that date.
+    const redated = await dateBillToFirstPayment(id)
+    if (redated) {
+      await recordAudit('bill', id, 'bill.dated-to-payment', {
+        from: redated.from,
+        to: redated.to,
+        auto: true,
+        note: `Invoice date set to ${redated.to}, the day the order was first paid, rather than ${redated.from} on their invoice.`,
+      })
+    }
     if (config.postApprovedBillsToBooks) {
       // The bill is approved either way; a set of books having a bad day is
       // stored on the bill and offered again on its screen, as for a person.

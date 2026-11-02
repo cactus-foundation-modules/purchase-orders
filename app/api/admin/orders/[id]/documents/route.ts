@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { getSessionFromCookie } from '@/lib/auth/session'
+import { calendarDateIn } from '@/lib/config/timezone'
+import { getSiteTimezone } from '@/lib/config/timezone.server'
 import { errorResponse } from '@/lib/utils'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrder, setOrderStatus } from '@/modules/purchase-orders/lib/db'
@@ -14,6 +16,7 @@ import {
   setAcknowledgementDocument,
   setAcknowledgementReference,
   setPaymentProofDocument,
+  setPaymentProofPaidOn,
   setProformaAmount,
   setProformaDocument,
   setProformaReference,
@@ -43,6 +46,26 @@ type Params = { params: Promise<{ id: string }> }
 
 const KIND = z.enum(PO_FILE_KINDS)
 
+/** A calendar day, yyyy-mm-dd, that really is one ("2026-02-30" is not). */
+const CalendarDay = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'That date does not look right.')
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00.000Z`)
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+  }, 'That date does not look right.')
+
+/**
+ * The day the money left, checked against today in the site's own timezone.
+ *
+ * A payment dated tomorrow is a typo, and one that would become the tax point
+ * on the bill when it is approved, so it is refused here rather than found in
+ * a VAT return. Null comes back where it passes.
+ */
+function paidOnProblem(paidOn: string, today: string): string | null {
+  return paidOn > today ? 'The date it was paid cannot be in the future.' : null
+}
+
 const UploadFields = z.object({
   kind: KIND,
   ref: z.string().max(120).optional(),
@@ -50,6 +73,10 @@ const UploadFields = z.object({
    *  mark the order as confirmed in the same breath rather than leaving it
    *  reading "Sent" with the proof that it is not filed against it. */
   acknowledge: z.enum(['1']).optional(),
+  /** With a proof of payment only: the day the money actually left. Defaults to
+   *  today, which is the day the proof is being filed. A bill against the order
+   *  is dated to it when approved. */
+  paidOn: CalendarDay.optional(),
 })
 
 /** The three fields somebody can type in without a file to go with them. An
@@ -62,6 +89,8 @@ const ReferenceBody = z.object({
     .string()
     .regex(/^$|^\d{1,10}(\.\d{1,2})?$/, 'That amount does not look right.')
     .optional(),
+  /** The day the money left, corrected after the proof was filed. */
+  proofPaidOn: CalendarDay.optional(),
 })
 
 // POST - a document arrives, as a file off the screen.
@@ -78,6 +107,7 @@ export async function POST(request: NextRequest, { params }: Params) {
     kind: form.get('kind') ?? '',
     ref: form.get('ref')?.toString().trim() || undefined,
     acknowledge: form.get('acknowledge')?.toString() === '1' ? '1' : undefined,
+    paidOn: form.get('paidOn')?.toString().trim() || undefined,
   })
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? 'We could not read that.')
   const { kind } = parsed.data
@@ -91,6 +121,15 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (!order) return errorResponse('That purchase order is not here any more.', 404)
   if (kind === 'payment-proof' && !order.proformaRequired) {
     return errorResponse('This order is on the supplier’s account, so there is no proforma to prove a payment against.', 409)
+  }
+
+  // The day it was paid, settled before anything is written for the same reason
+  // as the file below: a refusal leaves the order exactly as it was.
+  const today = calendarDateIn(new Date(), await getSiteTimezone())
+  const paidOn = parsed.data.paidOn ?? today
+  if (kind === 'payment-proof') {
+    const problem = paidOnProblem(paidOn, today)
+    if (problem) return errorResponse(problem)
   }
 
   // Read and sniffed BEFORE anything is written, so a refusal leaves the order
@@ -119,7 +158,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   } else if (kind === 'acknowledgement') {
     await setAcknowledgementDocument(id, stored.mediaId, ref)
   } else {
-    await setPaymentProofDocument(id, stored.mediaId)
+    await setPaymentProofDocument(id, stored.mediaId, paidOn)
   }
 
   const what =
@@ -129,7 +168,10 @@ export async function POST(request: NextRequest, { params }: Params) {
     id,
     `order.${kind}-filed`,
     {
-      note: `Filed their ${what}${ref ? `, reference ${ref}` : ''}`,
+      note:
+        kind === 'payment-proof'
+          ? `Filed the proof of payment, paid on ${paidOn}`
+          : `Filed their ${what}${ref ? `, reference ${ref}` : ''}`,
       filename: upload.filename,
       // Said in the log, because a number nobody typed is worth being able to
       // tell apart from one somebody did.
@@ -174,14 +216,29 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const user = await getSessionFromCookie()
   if (!user) return errorResponse('Not authenticated', 401)
   const access = await getPoAccess(user)
-  if (!access.canCreate) return errorResponse('Forbidden', 403)
 
   const { id } = await params
   const parsed = ReferenceBody.safeParse(await request.json().catch(() => ({})))
   if (!parsed.success) return errorResponse(parsed.error.issues[0]?.message ?? 'Invalid input')
 
+  // Their numbers are clerical. The day the money left is part of paying, and
+  // it becomes a tax point, so it wants the same hands as filing the proof.
+  const { proofPaidOn, ...references } = parsed.data
+  const touchesReferences = Object.values(references).some((value) => value !== undefined)
+  if (touchesReferences && !access.canCreate) return errorResponse('Forbidden', 403)
+  if (proofPaidOn !== undefined && !access.canApprove && !access.canBills) return errorResponse('Forbidden', 403)
+
   const order = await getOrder(id)
   if (!order) return errorResponse('That purchase order is not here any more.', 404)
+
+  // Checked before anything is written, so a refusal changes none of the rest.
+  if (proofPaidOn !== undefined) {
+    if (!order.proformaPaymentProofMediaId) {
+      return errorResponse('File the proof of payment first, then the date it was paid can be changed.', 409)
+    }
+    const problem = paidOnProblem(proofPaidOn, calendarDateIn(new Date(), await getSiteTimezone()))
+    if (problem) return errorResponse(problem)
+  }
 
   const changed: string[] = []
   if (parsed.data.proformaRef !== undefined) {
@@ -198,6 +255,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const amount = parsed.data.proformaAmount.trim() || null
     await setProformaAmount(id, amount)
     changed.push(amount ? `the proforma amount to ${amount}` : 'the proforma amount cleared')
+  }
+  if (proofPaidOn !== undefined) {
+    await setPaymentProofPaidOn(id, proofPaidOn)
+    changed.push(`the date it was paid to ${proofPaidOn}`)
   }
   if (!changed.length) return errorResponse('There was nothing to change.')
 

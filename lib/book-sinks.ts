@@ -59,7 +59,9 @@ export type PoBillApprovedPayload = {
   orderId: string | null
   orderNumber: string | null
   supplier: PoBookSupplier
-  /** yyyy-mm-dd. The invoice date, which is the tax point. */
+  /** yyyy-mm-dd. The invoice date, which is the tax point. On a bill against
+   *  an order paid up front this is the day the order was first paid, not the
+   *  date on their VAT invoice (see lib/bills.ts dateBillToFirstPayment). */
   taxPointDate: string
   /** yyyy-mm-dd it falls due, or null where the supplier gave no terms. */
   dueDate: string | null
@@ -75,6 +77,11 @@ export type PoBillApprovedPayload = {
   lines: PoBookLine[]
   description: string
   document?: PoBookDocument
+  /** The proof of payment filed on the bill's order, where it was paid up
+   *  front: a screenshot of the payment, or a remittance. Filed beside their
+   *  invoice, since the payment is the tax point and this is the evidence of
+   *  it. A set of books that does not know the field simply ignores it. */
+  paymentProof?: PoBookDocument
 }
 
 /** The matching statement when an approved bill is withdrawn. */

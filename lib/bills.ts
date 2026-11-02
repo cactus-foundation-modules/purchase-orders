@@ -169,7 +169,7 @@ export async function getBill(id: string): Promise<PoBill | null> {
   const rows = await prisma.$queryRaw<Record<string, unknown>[]>`
     SELECT ${SUMMARY_SELECT}, b."fx_rate", b."subtotal", b."carriage_amount", b."surcharge_amount", b."tax_amount",
            b."query_note", b."attachment_note", b."approved_by_user_id", b."approved_at", b."posted_at",
-           b."books_outcome", b."updated_at",
+           b."books_outcome", b."updated_at", o."proforma_proof_paid_on" AS "order_first_paid_on",
            COALESCE(a."displayName", a."username") AS "approved_by_name",
            m."url" AS "media_url", m."originalName" AS "media_name", m."key" AS "media_key",
            m."mimeType" AS "media_mime", m."sizeBytes" AS "media_size"
@@ -222,6 +222,7 @@ export async function getBill(id: string): Promise<PoBill | null> {
     booksOutcome: (r.books_outcome as Record<string, unknown> | null) ?? {},
     attachment,
     attachmentNote: (r.attachment_note as string | null) ?? null,
+    orderFirstPaidOn: day(r.order_first_paid_on),
     updatedAt: stamp(r.updated_at) ?? '',
     lines: lineRows.map(mapLine),
   }
@@ -510,6 +511,38 @@ export async function approveDraftBill(id: string): Promise<boolean> {
      WHERE "id" = ${id} AND "status" = 'DRAFT'
   `
   return changed > 0
+}
+
+/**
+ * Dates an approved bill to the day its order was first paid, where it was paid
+ * up front.
+ *
+ * A supplier paid before they invoice has been paid on the tax point: the VAT
+ * invoice that arrives afterwards carries its own date, but the books want the
+ * day the money left. That day is the one typed in beside the proof of payment
+ * on the order, and it replaces the bill's invoice date at the moment of
+ * approval - so the screen, the books and any later "try the books again" all
+ * agree on one date. Their own date is not lost: the caller writes it into the
+ * audit line.
+ *
+ * Returns the move it made, or null where there was nothing to move: no order,
+ * an order paid on account, or a bill already carrying the right date.
+ */
+export async function dateBillToFirstPayment(id: string): Promise<{ from: string; to: string } | null> {
+  const rows = await prisma.$queryRaw<{ invoice_date: unknown; paid_on: unknown }[]>`
+    SELECT b."invoice_date", o."proforma_proof_paid_on" AS "paid_on"
+      FROM "po_bills" b
+      JOIN "po_orders" o ON o."id" = b."order_id"
+     WHERE b."id" = ${id}
+     LIMIT 1
+  `
+  const from = day(rows[0]?.invoice_date)
+  const to = day(rows[0]?.paid_on)
+  if (!from || !to || from === to) return null
+  await prisma.$executeRaw`
+    UPDATE "po_bills" SET "invoice_date" = ${to}::date, "updated_at" = now() WHERE "id" = ${id}
+  `
+  return { from, to }
 }
 
 export async function saveBillMatch(

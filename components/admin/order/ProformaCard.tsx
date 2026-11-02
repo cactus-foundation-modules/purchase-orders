@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { preflightFileError } from '@/modules/purchase-orders/lib/bill-file-kinds'
 import type { PoOrder } from '@/modules/purchase-orders/lib/types'
-import { card, formatWhen, input, linkButton, Money, muted, table, td } from '../ui'
+import { card, formatDay, formatWhen, input, linkButton, localToday, Money, muted, table, td } from '../ui'
 import type { FiledDocumentKind, SupplierDocument, SupplierDocuments } from './shared'
 import { BankDetailsCheck } from './BankDetailsCheck'
 
@@ -17,7 +17,10 @@ type ProformaCardProps = {
   onFile: ((kind: 'proforma' | 'acknowledgement', file: File) => Promise<boolean>) | null
   /** Filing what we sent THEM. Null for anybody without the permission to say
    *  money has moved - it is part of paying, not of buying. */
-  onFileProof: ((file: File) => Promise<boolean>) | null
+  onFileProof: ((file: File, paidOn: string) => Promise<boolean>) | null
+  /** Correcting the day the money left, after the proof is filed. Null for
+   *  anybody who may not say money has moved. */
+  onSaveProofPaidOn?: ((body: Record<string, string>) => Promise<boolean>) | null
   /** Their own numbers, typed in or corrected. Null for anybody who may not buy. */
   onSaveRefs: ((body: Record<string, string>) => Promise<boolean>) | null
   /** Warnings standing on a proforma that arrived by email - above all that a
@@ -134,6 +137,82 @@ function ReferenceField({
   )
 }
 
+/**
+ * The day the money actually left, beside the proof of payment.
+ *
+ * It matters more than it looks: a bill against this order is dated to it when
+ * approved, because a payment made before the invoice is the tax point. So it
+ * is asked for when the proof is filed (today unless somebody says otherwise)
+ * and can be corrected afterwards - the proof filed on Monday for a payment
+ * made on Friday is the usual case.
+ *
+ * Keyed on the stored date at the call site, so what the server holds wins
+ * whenever it changes, exactly as ReferenceField does it.
+ */
+function ProofPaidOn({
+  paidOn,
+  filed,
+  busy,
+  onFile,
+  onSave,
+}: {
+  paidOn: string | null
+  filed: boolean
+  busy: boolean
+  onFile: ((file: File, paidOn: string) => void) | null
+  onSave: ((body: Record<string, string>) => Promise<boolean>) | null
+}) {
+  const today = localToday()
+  const [typed, setTyped] = useState(paidOn ?? today)
+  const [saving, setSaving] = useState(false)
+  const valid = /^\d{4}-\d{2}-\d{2}$/.test(typed) && typed <= today
+  const dirty = filed && typed !== (paidOn ?? '')
+
+  if (!onFile && !onSave) {
+    return paidOn ? <div style={muted}>Paid on {formatDay(paidOn)}</div> : null
+  }
+  return (
+    <>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '0.375rem' }}>
+        <label style={{ ...muted, display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          Date it was paid
+          <input
+            type="date"
+            style={{ ...input, maxWidth: 180 }}
+            value={typed}
+            max={today}
+            disabled={busy || saving}
+            onChange={(e) => setTyped(e.target.value)}
+          />
+        </label>
+        {dirty && onSave && (
+          <button
+            className="btn btn-secondary btn-sm"
+            disabled={saving || !valid}
+            onClick={() => {
+              setSaving(true)
+              void onSave({ proofPaidOn: typed }).finally(() => setSaving(false))
+            }}
+          >
+            {saving ? 'Saving' : 'Save'}
+          </button>
+        )}
+      </div>
+      {!valid && <div style={{ ...muted, color: 'var(--color-danger)' }}>Pick the day it was paid, no later than today.</div>}
+      {filed && (
+        <div style={muted}>Any bill against this order is dated to this day when it is approved.</div>
+      )}
+      {onFile && (
+        <FilePicker
+          label="File the proof of payment"
+          busy={busy || !valid}
+          onPick={(chosen) => onFile(chosen, typed)}
+        />
+      )}
+    </>
+  )
+}
+
 /** Whether the card draws at all. A draft nobody has sent has no supplier
  *  documents and no proforma to chase. Exported so the screen can tell whether
  *  the heading above this card has anything under it. */
@@ -166,8 +245,8 @@ export function proformaCardShows(order: PoOrder): boolean {
  * money up front, or the other way about.
  */
 export function ProformaCard({
-  order, documents, onPay, onUnpay, onSetTerms, onFile, onFileProof, onSaveRefs, proformaWarnings = [],
-  proformaWarningsAt = null,
+  order, documents, onPay, onUnpay, onSetTerms, onFile, onFileProof, onSaveRefs, onSaveProofPaidOn = null,
+  proformaWarnings = [], proformaWarningsAt = null,
 }: ProformaCardProps) {
   const [checkedFor, setCheckedFor] = useState<string | null>(null)
   const checkedBank = checkedFor !== null && checkedFor === (proformaWarningsAt ?? '')
@@ -190,10 +269,10 @@ export function ProformaCard({
     void onFile(kind, chosen).finally(() => setBusy(null))
   }
 
-  function fileProof(chosen: File) {
+  function fileProof(chosen: File, paidOn: string) {
     if (!onFileProof) return
     setBusy('payment-proof')
-    void onFileProof(chosen).finally(() => setBusy(null))
+    void onFileProof(chosen, paidOn).finally(() => setBusy(null))
   }
 
   /** Their acknowledgement, which an order collects whether it is on proforma
@@ -301,13 +380,14 @@ export function ProformaCard({
                   {order.proformaProofSentAt && (
                     <div style={muted}>Sent to them {formatWhen(order.proformaProofSentAt)}</div>
                   )}
-                  {onFileProof && (
-                    <FilePicker
-                      label="File the proof of payment"
-                      busy={busy === 'payment-proof'}
-                      onPick={fileProof}
-                    />
-                  )}
+                  <ProofPaidOn
+                    key={order.proformaProofPaidOn ?? ''}
+                    paidOn={order.proformaProofPaidOn}
+                    filed={hasProof}
+                    busy={busy === 'payment-proof'}
+                    onFile={onFileProof ? fileProof : null}
+                    onSave={hasProof ? onSaveProofPaidOn : null}
+                  />
                 </td>
               </tr>
               <tr>

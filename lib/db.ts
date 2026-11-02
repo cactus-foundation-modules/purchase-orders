@@ -676,6 +676,7 @@ export async function getOrder(id: string): Promise<PoOrder | null> {
     proformaPaymentRef: (r.proforma_payment_ref as string | null) ?? null,
     proformaPaymentProofMediaId: (r.proforma_payment_proof_media_id as string | null) ?? null,
     proformaProofSentAt: stamp(r.proforma_proof_sent_at),
+    proformaProofPaidOn: day(r.proforma_proof_paid_on),
     ackMediaId: (r.ack_media_id as string | null) ?? null,
     ackRef: (r.ack_ref as string | null) ?? null,
     cancelledAt: stamp(r.cancelled_at),

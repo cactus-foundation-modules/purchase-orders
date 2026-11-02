@@ -90,8 +90,10 @@ export type OrderViewProps = {
   /** Filing what arrived by email or in the post. Buying for the supplier's own
    *  paperwork, paying for the proof that the money left. */
   onFileDocument: ((kind: FiledDocumentKind, file: File) => Promise<boolean>) | null
-  onFileProof: ((kind: FiledDocumentKind, file: File) => Promise<boolean>) | null
+  onFileProof: ((kind: FiledDocumentKind, file: File, paidOn?: string) => Promise<boolean>) | null
   onSaveSupplierRefs: ((body: Record<string, string>) => Promise<boolean>) | null
+  /** Correcting the day the money left. Paying hands, like filing the proof. */
+  onSaveProofPaidOn: ((body: Record<string, string>) => Promise<boolean>) | null
 }
 
 const heading: CSSProperties = { margin: '0 0 0.75rem', fontSize: 'var(--text-lg)' }
@@ -167,7 +169,7 @@ export function OrderView({
   onCancelLine, portal, newLink, onRevokeLink, onRevokeAllLinks, onApplyDate,
   shipments, despatchable, onRecordDespatch, onDeleteDespatch, despatchOpen, onDespatchOpenChange,
   documents, fromEmail, proformaWarnings, proformaWarningsAt, onPayProforma, onUnpayProforma, onSetProformaTerms,
-  onFileDocument, onFileProof, onSaveSupplierRefs,
+  onFileDocument, onFileProof, onSaveSupplierRefs, onSaveProofPaidOn,
 }: OrderViewProps) {
   const totals = {
     subtotal: order.subtotal,
@@ -441,8 +443,9 @@ export function OrderView({
                 onUnpay={onUnpayProforma}
                 onSetTerms={onSetProformaTerms}
                 onFile={onFileDocument}
-                onFileProof={onFileProof ? (chosen) => onFileProof('payment-proof', chosen) : null}
+                onFileProof={onFileProof ? (chosen, paidOn) => onFileProof('payment-proof', chosen, paidOn) : null}
                 onSaveRefs={onSaveSupplierRefs}
+                onSaveProofPaidOn={onSaveProofPaidOn}
                 proformaWarnings={proformaWarnings}
                 proformaWarningsAt={proformaWarningsAt}
               />

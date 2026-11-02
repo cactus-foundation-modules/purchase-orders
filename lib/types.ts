@@ -291,6 +291,10 @@ export type PoOrder = PoOrderSummary & {
   /** When that proof travelled with the payment email. Apart from
    *  `proformaPaidAt` on purpose: paid here and proved to them are two facts. */
   proformaProofSentAt: string | null
+  /** The day the money actually left (yyyy-mm-dd), typed in beside the proof.
+   *  A bill against this order is dated to it when approved: a payment made
+   *  before the invoice is the tax point, not the date on their VAT invoice. */
+  proformaProofPaidOn: string | null
   /** Their order acknowledgement, attached when they confirmed. */
   ackMediaId: string | null
   ackRef: string | null
@@ -739,6 +743,9 @@ export type PoBillAttachment = {
 }
 
 export type PoBill = PoBillSummary & {
+  /** The day the bill's order was first paid up front, where it was. Approving
+   *  the bill dates it to this rather than to the date on their invoice. */
+  orderFirstPaidOn: string | null
   /** One line about the attached file where it is more than this invoice: the
    *  supplier's whole batch, with this invoice on page 2 of 3. */
   attachmentNote: string | null

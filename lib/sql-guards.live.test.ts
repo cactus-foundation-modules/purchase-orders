@@ -185,13 +185,14 @@ suite('purchase-orders SQL, against a real Postgres', () => {
 
     await mod.proforma.setProformaDocument(orderId, 'media-proforma', '0000008633', '160.54')
     await mod.proforma.setAcknowledgementDocument(orderId, 'media-ack', '0000966554')
-    await mod.proforma.setPaymentProofDocument(orderId, 'media-proof')
+    await mod.proforma.setPaymentProofDocument(orderId, 'media-proof', '2026-04-20')
 
     const filed = await mod.db.getOrder(orderId)
     expect(filed?.proformaRef).toBe('0000008633')
     expect(filed?.proformaAmount).toBe('160.54')
     expect(filed?.ackRef).toBe('0000966554')
     expect(filed?.proformaPaymentProofMediaId).toBe('media-proof')
+    expect(filed?.proformaProofPaidOn).toBe('2026-04-20')
     expect(filed?.proformaReceived).toBe(true)
 
     // An upload must never clear a reference somebody typed: the write COALESCEs.
