@@ -10,7 +10,8 @@ import { recordAudit } from '@/modules/purchase-orders/lib/audit'
 import { proformaPaidRecipients, sendProformaPaid } from '@/modules/purchase-orders/lib/email'
 import { formatMoney } from '@/modules/purchase-orders/lib/money'
 import { mintPortalLink } from '@/modules/purchase-orders/lib/portal'
-import { clearProformaWarnings, liveProformaWarnings } from '@/modules/purchase-orders/lib/inbound-run'
+import { clearProformaWarnings, inboundForOrder, liveProformaWarnings } from '@/modules/purchase-orders/lib/inbound-run'
+import { proformaSender, withProformaSender } from '@/modules/purchase-orders/lib/proforma-sender'
 import {
   clearProformaPayment, markProformaPaid, markProofSent, mediaAttachment, setProformaRequired,
 } from '@/modules/purchase-orders/lib/proforma'
@@ -104,8 +105,12 @@ export async function POST(request: NextRequest, { params }: Params) {
   // because a mail server was busy would be the worse of the two wrongs.
   const supplier = await getSupplier(order.supplierId)
   // Their accounts department where the supplier says so, and the ordering desk
-  // otherwise. This is the only email in the module that asks.
-  const recipients = proformaPaidRecipients(supplier)
+  // otherwise. This is the only email in the module that asks. And whoever sent
+  // the proforma in place of the ordering address: the order went to sales@,
+  // the proforma came back from a person, and that person is the one waiting.
+  const sender = proformaSender(await inboundForOrder(id), order.proformaMediaId, supplier)
+  const paidTo = proformaPaidRecipients(supplier)
+  const recipients = paidTo ? withProformaSender(paidTo, supplier?.email ?? null, sender) : null
   let emailed = false
   if (recipients) {
     // A fresh link travels with it, so "you can confirm the order now" is
@@ -141,6 +146,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       emailed,
       proofAttached: Boolean(emailed && proof),
       to: recipients?.to ?? null,
+      cc: recipients?.cc.length ? recipients.cc : undefined,
     },
     user.id,
   )

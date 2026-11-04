@@ -25,6 +25,7 @@ vi.mock('@/modules/purchase-orders/lib/portal', () => ({ mintPortalLink: vi.fn()
 vi.mock('@/modules/purchase-orders/lib/inbound-run', () => ({
   liveProformaWarnings: warnings,
   clearProformaWarnings: clearWarnings,
+  inboundForOrder: async () => [],
 }))
 vi.mock('@/modules/purchase-orders/lib/proforma', () => ({
   clearProformaPayment: vi.fn(),

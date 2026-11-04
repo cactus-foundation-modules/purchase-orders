@@ -433,7 +433,8 @@ export function SuppliersScreen({ canEdit }: { canEdit: boolean }) {
                 <span style={muted}>
                   The &ldquo;we have paid your proforma&rdquo; note, and the proof of payment with it, go to the
                   accounts address instead of the ordering one. Everything else - the order, an amendment, a chase, a
-                  cancellation - still goes to the people who take orders. Needs an accounts address above.
+                  cancellation - still goes to the people who take orders. Needs an accounts address above. Where
+                  their proforma came in by email, whoever sent it gets the note in place of the ordering address.
                 </span>
               </label>
             </Field>
