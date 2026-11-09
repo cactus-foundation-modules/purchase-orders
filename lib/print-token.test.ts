@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest'
 import {
-  PRINT_TOKEN_TTL_MINUTES, poDocumentBasePath, poDocumentPath, signPoPrintToken, verifyPoPrintToken,
+  PRINT_TOKEN_TTL_MINUTES, poDocumentBasePath, poDocumentPath, signPoApprovingParam, signPoPrintToken,
+  verifyPoApprovingParam, verifyPoPrintToken,
 } from '@/modules/purchase-orders/lib/print-token'
 
 // The token is the only thing standing between "a headless browser can open this
@@ -60,5 +61,35 @@ describe('purchase order print tokens', () => {
 
   it('escapes a number that would otherwise break the path', () => {
     expect(poDocumentBasePath('PO/00147 A')).toBe('/purchase-order/PO%2F00147%20A')
+  })
+})
+
+describe('the approver a send hands the printing browser', () => {
+  it('names the person, or the automatic job, it was minted for', () => {
+    expect(verifyPoApprovingParam('PO-00147', signPoApprovingParam('PO-00147', { userId: 'user-1' }))).toEqual({ userId: 'user-1' })
+    expect(verifyPoApprovingParam('PO-00147', signPoApprovingParam('PO-00147', { automatic: true }))).toEqual({ automatic: true })
+  })
+
+  it('means nothing on another order', () => {
+    expect(verifyPoApprovingParam('PO-00148', signPoApprovingParam('PO-00147', { userId: 'user-1' }))).toBeNull()
+  })
+
+  it('cannot have a different name put in it', () => {
+    const [expiry, , digest] = signPoApprovingParam('PO-00147', { userId: 'user-1' }).split('.')
+    expect(verifyPoApprovingParam('PO-00147', `${expiry}.user-2.${digest}`)).toBeNull()
+    expect(verifyPoApprovingParam('PO-00147', `${expiry}.auto.${digest}`)).toBeNull()
+  })
+
+  it('stops working once it has aged out', () => {
+    vi.useFakeTimers()
+    const value = signPoApprovingParam('PO-00147', { userId: 'user-1' })
+    vi.setSystemTime(Date.now() + (PRINT_TOKEN_TTL_MINUTES + 2) * 60_000)
+    expect(verifyPoApprovingParam('PO-00147', value)).toBeNull()
+  })
+
+  it('answers null rather than throwing on rubbish', () => {
+    for (const bad of ['', 'nonsense', '.', '..', '1..x', 'abc.def.ghi', null, undefined]) {
+      expect(verifyPoApprovingParam('PO-00147', bad)).toBeNull()
+    }
   })
 })

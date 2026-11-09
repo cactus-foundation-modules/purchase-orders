@@ -194,7 +194,7 @@ export async function listPortalEvents(orderId: string, limit = 50): Promise<PoP
  * when. Everything else on our side of the story is worked out from the order
  * row itself, in portalView.
  */
-const SUPPLIER_VISIBLE_ACTIONS = ['order.sent', 'order.amendment-sent', 'order.chased'] as const
+const SUPPLIER_VISIBLE_ACTIONS = ['order.sent', 'order.resent', 'order.amendment-sent', 'order.chased'] as const
 
 export async function listOursPortalEvents(orderId: string, limit = 30): Promise<PoPortalOursEvent[]> {
   const cap = Math.max(1, Math.min(100, Math.trunc(limit)))
@@ -242,7 +242,7 @@ export async function listOursPortalEvents(orderId: string, limit = 30): Promise
       id: row.id as string,
       kind: 'ORDER_SENT' as const,
       createdAt: at,
-      summary: 'We sent you this order.',
+      summary: action === 'order.resent' ? 'We sent you this order again.' : 'We sent you this order.',
     }
   })
 

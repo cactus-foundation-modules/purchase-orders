@@ -74,6 +74,55 @@ export function poDocumentPath(orderNumber: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Drawing an order as approved by the send that is printing it
+// ---------------------------------------------------------------------------
+//
+// Sending an order nobody approved is what approves it, but the approval is only
+// written once the email has gone - and the PDF attached to that email is printed
+// before then, by a browser fetching the page above. Without this the supplier's
+// first copy goes out with nobody under "Authorised by", and an "email it again"
+// a day later sends a different-looking sheet for the same order.
+//
+// So the send hands the printing browser one more parameter: who is approving,
+// signed under its own subject string with the order number inside it. Nobody can
+// put a name of their choosing on a page by editing a URL, and a value minted for
+// one order means nothing on another. The page still ignores it on an order that
+// already has an approver.
+
+/** Who is approving by sending: a user's id, or the automatic job. */
+export type PoPrintApproving = { userId: string } | { automatic: true }
+
+const AUTO_APPROVER = 'auto'
+
+function approvingDigest(orderNumber: string, who: string, expiresAtMinute: number, key: string = getKey()): string {
+  return createHmac('sha256', key)
+    .update(`purchase-order-approving:${orderNumber}:${who}:${expiresAtMinute}`)
+    .digest('base64url')
+}
+
+/** The `a` parameter for one order's print, good for `PRINT_TOKEN_TTL_MINUTES`. */
+export function signPoApprovingParam(orderNumber: string, approving: PoPrintApproving, ttlMinutes = PRINT_TOKEN_TTL_MINUTES): string {
+  const who = 'userId' in approving ? approving.userId : AUTO_APPROVER
+  const expiresAtMinute = Math.floor(Date.now() / 60_000) + Math.max(1, Math.trunc(ttlMinutes))
+  return `${expiresAtMinute}.${who}.${approvingDigest(orderNumber, who, expiresAtMinute)}`
+}
+
+/** The approver an `a` parameter names, or null for anything forged, aged out,
+ *  minted for another order, or malformed. Never throws. */
+export function verifyPoApprovingParam(orderNumber: string, value: string | null | undefined): PoPrintApproving | null {
+  if (!orderNumber || !value) return null
+  const first = value.indexOf('.')
+  const last = value.lastIndexOf('.')
+  if (first < 1 || last <= first + 1) return null
+  const expiresAtMinute = Number(value.slice(0, first))
+  if (!Number.isSafeInteger(expiresAtMinute)) return null
+  if (expiresAtMinute < Math.floor(Date.now() / 60_000)) return null
+  const who = value.slice(first + 1, last)
+  if (!verifyWithAnyKey(value.slice(last + 1), (key) => approvingDigest(orderNumber, who, expiresAtMinute, key))) return null
+  return who === AUTO_APPROVER ? { automatic: true } : { userId: who }
+}
+
+// ---------------------------------------------------------------------------
 // Returns notes
 // ---------------------------------------------------------------------------
 //

@@ -617,7 +617,7 @@ export function OrderScreen({ orderId, access, defaults, hasCatalogue }: Props) 
     // A revision saved since the supplier last heard from us is waiting to go
     // out, exactly as a new order is: their copy is now the wrong one.
     const lastSentRevision = history.reduce((max, h) => {
-      if (h.action !== 'order.sent' && h.action !== 'order.amendment-sent') return max
+      if (h.action !== 'order.sent' && h.action !== 'order.resent' && h.action !== 'order.amendment-sent') return max
       const r = Number(h.detail.revision ?? 1)
       return Number.isFinite(r) && r > max ? r : max
     }, 0)

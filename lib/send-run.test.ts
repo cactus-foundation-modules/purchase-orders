@@ -22,7 +22,7 @@ const mintPortalLink = vi.hoisted(() => vi.fn())
 const executeRaw = vi.hoisted(() => vi.fn())
 const queryRaw = vi.hoisted(() => vi.fn())
 // What the row says, for the statements on the automatic queue.
-const row = vi.hoisted(() => ({ takeable: true, claimed: false, markable: true }))
+const row = vi.hoisted(() => ({ takeable: true, claimed: false, markable: true, lastSentRevision: null as number | null }))
 const session = vi.hoisted(() => vi.fn())
 
 vi.mock('@/lib/auth/session', () => ({ getSessionFromCookie: session }))
@@ -85,13 +85,14 @@ beforeEach(() => {
   for (const fn of [getOrder, getSupplier, recordOrderSent, setOrderStatus, loadPoDocContext, sendOrderToSupplier, recordAudit, mintPortalLink, executeRaw, queryRaw, session]) {
     fn.mockReset()
   }
-  Object.assign(row, { takeable: true, claimed: false, markable: true })
+  Object.assign(row, { takeable: true, claimed: false, markable: true, lastSentRevision: null })
   queryRaw.mockImplementation(async (strings: TemplateStringsArray) => {
     const text = strings.join('?')
     if (text.includes(`"auto_send_state" = 'HELD'`)) return row.takeable ? [{ id: 'o1' }] : []
     if (text.includes('AS "busy"')) return [{ busy: row.claimed }]
     if (text.includes('::text AS "stamp"')) return [{ stamp: '2026-10-01 09:00:00.123456+00' }]
     if (text.includes('Being emailed now.')) return row.markable ? [{ id: 'o1' }] : []
+    if (text.includes('max(("detail"->>\'revision\')::int)')) return [{ revision: row.lastSentRevision }]
     throw new Error(`unexpected query: ${text}`)
   })
   session.mockResolvedValue({ id: 'user-1', displayName: 'Pat Buyer' })
@@ -117,6 +118,8 @@ describe('a person pressing Send', () => {
       'sent',
       'Ring before delivering',
       LINK,
+      // The attached sheet is drawn with their name under "Authorised by".
+      { userId: 'user-1' },
     )
     expect(recordOrderSent).toHaveBeenCalledWith('o1', { name: 'Acme Supplies' }, { heading: 'Purchase order' }, [
       'orders@acme.example',
@@ -180,12 +183,34 @@ describe('a person pressing Send', () => {
 
   it('sends an amendment without touching the status or the approval', async () => {
     getOrder.mockResolvedValue(order({ status: 'PART_RECEIVED', sentAt: '2026-09-01T09:00:00.000Z', approvedAt: '2026-09-01T09:00:00.000Z', revision: 3 }))
+    row.lastSentRevision = 2
     const res = await press()
     expect((await res.json()).kind).toBe('amended')
     expect(loadPoDocContext).toHaveBeenCalledWith('o1', undefined)
+    expect(sendOrderToSupplier).toHaveBeenCalledWith(CTX, expect.anything(), 'amended', null, LINK, undefined)
     expect(setOrderStatus).not.toHaveBeenCalled()
     expect(recordAudit.mock.calls.map((c) => c[2])).toEqual(['order.amendment-sent'])
     expect(recordAudit.mock.calls[0]![3]).toMatchObject({ revision: 3, note: null, portalLink: true })
+  })
+
+  it('sends the same order again, not a "revised" one, when nothing has changed since it went', async () => {
+    // They lost the email. Revision 1, sent as revision 1: the original email and
+    // the original sheet, with no "please ignore the previous one" anywhere.
+    getOrder.mockResolvedValue(order({ status: 'SENT', sentAt: '2026-11-08T17:37:47.000Z', approvedAt: '2026-11-08T17:37:47.000Z' }))
+    row.lastSentRevision = 1
+    const res = await press()
+    expect((await res.json()).kind).toBe('resent')
+    expect(sendOrderToSupplier).toHaveBeenCalledWith(CTX, expect.anything(), 'sent', null, LINK, undefined)
+    expect(setOrderStatus).not.toHaveBeenCalled()
+    expect(recordAudit.mock.calls.map((c) => c[2])).toEqual(['order.resent'])
+    expect(recordAudit.mock.calls[0]![3]).toMatchObject({ revision: 1 })
+  })
+
+  it('reads a later revision as an amendment where the history holds no send to compare with', async () => {
+    getOrder.mockResolvedValue(order({ status: 'SENT', sentAt: '2026-09-01T09:00:00.000Z', approvedAt: '2026-09-01T09:00:00.000Z', revision: 2 }))
+    expect((await (await press()).json()).kind).toBe('amended')
+    getOrder.mockResolvedValue(order({ status: 'SENT', sentAt: '2026-09-01T09:00:00.000Z', approvedAt: '2026-09-01T09:00:00.000Z', revision: 1 }))
+    expect((await (await press()).json()).kind).toBe('resent')
   })
 
   it('refuses an order over the approval threshold, sending nothing', async () => {
@@ -243,7 +268,7 @@ describe('the automatic job sending', () => {
 
     expect(loadPoDocContext).toHaveBeenCalledWith('o1', { approvingAutomatically: true })
     expect(mintPortalLink).toHaveBeenCalledWith('o1', 'PO-00101', null)
-    expect(sendOrderToSupplier).toHaveBeenCalledWith(CTX, expect.anything(), 'sent', null, LINK)
+    expect(sendOrderToSupplier).toHaveBeenCalledWith(CTX, expect.anything(), 'sent', null, LINK, { automatic: true })
     expect(setOrderStatus).toHaveBeenCalledWith('o1', 'SENT', { approvedAutomatically: true }, null)
     // Marked as being emailed before the email, as sent the moment it returned,
     // and only then everything else.

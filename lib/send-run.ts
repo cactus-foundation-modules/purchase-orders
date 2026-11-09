@@ -53,8 +53,12 @@ export type SendRunOptions = {
   autoStamp?: string | null
 }
 
+/** First time out; the same order again for a supplier who lost it; or a
+ *  revision replacing the one they hold. */
+export type SendKind = 'sent' | 'resent' | 'amended'
+
 export type SendRunResult =
-  | { outcome: 'sent'; kind: 'sent' | 'amended'; to: string; cc: string[] }
+  | { outcome: 'sent'; kind: SendKind; to: string; cc: string[] }
   /** Not sent, and nothing written. `status` is what the route answers with. */
   | { outcome: 'refused'; reason: string; status: 404 | 409 }
   /** The mailer would not take it, in its own words. Nothing written (the job's
@@ -126,10 +130,18 @@ export async function sendOrderRun(options: SendRunOptions): Promise<SendRunResu
   )
   if (!ctx) return { outcome: 'refused', reason: GONE, status: 404 }
 
-  // First time out, or an amendment replacing what they already hold. The
-  // revision decides rather than the status, because an order can be amended
-  // while it is part received and it is still an amendment.
-  const kind = order.sentAt ? 'amended' : 'sent'
+  // First time out, an amendment replacing what they already hold, or the same
+  // order again. The revision decides rather than the status, because an order
+  // can be amended while it is part received and it is still an amendment - and
+  // having been sent before decides nothing on its own: "they lost the email" is
+  // a resend of the order they already have, and telling them it is REVISED and
+  // to ignore the one before sends them hunting for a change that is not there.
+  const kind: SendKind = !order.sentAt
+    ? 'sent'
+    : order.revision > ((await lastSentRevision(id)) ?? 1)
+      ? 'amended'
+      : 'resent'
+  const approver = approving ? (userId ? { userId } : { automatic: true as const }) : undefined
 
   // The supplier's own link, minted here so it can travel in the email. Null
   // where the owner has the supplier link switched off, in which case the
@@ -144,7 +156,7 @@ export async function sendOrderRun(options: SendRunOptions): Promise<SendRunResu
   if (by === 'AUTO' && !(await markMailing(id, stamp ?? ''))) return { outcome: 'stale' }
 
   try {
-    await sendOrderToSupplier(ctx, recipients, kind, note, portalLink)
+    await sendOrderToSupplier(ctx, recipients, kind === 'amended' ? 'amended' : 'sent', note, portalLink, approver)
   } catch (error) {
     if (by === 'AUTO') await backToQueue(id)
     return { outcome: 'failed', error: error instanceof Error ? error.message : 'The order could not be sent.' }
@@ -190,7 +202,7 @@ export async function sendOrderRun(options: SendRunOptions): Promise<SendRunResu
     await recordAudit(
       'order',
       id,
-      kind === 'sent' ? 'order.sent' : 'order.amendment-sent',
+      kind === 'sent' ? 'order.sent' : kind === 'resent' ? 'order.resent' : 'order.amendment-sent',
       {
         to: recipients.to,
         cc: recipients.cc,
@@ -227,6 +239,25 @@ export async function sendOrderRun(options: SendRunOptions): Promise<SendRunResu
 
   await recordSend()
   return { outcome: 'sent', kind, to: recipients.to, cc: recipients.cc }
+}
+
+/**
+ * The newest revision the supplier has been sent, off the history. Null where
+ * the history holds no send at all - an order marked sent before the log
+ * recorded revisions - and the caller then reads anything past revision 1 as
+ * an amendment, which is the safe way round: a needless "revised" costs a
+ * puzzled supplier, a missing one costs the old quantity being shipped.
+ */
+async function lastSentRevision(orderId: string): Promise<number | null> {
+  const rows = await prisma.$queryRaw<{ revision: number | null }[]>`
+    SELECT max(("detail"->>'revision')::int) AS "revision"
+      FROM "po_audit_log"
+     WHERE "entity_type" = 'order' AND "entity_id" = ${orderId}
+       AND "action" IN ('order.sent', 'order.resent', 'order.amendment-sent')
+       AND "detail"->>'revision' ~ '^[0-9]+$'
+  `
+  const revision = rows[0]?.revision
+  return revision == null ? null : Number(revision)
 }
 
 /** The row's `updated_at`, as text, so a comparison is exact to the

@@ -6,7 +6,7 @@ import { DocumentFooterRegion } from '@/lib/documents/page-settings'
 import { getPoAccess } from '@/modules/purchase-orders/lib/permissions'
 import { getOrderIdByNumber } from '@/modules/purchase-orders/lib/db'
 import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
-import { verifyPoPrintToken } from '@/modules/purchase-orders/lib/print-token'
+import { verifyPoApprovingParam, verifyPoPrintToken } from '@/modules/purchase-orders/lib/print-token'
 import { loadPoDocContext, renderPoDocument, renderPoRunningFooter } from '@/modules/purchase-orders/lib/document'
 import { resolvePortalToken, touchPortalToken } from '@/modules/purchase-orders/lib/portal'
 import { PORTAL_TOKEN_QUERY_KEY } from '@/modules/purchase-orders/lib/portal-token'
@@ -124,7 +124,17 @@ export default async function PurchaseOrderDocumentPage({
   if (!allowed) notFound()
   if (!id) notFound()
 
-  const ctx = await loadPoDocContext(id, { print })
+  // The send that approves the order as it goes, printing the copy it attaches:
+  // drawn as the order will read once the email has gone (lib/print-token.ts).
+  // Only alongside the printing browser's own token, and ignored by the loader on
+  // an order that already has an approver.
+  const approving = verifyPoPrintToken(number, token)
+    ? verifyPoApprovingParam(number, typeof query.a === 'string' ? query.a : null)
+    : null
+  const ctx = await loadPoDocContext(id, {
+    print,
+    ...(approving ? ('userId' in approving ? { approvingUserId: approving.userId } : { approvingAutomatically: true }) : {}),
+  })
   if (!ctx) notFound()
 
   const document = await renderPoDocument(ctx)

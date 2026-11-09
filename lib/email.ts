@@ -8,6 +8,7 @@ import { getPoConfigCached } from '@/modules/purchase-orders/lib/config'
 import { appliedDiscount } from '@/modules/purchase-orders/lib/totals'
 import { poPdfFilename } from '@/modules/purchase-orders/lib/pdf'
 import { poDocumentPdf } from '@/modules/purchase-orders/lib/order-pdf'
+import type { PoPrintApproving } from '@/modules/purchase-orders/lib/print-token'
 import { poReturnDocumentPdf } from '@/modules/purchase-orders/lib/return-pdf'
 import type { PoDocContext } from '@/modules/purchase-orders/lib/doc-context'
 import type { PoRetDocContext } from '@/modules/purchase-orders/lib/return-doc-context'
@@ -112,9 +113,9 @@ function shipToHtml(ctx: PoDocContext): string {
  * reaches the supplier as an email with the lines in the body beats one that
  * never reaches them because the PDF would not render.
  */
-async function orderAttachment(orderNumber: string): Promise<EmailAttachment | null> {
+async function orderAttachment(orderNumber: string, approving?: PoPrintApproving): Promise<EmailAttachment | null> {
   try {
-    const [bytes, config] = await Promise.all([poDocumentPdf(orderNumber), getPoConfigCached()])
+    const [bytes, config] = await Promise.all([poDocumentPdf(orderNumber, approving), getPoConfigCached()])
     return {
       filename: poPdfFilename(config.pdfFilenamePrefix, orderNumber),
       content: Buffer.from(bytes),
@@ -191,8 +192,10 @@ export function proformaPaidRecipients(supplier: {
 /**
  * Sends one purchase order to its supplier, with the document attached.
  *
- * `kind` picks the template: the first time it goes out, and the amended one that
- * replaces it. Throws on anything that stops it going, because the person who
+ * `kind` picks the template: the first time it goes out (and the same again, for a
+ * supplier who lost it), and the amended one that replaces it. `approving` is the
+ * send that approves it as it goes, so the attached sheet carries the name under
+ * "Authorised by" that every later copy will. Throws on anything that stops it going, because the person who
  * pressed the button is owed a real error rather than a green tick and silence.
  */
 export async function sendOrderToSupplier(
@@ -201,6 +204,7 @@ export async function sendOrderToSupplier(
   kind: 'sent' | 'amended',
   reason?: string | null,
   portalLink?: string | null,
+  approving?: PoPrintApproving,
 ): Promise<void> {
   if (!isEmailConfigured()) {
     throw new Error('Email is not set up on this site. Add a Brevo key or SMTP details in Settings, Emails.')
@@ -235,7 +239,7 @@ export async function sendOrderToSupplier(
     throw new Error('That email has been switched off in Settings, Emails.')
   }
 
-  const attachment = await orderAttachment(order.number)
+  const attachment = await orderAttachment(order.number, approving)
   await sendEmail({
     moduleName: 'purchase-orders',
     to: recipients.to,
