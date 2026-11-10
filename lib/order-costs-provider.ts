@@ -5,7 +5,7 @@
 // One entry per purchase order raised off the customer order (source_ref), at
 // the best figure there is for it:
 //  - billed: the supplier's invoice(s) against it, once approved or posted -
-//    what we actually owe, carriage and surcharge in, tax out
+//    dated by the latest invoice, what we actually owe, carriage and surcharge in, tax out
 //  - ordered: what the purchase order asked for, until an invoice is approved
 // A cancelled purchase order cost nothing and is left out. Every figure is net
 // of tax and in the site's own currency, at the rate each document carries.
@@ -19,7 +19,7 @@ import { hasPermission } from '@/lib/permissions/check'
 import { PO_STATUS_LABELS, type PoStatus } from './types'
 
 export type OrderForCost = { id: string; orderNumber: string }
-export type OrderCost = { ref: string; label?: string; path?: string; status?: string; amount: number; basis: 'billed' | 'ordered' }
+export type OrderCost = { ref: string; label?: string; path?: string; status?: string; invoicedOn?: string; amount: number; basis: 'billed' | 'ordered' }
 
 export async function purchaseOrdersOrderCosts(orders: OrderForCost[]): Promise<Record<string, OrderCost[]> | null> {
   const user = await getSessionFromCookie()
@@ -28,15 +28,16 @@ export async function purchaseOrdersOrderCosts(orders: OrderForCost[]): Promise<
 
   const rows = await prisma.$queryRaw<Array<{
     id: string; number: string; status: string; shop_order_id: string; supplier: string | null
-    ordered_net: string; billed_net: string | null; bill_count: bigint
+    ordered_net: string; billed_net: string | null; bill_count: bigint; invoiced_on: string | null
   }>>`
     SELECT o."id", o."number", o."status", o."source_ref"->>'orderId' AS shop_order_id, s."name" AS supplier,
            (o."total" - o."tax_amount") * o."fx_rate" AS ordered_net,
-           b.billed_net, COALESCE(b.bill_count, 0)::bigint AS bill_count
+           b.billed_net, COALESCE(b.bill_count, 0)::bigint AS bill_count, b.invoiced_on
     FROM "po_orders" o
     LEFT JOIN "po_suppliers" s ON s."id" = o."supplier_id"
     LEFT JOIN LATERAL (
-      SELECT SUM((bl."total" - bl."tax_amount") * bl."fx_rate") AS billed_net, COUNT(*) AS bill_count
+      SELECT SUM((bl."total" - bl."tax_amount") * bl."fx_rate") AS billed_net, COUNT(*) AS bill_count,
+             to_char(MAX(bl."invoice_date"), 'YYYY-MM-DD') AS invoiced_on
       FROM "po_bills" bl
       WHERE bl."order_id" = o."id" AND bl."status" IN ('APPROVED', 'POSTED')
     ) b ON true
@@ -53,6 +54,7 @@ export async function purchaseOrdersOrderCosts(orders: OrderForCost[]): Promise<
       label: r.supplier ?? undefined,
       path: `m/purchase-orders/orders/${r.id}`,
       status: PO_STATUS_LABELS[r.status as PoStatus] ?? r.status,
+      invoicedOn: billed && r.invoiced_on ? r.invoiced_on : undefined,
       amount: Number(billed ? r.billed_net : r.ordered_net),
       basis: billed ? 'billed' : 'ordered',
     })
