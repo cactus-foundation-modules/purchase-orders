@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.62",
+  "version": "0.1.63",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
@@ -85,6 +85,12 @@
       "serverOnly": true,
       "import": "./lib/order-costs-provider",
       "component": "purchaseOrdersOrderCosts"
+    },
+    {
+      "point": "uk-bookkeeping.entry-redated",
+      "id": "purchase-orders-bill-redated",
+      "import": "./lib/bill-redated",
+      "component": "purchaseOrdersBillRedated"
     },
     {
       "point": "shop.order-completed",
