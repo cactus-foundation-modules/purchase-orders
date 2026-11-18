@@ -485,17 +485,44 @@ export function serviceCostShare(cost: string | null, divisor: number | null | u
   return (Math.round((Number(cost) / divisor) * 10_000) / 10_000).toFixed(4)
 }
 
+/** Four decimal places or fewer: the column is NUMERIC(12,4) and the order
+ *  form's own money regex refuses a fifth. Zero and anything unreadable come
+ *  back null - no service cost to put on the order. */
+function serviceCostFigure(value: number): string | null {
+  if (!Number.isFinite(value) || value === 0) return null
+  return (Math.round(value * 10_000) / 10_000).toFixed(4)
+}
+
 /**
  * What that service costs us, per unit, to four decimal places.
  *
- * `line_meta.charges` is per unit and unclamped by design - the true cost of the
- * service for one of them, which is exactly the figure to buy it back at. Null
- * on every order placed before shop began persisting charges, and on orders
- * converted from a quote, which build their line meta from scratch. That is a
- * degradation and not an error: the service NAME is the part the supplier acts
- * on, and it survives.
+ * First choice is the cost-price snapshot the delivery module writes at
+ * checkout, `line_meta.data.ashDeliveryCost.unitCost`. A shop that marks up its
+ * delivery charges the customer the SALES price and pays the supplier the COST
+ * price, and only the snapshot knows the second one - the line's charge is what
+ * the customer paid, and buying the service back at that would hand the
+ * supplier our margin. A snapshot reading zero means the service genuinely
+ * costs us nothing, and that is the answer: it does not fall through to the
+ * charge.
+ *
+ * Duck-typed rather than imported, like `serviceNameFor`: advanced shipping is
+ * an optional module and this one names no other module's code.
+ *
+ * Without a snapshot - every order placed before the cost price existed - it
+ * falls back to `line_meta.charges`, per unit and unclamped by design. Those
+ * orders were sold when the charge and the cost were one figure, so the charge
+ * is still the right number for them. Null on orders older than persisted
+ * charges, and on orders converted from a quote, which build their line meta
+ * from scratch. That is a degradation and not an error: the service NAME is the
+ * part the supplier acts on, and it survives.
  */
 export function serviceCostFor(lineMeta: Record<string, unknown> | null): string | null {
+  const snapshot = bag(bag(lineMeta?.data)?.ashDeliveryCost)
+  if (snapshot && snapshot.unitCost != null) {
+    const unitCost = Number(snapshot.unitCost)
+    if (Number.isFinite(unitCost)) return serviceCostFigure(unitCost)
+  }
+
   const charges = lineMeta?.charges
   if (!Array.isArray(charges)) return null
   for (const raw of charges) {
@@ -504,11 +531,7 @@ export function serviceCostFor(lineMeta: Record<string, unknown> | null): string
     if (String(charge.label ?? '').trim().toLowerCase() !== DELIVERY_LABEL) continue
     // `base` is the figure before any attribution where a resolver ever
     // publishes one; `amount` is what every resolver publishes today.
-    const value = Number(charge.base ?? charge.amount)
-    if (!Number.isFinite(value) || value === 0) return null
-    // Four decimal places or fewer: the column is NUMERIC(12,4) and the order
-    // form's own money regex refuses a fifth.
-    return (Math.round(value * 10_000) / 10_000).toFixed(4)
+    return serviceCostFigure(Number(charge.base ?? charge.amount))
   }
   return null
 }

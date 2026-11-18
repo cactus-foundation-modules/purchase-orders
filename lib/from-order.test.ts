@@ -199,6 +199,18 @@ describe('the delivery service on a line', () => {
     expect(serviceCostFor({ charges: [{ label: 'Delivery', base: 45, amount: 39 }] })).toBe('45.0000')
   })
 
+  it('pays the cost price snapshot, never the customer charge, where one was kept', () => {
+    const marked = { ...shippedLineMeta, data: { ...shippedLineMeta.data, ashDeliveryCost: { tierKey: 'pre-assembled', unitCost: 30 } } }
+    expect(serviceCostFor(marked)).toBe('30.0000')
+    // Costs us nothing is an answer, not a gap: it must not fall back to the
+    // 39 the customer paid.
+    const free = { ...shippedLineMeta, data: { ashDeliveryCost: { tierKey: 'standard', unitCost: 0 } } }
+    expect(serviceCostFor(free)).toBeNull()
+    // A snapshot nobody can read is no snapshot - fall back to the charge.
+    const garbled = { ...shippedLineMeta, data: { ashDeliveryCost: { unitCost: 'lots' } } }
+    expect(serviceCostFor(garbled)).toBe('39.0000')
+  })
+
   it('has no cost on an order placed before shop kept one', () => {
     // Every order older than shop v0.1.356, and every order converted from a
     // quote. The NAME is what the supplier acts on, so this is a degradation
