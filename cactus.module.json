@@ -1,6 +1,6 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.65",
+  "version": "0.1.66",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
@@ -91,6 +91,13 @@
       "id": "purchase-orders-bill-redated",
       "import": "./lib/bill-redated",
       "component": "purchaseOrdersBillRedated",
+      "serverOnly": true
+    },
+    {
+      "point": "uk-bookkeeping.prepaid-vat",
+      "id": "purchase-orders-prepaid-vat",
+      "import": "./lib/prepaid-vat-provider",
+      "component": "purchaseOrdersPrepaidVat",
       "serverOnly": true
     },
     {
