@@ -1,10 +1,10 @@
 {
   "name": "purchase-orders",
-  "version": "0.1.66",
+  "version": "0.1.67",
   "tablePrefix": "po_",
   "description": "Raise purchase orders to your suppliers, check what turns up against what you ordered, and match their invoice before you pay it.",
   "publicBasePath": "purchase-order",
-  "requiresCoreVersion": "0.5.1904",
+  "requiresCoreVersion": "0.5.1981",
   "migrationCatchups": {
     "004_supplier_catalogues": [
       "005_supplier_discount",
@@ -105,6 +105,13 @@
       "id": "purchase-orders-settle-on-completed",
       "import": "./lib/order-completed-provider",
       "component": "purchaseOrdersOrderCompletedObserver"
+    },
+    {
+      "point": "shop.order-delivery-changed",
+      "id": "purchase-orders-ship-to-sync",
+      "serverOnly": true,
+      "import": "./lib/order-delivery-provider",
+      "component": "purchaseOrdersOrderDeliveryChangedObserver"
     },
     {
       "point": "unified-inbox.message-received",
