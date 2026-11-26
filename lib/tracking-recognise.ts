@@ -205,7 +205,7 @@ export function readTrackingLink(raw: string): LinkFind | null {
   const segments = url.pathname.split('/').filter(Boolean)
 
   // DPD's follow-my-parcel link: the code is a session key on their feed.
-  if (/(^|\.)dpd(local)?\.co\.uk$/.test(host) && segments[0] === 'd' && /^[A-Za-z0-9]{6,32}$/.test(segments[1] ?? '')) {
+  if (/(^|\.)dpd(local)?\.co\.uk$/.test(host) && segments[0] === 'd' && /^[A-Za-z0-9_-]{6,32}$/.test(segments[1] ?? '')) {
     // As the link itself, without anything on the end: the same code with a
     // query string is the same parcel.
     return { carrier: 'DPD', trackingNumber: null, trackingUrl: `${url.origin}/d/${segments[1]!}`, shortCode: segments[1]!, postcode: null }
